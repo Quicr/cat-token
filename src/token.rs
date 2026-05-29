@@ -374,7 +374,7 @@ pub fn encode_token(
     };
 
     let header_cbor = {
-        let mut header_map = std::collections::HashMap::new();
+        let mut header_map = std::collections::BTreeMap::new();
         header_map.insert(1i64, ciborium::Value::Integer(header.alg.into()));
         if let Some(ref kid) = header.kid {
             header_map.insert(4i64, ciborium::Value::Text(kid.clone()));

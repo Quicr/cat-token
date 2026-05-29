@@ -1,0 +1,102 @@
+{
+  "description": "Token validation test cases (expected pass and fail scenarios)",
+  "vectors": [
+    {
+      "description": "Valid token with correct issuer, audience, and time bounds",
+      "id": "valid_basic",
+      "token": "ogEjEGNDQVQ.pAF4GGh0dHBzOi8vYXV0aC5leGFtcGxlLmNvbQOBeBlodHRwczovL3JlbGF5LmV4YW1wbGUuY29tBBplVUKABRplU_EA.9SztgnG4xgw8U9zDFnqPIuPn6hLwuilSigQcfPsArSg",
+      "validation": {
+        "expected_audiences": [
+          "https://relay.example.com"
+        ],
+        "expected_issuers": [
+          "https://auth.example.com"
+        ],
+        "expected_result": "valid",
+        "reference_time": 1700003600
+      }
+    },
+    {
+      "description": "Token with expiration in the past",
+      "id": "invalid_expired",
+      "token": "ogEjEGNDQVQ.ogF4GGh0dHBzOi8vYXV0aC5leGFtcGxlLmNvbQQaX14QAA.lq8nGBiZm80yUwl1kH_Tv2prKu_nV20JvxVJW8ZGkho",
+      "validation": {
+        "expected_error": "TokenExpired",
+        "expected_result": "error",
+        "reference_time": 1700000000
+      }
+    },
+    {
+      "description": "Token with not-before in the future",
+      "id": "invalid_not_yet_valid",
+      "token": "ogEjEGNDQVQ.owF4GGh0dHBzOi8vYXV0aC5leGFtcGxlLmNvbQQaZVaUAAUaZVVCgA.fPIUugY7_oSeHlheu83_8Yyljsk3iP2zGeWRUi7NtUs",
+      "validation": {
+        "expected_error": "TokenNotYetValid",
+        "expected_result": "error",
+        "reference_time": 1700000000
+      }
+    },
+    {
+      "description": "Token from untrusted issuer",
+      "id": "invalid_wrong_issuer",
+      "token": "ogEjEGNDQVQ.owF4GGh0dHBzOi8vZXZpbC5leGFtcGxlLmNvbQOBeBlodHRwczovL3JlbGF5LmV4YW1wbGUuY29tBBplVUKA.Xo7FCr_MGSyVX0C9sueeapSfboIHkrkysurn2VjC9PU",
+      "validation": {
+        "expected_error": "InvalidIssuer",
+        "expected_issuers": [
+          "https://auth.example.com"
+        ],
+        "expected_result": "error",
+        "reference_time": 1700003600
+      }
+    },
+    {
+      "description": "Token not intended for this audience",
+      "id": "invalid_wrong_audience",
+      "token": "ogEjEGNDQVQ.owF4GGh0dHBzOi8vYXV0aC5leGFtcGxlLmNvbQOBeB9odHRwczovL290aGVyLXJlbGF5LmV4YW1wbGUuY29tBBplVUKA.b8KxAKxJglzhELMuc9bYmsikrx3F9Y3YdvpfHLbsyk0",
+      "validation": {
+        "expected_audiences": [
+          "https://relay.example.com"
+        ],
+        "expected_error": "InvalidAudience",
+        "expected_issuers": [
+          "https://auth.example.com"
+        ],
+        "expected_result": "error",
+        "reference_time": 1700003600
+      }
+    },
+    {
+      "description": "Token with corrupted signature (first byte flipped)",
+      "id": "invalid_tampered_signature",
+      "original_token": "ogEjEGNDQVQ.owF4GGh0dHBzOi8vYXV0aC5leGFtcGxlLmNvbQOBeBlodHRwczovL3JlbGF5LmV4YW1wbGUuY29tBBplVUKA.W17GD7Gj-B0YtejX7fRwLlUmEkje-ME81oCc9oZaaYY",
+      "token": "ogEjEGNDQVQ.owF4GGh0dHBzOi8vYXV0aC5leGFtcGxlLmNvbQOBeBlodHRwczovL3JlbGF5LmV4YW1wbGUuY29tBBplVUKA.pF7GD7Gj-B0YtejX7fRwLlUmEkje-ME81oCc9oZaaYY",
+      "validation": {
+        "expected_error": "SignatureVerificationFailed",
+        "expected_result": "error",
+        "key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+      }
+    },
+    {
+      "description": "Token verified with incorrect key",
+      "id": "invalid_wrong_key",
+      "token": "ogEjEGNDQVQ.ogF4GGh0dHBzOi8vYXV0aC5leGFtcGxlLmNvbQQaZVVCgA.zmbxdkvbWtGtX0DExLC2nIxPDDmgAVImqk4rRSCCkCY",
+      "validation": {
+        "correct_key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        "expected_error": "SignatureVerificationFailed",
+        "expected_result": "error",
+        "wrong_key_hex": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      }
+    },
+    {
+      "description": "Token header says HMAC-SHA256 but verifier expects ES256",
+      "id": "invalid_algorithm_mismatch",
+      "token": "ogEjEGNDQVQ.ogF4GGh0dHBzOi8vYXV0aC5leGFtcGxlLmNvbQQaZVVCgA.zmbxdkvbWtGtX0DExLC2nIxPDDmgAVImqk4rRSCCkCY",
+      "validation": {
+        "expected_error": "AlgorithmMismatch",
+        "expected_result": "error",
+        "token_algorithm_id": -4,
+        "verifier_algorithm_id": -7
+      }
+    }
+  ]
+}

@@ -1,0 +1,43 @@
+{
+  "description": "DPoP (Demonstrating Proof-of-Possession) binding vectors",
+  "vectors": [
+    {
+      "description": "Token with DPoP key binding (JWK thumbprint in cnf claim)",
+      "dpop": {
+        "cnf_jkt_hex": "a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1",
+        "honor_jti": true,
+        "window_seconds": 60
+      },
+      "id": "dpop_jwk_binding",
+      "payload_cbor_hex": "a401781868747470733a2f2f617574682e6578616d706c652e636f6d041a6555428008a1035820a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1190141a200183c0101",
+      "token": "ogEjEGNDQVQ.pAF4GGh0dHBzOi8vYXV0aC5leGFtcGxlLmNvbQQaZVVCgAihA1ggoLHC0-T1prfI2eDxorPE1eb3qLnA0eLzpLXG1-j5oLEZAUGiABg8AQE.sN9kLIp64zIN9zDXoTLYC0xsJU_1FNF3kaO0CbdA_3M"
+    },
+    {
+      "description": "DPoP binding with longer window, JTI processing disabled",
+      "dpop": {
+        "cnf_jkt_hex": "3c82dfd6358ba804bd90879c34e743bbe13aeab7980664944f37a0ec0063fe95",
+        "cnf_jkt_source": "SHA-256 of 'test-public-key-material'",
+        "honor_jti": false,
+        "window_seconds": 300
+      },
+      "id": "dpop_no_jti",
+      "payload_cbor_hex": "a401781868747470733a2f2f617574682e6578616d706c652e636f6d041a6555428008a10358203c82dfd6358ba804bd90879c34e743bbe13aeab7980664944f37a0ec0063fe95190141a20019012c0100",
+      "token": "ogEjEGNDQVQ.pAF4GGh0dHBzOi8vYXV0aC5leGFtcGxlLmNvbQQaZVVCgAihA1ggPILf1jWLqAS9kIecNOdDu-E66reYBmSUTzeg7ABj_pUZAUGiABkBLAEA.M4lF5pQdxav6eIWqDjbchDkijVYOM7xa3oJR2IwWt9g"
+    },
+    {
+      "algorithm": "ES256",
+      "description": "ES256 token with real JWK thumbprint binding to the signing key",
+      "dpop": {
+        "cnf_jkt_hex": "0cebf1bc9880748a95588905b79843b42ba75cb174055e3e246bf87fe00b4a6d",
+        "honor_jti": null,
+        "window_seconds": 120
+      },
+      "id": "dpop_es256_real_binding",
+      "jwk_thumbprint_input": "{\"crv\":\"P-256\",\"kty\":\"EC\",\"x\":\"YP7UuiVanTHJYet0xjVtaMBJuJI7Yfps5mliLmDyn7Y\",\"y\":\"eQP-EAi4vJmkGunpVii8ZPLxsgwtfp9Rd6PClNRGIpk\"}",
+      "payload_cbor_hex": "a501781868747470733a2f2f617574682e6578616d706c652e636f6d0381781968747470733a2f2f72656c61792e6578616d706c652e636f6d041a6555428008a10358200cebf1bc9880748a95588905b79843b42ba75cb174055e3e246bf87fe00b4a6d190141a1001878",
+      "public_key_x_hex": "60fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6",
+      "public_key_y_hex": "7903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462299",
+      "token": "ogEmEGNDQVQ.pQF4GGh0dHBzOi8vYXV0aC5leGFtcGxlLmNvbQOBeBlodHRwczovL3JlbGF5LmV4YW1wbGUuY29tBBplVUKACKEDWCAM6_G8mIB0ipVYiQW3mEO0K6dcsXQFXj4ka_h_4AtKbRkBQaEAGHg.5andoxOhWXQIKWR3EMHWT-WIMPBDMYQFc61nzlfZs8zmgzwcOARpmlaB3ZS5MbJ9iCYWykYAcIzJ81nMyyZoQw"
+    }
+  ]
+}

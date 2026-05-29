@@ -1,0 +1,87 @@
+{
+  "description": "Full token structure (header.payload.signature) with cryptographic verification",
+  "vectors": [
+    {
+      "algorithm": "HMAC-SHA256",
+      "algorithm_id": -4,
+      "claims": {
+        "aud": [
+          "https://relay.example.com"
+        ],
+        "exp": 1700086400,
+        "iss": "https://auth.example.com"
+      },
+      "description": "Minimal token signed with HMAC-SHA256",
+      "header_b64": "ogEjEGNDQVQ",
+      "header_cbor_hex": "a201231063434154",
+      "id": "token_hmac_minimal",
+      "key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "payload_b64": "owF4GGh0dHBzOi8vYXV0aC5leGFtcGxlLmNvbQOBeBlodHRwczovL3JlbGF5LmV4YW1wbGUuY29tBBplVUKA",
+      "payload_cbor_hex": "a301781868747470733a2f2f617574682e6578616d706c652e636f6d0381781968747470733a2f2f72656c61792e6578616d706c652e636f6d041a65554280",
+      "signature_b64": "W17GD7Gj-B0YtejX7fRwLlUmEkje-ME81oCc9oZaaYY",
+      "signature_hex": "5b5ec60fb1a3f81d18b5e8d7edf4702e55261248def8c13cd6809cf6865a6986",
+      "token": "ogEjEGNDQVQ.owF4GGh0dHBzOi8vYXV0aC5leGFtcGxlLmNvbQOBeBlodHRwczovL3JlbGF5LmV4YW1wbGUuY29tBBplVUKA.W17GD7Gj-B0YtejX7fRwLlUmEkje-ME81oCc9oZaaYY",
+      "valid": true
+    },
+    {
+      "algorithm": "HMAC-SHA256",
+      "algorithm_id": -4,
+      "claims": {
+        "aud": [
+          "https://relay1.example.com",
+          "https://relay2.example.com"
+        ],
+        "catnip": [
+          {
+            "type": "ip_address",
+            "value": "203.0.113.50"
+          }
+        ],
+        "catu": 10,
+        "catv": "CAT-v1",
+        "cti": "vector-002",
+        "exp": 1700086400,
+        "iat": 1700000000,
+        "iss": "https://issuer.moq.example",
+        "nbf": 1700000000,
+        "sub": "user:alice@example.com"
+      },
+      "description": "Token with core + CAT + informational claims, HMAC-SHA256",
+      "header_b64": "ogEjEGNDQVQ",
+      "header_cbor_hex": "a201231063434154",
+      "id": "token_hmac_full",
+      "key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "payload_b64": "qgF4Gmh0dHBzOi8vaXNzdWVyLm1vcS5leGFtcGxlAnZ1c2VyOmFsaWNlQGV4YW1wbGUuY29tA4J4Gmh0dHBzOi8vcmVsYXkxLmV4YW1wbGUuY29teBpodHRwczovL3JlbGF5Mi5leGFtcGxlLmNvbQQaZVVCgAUaZVPxAAYaZVPxAAdKdmVjdG9yLTAwMhkBNmZDQVQtdjEZATeBbDIwMy4wLjExMy41MBkBOAo",
+      "payload_cbor_hex": "aa01781a68747470733a2f2f6973737565722e6d6f712e6578616d706c650276757365723a616c696365406578616d706c652e636f6d0382781a68747470733a2f2f72656c6179312e6578616d706c652e636f6d781a68747470733a2f2f72656c6179322e6578616d706c652e636f6d041a65554280051a6553f100061a6553f100074a766563746f722d303032190136664341542d7631190137816c3230332e302e3131332e35301901380a",
+      "signature_b64": "AqpYox40q1P6s8dVtHzwj0WKNgPaTZM9fAsc5GFPRNo",
+      "signature_hex": "02aa58a31e34ab53fab3c755b47cf08f458a3603da4d933d7c0b1ce4614f44da",
+      "token": "ogEjEGNDQVQ.qgF4Gmh0dHBzOi8vaXNzdWVyLm1vcS5leGFtcGxlAnZ1c2VyOmFsaWNlQGV4YW1wbGUuY29tA4J4Gmh0dHBzOi8vcmVsYXkxLmV4YW1wbGUuY29teBpodHRwczovL3JlbGF5Mi5leGFtcGxlLmNvbQQaZVVCgAUaZVPxAAYaZVPxAAdKdmVjdG9yLTAwMhkBNmZDQVQtdjEZATeBbDIwMy4wLjExMy41MBkBOAo.AqpYox40q1P6s8dVtHzwj0WKNgPaTZM9fAsc5GFPRNo",
+      "valid": true
+    },
+    {
+      "algorithm": "ES256",
+      "algorithm_id": -7,
+      "claims": {
+        "aud": [
+          "https://moq-relay.example.com"
+        ],
+        "exp": 1700086400,
+        "iss": "https://auth.example.com",
+        "nbf": 1700000000
+      },
+      "description": "Token signed with ES256 (P-256 ECDSA, deterministic RFC 6979)",
+      "header_b64": "ogEmEGNDQVQ",
+      "header_cbor_hex": "a201261063434154",
+      "id": "token_es256",
+      "payload_b64": "pAF4GGh0dHBzOi8vYXV0aC5leGFtcGxlLmNvbQOBeB1odHRwczovL21vcS1yZWxheS5leGFtcGxlLmNvbQQaZVVCgAUaZVPxAA",
+      "payload_cbor_hex": "a401781868747470733a2f2f617574682e6578616d706c652e636f6d0381781d68747470733a2f2f6d6f712d72656c61792e6578616d706c652e636f6d041a65554280051a6553f100",
+      "private_key_hex": "c9afa9d845ba75166b5c215767b1d6934e50c3db36e89b127b8a622b120f6721",
+      "public_key_x_hex": "60fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6",
+      "public_key_y_hex": "7903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462299",
+      "signature_b64": "-jMV6d4GH9d9gUOUQormHaPXoh_f-xmAKwxXXFeAmOfNS2t1oWkN7tTCuq6ZS_xGLg2KIAbz6JeA80NXOClNeg",
+      "signature_hex": "fa3315e9de061fd77d814394428ae61da3d7a21fdffb19802b0c575c578098e7cd4b6b75a1690deed4c2baae994bfc462e0d8a2006f3e89780f3435738294d7a",
+      "token": "ogEmEGNDQVQ.pAF4GGh0dHBzOi8vYXV0aC5leGFtcGxlLmNvbQOBeB1odHRwczovL21vcS1yZWxheS5leGFtcGxlLmNvbQQaZVVCgAUaZVPxAA.-jMV6d4GH9d9gUOUQormHaPXoh_f-xmAKwxXXFeAmOfNS2t1oWkN7tTCuq6ZS_xGLg2KIAbz6JeA80NXOClNeg",
+      "valid": true
+    }
+  ]
+}

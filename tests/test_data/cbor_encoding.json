@@ -1,0 +1,114 @@
+{
+  "description": "CBOR encoding of individual claim types",
+  "vectors": [
+    {
+      "claims": {
+        "iss": "https://auth.example.com"
+      },
+      "description": "Minimal token with only issuer claim",
+      "id": "cbor_issuer_only",
+      "payload_cbor_hex": "a101781868747470733a2f2f617574682e6578616d706c652e636f6d"
+    },
+    {
+      "claims": {
+        "aud": [
+          "https://relay.example.com"
+        ],
+        "cti": "test-token-001",
+        "exp": 1700086400,
+        "iss": "https://auth.example.com",
+        "nbf": 1700000000
+      },
+      "description": "All core CWT claims (iss, aud, exp, nbf, cti)",
+      "id": "cbor_core_claims",
+      "payload_cbor_hex": "a501781868747470733a2f2f617574682e6578616d706c652e636f6d0381781968747470733a2f2f72656c61792e6578616d706c652e636f6d041a65554280051a6553f100074e746573742d746f6b656e2d303031"
+    },
+    {
+      "claims": {
+        "catu": 5,
+        "catv": "CAT-v1"
+      },
+      "description": "CAT version string and usage limit",
+      "id": "cbor_cat_version_usage",
+      "payload_cbor_hex": "a2190136664341542d763119013805"
+    },
+    {
+      "claims": {
+        "catnip": [
+          {
+            "type": "ip_address",
+            "value": "192.168.1.100"
+          },
+          {
+            "type": "ip_range",
+            "value": "10.0.0.0/8"
+          },
+          {
+            "type": "asn",
+            "value": 64512
+          },
+          {
+            "type": "asn_range",
+            "value": [
+              64512,
+              64768
+            ]
+          }
+        ]
+      },
+      "description": "Network identifiers: IP, CIDR, ASN, ASN range",
+      "id": "cbor_network_identifiers",
+      "payload_cbor_hex": "a1190137846d3139322e3136382e312e313030a16869705f72616e67656a31302e302e302e302f38a16361736e19fc00a16961736e5f72616e67658219fc0019fd00"
+    },
+    {
+      "claims": {
+        "catgeoalt": 10,
+        "catgeocoord": {
+          "accuracy": 100.0,
+          "lat": 37.7749,
+          "lon": -122.4194
+        },
+        "catgeoiso3166": [
+          "US",
+          "CA"
+        ],
+        "geohash": "9q8yyk"
+      },
+      "description": "Geographic claims: coordinates, geohash, ISO 3166, altitude",
+      "id": "cbor_geographic_claims",
+      "payload_cbor_hex": "a419011a6639713879796b19013c8262555362434119013da3636c6174fb4042e32fec56d5d0636c6f6efbc05e9ad77318fc50686163637572616379f9564019013e0a"
+    },
+    {
+      "claims": {
+        "cath": [
+          {
+            "type": "exact",
+            "value": "https://example.com/live/stream1"
+          },
+          {
+            "type": "prefix",
+            "value": "https://example.com/vod/"
+          },
+          {
+            "type": "suffix",
+            "value": ".m3u8"
+          }
+        ]
+      },
+      "description": "URI patterns: exact, prefix, suffix",
+      "id": "cbor_uri_patterns",
+      "payload_cbor_hex": "a119013b83782068747470733a2f2f6578616d706c652e636f6d2f6c6976652f73747265616d31a166707265666978781868747470733a2f2f6578616d706c652e636f6d2f766f642fa166737566666978652e6d337538"
+    },
+    {
+      "claims": {
+        "catalpn": [
+          "moq-00",
+          "h3"
+        ]
+      },
+      "description": "ALPN protocol identifiers",
+      "id": "cbor_alpn",
+      "payload_cbor_hex": "a119013a82666d6f712d3030626833"
+    }
+  ]
+}

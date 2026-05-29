@@ -48,6 +48,10 @@ path = "src/lib.rs"
 name = "cat-cli"
 path = "src/bin/main.rs"
 
+[[bin]]
+name = "generate-test-vectors"
+path = "src/bin/generate_test_vectors.rs"
+
 [[bench]]
 name = "token_bench"
 harness = false

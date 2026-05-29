@@ -5,7 +5,7 @@ use crate::claims::*;
 use crate::{CatClaims, CatError, CatToken, CoreClaims, GeoCoordinate};
 use ciborium::Value;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CwtHeader {
@@ -40,7 +40,7 @@ impl Cwt {
     }
 
     pub fn encode_payload(&self) -> Result<Vec<u8>, CatError> {
-        let mut claims_map: HashMap<i64, Value> = HashMap::new();
+        let mut claims_map: BTreeMap<i64, Value> = BTreeMap::new();
 
         if let Some(ref iss) = self.payload.core.iss {
             claims_map.insert(CLAIM_ISS, Value::Text(iss.clone()));

@@ -144,6 +144,13 @@ impl Es256Algorithm {
         })
     }
 
+    pub fn from_key_pair(signing_key: SigningKey, verifying_key: VerifyingKey) -> Self {
+        Self {
+            signing_key: Some(signing_key),
+            verifying_key,
+        }
+    }
+
     pub fn new_verifier(verifying_key: VerifyingKey) -> Self {
         Self {
             signing_key: None,
