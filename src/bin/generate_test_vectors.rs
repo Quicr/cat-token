@@ -12,8 +12,7 @@ use std::collections::BTreeMap;
 use std::fs;
 
 // Fixed test keys (deterministic, NOT for production use)
-const HMAC_KEY_HEX: &str =
-    "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
+const HMAC_KEY_HEX: &str = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
 const ES256_PRIVATE_KEY_HEX: &str =
     "c9afa9d845ba75166b5c215767b1d6934e50c3db36e89b127b8a622b120f6721";
 
@@ -58,22 +57,13 @@ fn main() {
     );
 
     // Category 3: MOQT scope encoding vectors
-    all_vectors.insert(
-        "moqt_scopes".to_string(),
-        generate_moqt_scope_vectors(),
-    );
+    all_vectors.insert("moqt_scopes".to_string(), generate_moqt_scope_vectors());
 
     // Category 4: Validation vectors (pass/fail)
-    all_vectors.insert(
-        "validation".to_string(),
-        generate_validation_vectors(),
-    );
+    all_vectors.insert("validation".to_string(), generate_validation_vectors());
 
     // Category 5: DPoP binding vectors
-    all_vectors.insert(
-        "dpop_binding".to_string(),
-        generate_dpop_vectors(),
-    );
+    all_vectors.insert("dpop_binding".to_string(), generate_dpop_vectors());
 
     // Write combined file
     let combined = json!({
@@ -152,9 +142,7 @@ fn generate_cbor_encoding_vectors() -> JsonValue {
 
     // 1.3: CAT version and usage limit
     {
-        let token = CatToken::new()
-            .with_version("CAT-v1")
-            .with_usage_limit(5);
+        let token = CatToken::new().with_version("CAT-v1").with_usage_limit(5);
         let cwt = Cwt::new(ALG_HMAC256_256, token);
         let payload_cbor = cwt.encode_payload().unwrap();
         vectors.push(json!({
@@ -358,7 +346,7 @@ fn generate_token_structure_vectors() -> JsonValue {
         let encoded = encode_token(&token, &alg).unwrap();
 
         let parts: Vec<&str> = encoded.split('.').collect();
-        let vk = es256_signing_key().verifying_key().clone();
+        let vk = *es256_signing_key().verifying_key();
         let point = vk.to_encoded_point(false);
 
         vectors.push(json!({
@@ -538,18 +526,17 @@ fn generate_moqt_scope_vectors() -> JsonValue {
 
     // 3.4: Admin scope (all actions, wildcard namespace)
     {
-        let scope = MoqtScope::new()
-            .with_actions(vec![
-                MoqtAction::ClientSetup,
-                MoqtAction::ServerSetup,
-                MoqtAction::PublishNamespace,
-                MoqtAction::SubscribeNamespace,
-                MoqtAction::Subscribe,
-                MoqtAction::RequestUpdate,
-                MoqtAction::Publish,
-                MoqtAction::Fetch,
-                MoqtAction::TrackStatus,
-            ]);
+        let scope = MoqtScope::new().with_actions(vec![
+            MoqtAction::ClientSetup,
+            MoqtAction::ServerSetup,
+            MoqtAction::PublishNamespace,
+            MoqtAction::SubscribeNamespace,
+            MoqtAction::Subscribe,
+            MoqtAction::RequestUpdate,
+            MoqtAction::Publish,
+            MoqtAction::Fetch,
+            MoqtAction::TrackStatus,
+        ]);
 
         let token = CatToken::new()
             .with_issuer("https://auth.example.com")
@@ -654,8 +641,7 @@ fn generate_validation_vectors() -> JsonValue {
 
     // 4.2: Expired token
     {
-        let token = CatToken::new()
-            .with_issuer("https://auth.example.com");
+        let token = CatToken::new().with_issuer("https://auth.example.com");
         let mut token = token;
         token.core.exp = Some(1600000000); // well in the past
 
@@ -674,8 +660,7 @@ fn generate_validation_vectors() -> JsonValue {
 
     // 4.3: Not-yet-valid token
     {
-        let token = CatToken::new()
-            .with_issuer("https://auth.example.com");
+        let token = CatToken::new().with_issuer("https://auth.example.com");
         let mut token = token;
         token.core.exp = Some(FIXED_EXP + 86400);
         token.core.nbf = Some(FIXED_EXP); // nbf is in the future relative to reference_time
@@ -769,8 +754,7 @@ fn generate_validation_vectors() -> JsonValue {
 
     // 4.7: Wrong key
     {
-        let token = CatToken::new()
-            .with_issuer("https://auth.example.com");
+        let token = CatToken::new().with_issuer("https://auth.example.com");
         let mut token = token;
         token.core.exp = Some(FIXED_EXP);
 
@@ -792,8 +776,7 @@ fn generate_validation_vectors() -> JsonValue {
 
     // 4.8: Algorithm mismatch
     {
-        let token = CatToken::new()
-            .with_issuer("https://auth.example.com");
+        let token = CatToken::new().with_issuer("https://auth.example.com");
         let mut token = token;
         token.core.exp = Some(FIXED_EXP);
 
@@ -824,8 +807,7 @@ fn generate_dpop_vectors() -> JsonValue {
     // 5.1: Token with JWK thumbprint binding
     {
         let jkt_bytes = hex::decode(
-            "a]b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1"
-                .replace(']', "0"),
+            "a]b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1".replace(']', "0"),
         )
         .unwrap();
 

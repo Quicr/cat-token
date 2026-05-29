@@ -9,8 +9,7 @@ use cat_token::*;
 use p256::ecdsa::{SigningKey, VerifyingKey};
 use serde_json::Value as JsonValue;
 
-const HMAC_KEY_HEX: &str =
-    "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
+const HMAC_KEY_HEX: &str = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
 const ES256_PRIVATE_KEY_HEX: &str =
     "c9afa9d845ba75166b5c215767b1d6934e50c3db36e89b127b8a622b120f6721";
 
@@ -81,9 +80,7 @@ fn test_vector_cbor_cat_version_usage() {
 
     assert_eq!(v["id"], "cbor_cat_version_usage");
 
-    let token = CatToken::new()
-        .with_version("CAT-v1")
-        .with_usage_limit(5);
+    let token = CatToken::new().with_version("CAT-v1").with_usage_limit(5);
     let cwt = Cwt::new(ALG_HMAC256_256, token);
     let payload = cwt.encode_payload().unwrap();
 
@@ -187,7 +184,10 @@ fn test_vector_token_hmac_minimal() {
 
     // Verify the token decodes correctly
     let decoded = decode_token(token_str, &alg).unwrap();
-    assert_eq!(decoded.core.iss.as_deref(), Some("https://auth.example.com"));
+    assert_eq!(
+        decoded.core.iss.as_deref(),
+        Some("https://auth.example.com")
+    );
     assert_eq!(
         decoded.core.aud.as_deref(),
         Some(vec!["https://relay.example.com".to_string()].as_slice())
@@ -226,7 +226,10 @@ fn test_vector_token_hmac_full() {
     let token_str = v["token"].as_str().unwrap();
 
     let decoded = decode_token(token_str, &alg).unwrap();
-    assert_eq!(decoded.core.iss.as_deref(), Some("https://issuer.moq.example"));
+    assert_eq!(
+        decoded.core.iss.as_deref(),
+        Some("https://issuer.moq.example")
+    );
     assert_eq!(decoded.core.aud.as_ref().unwrap().len(), 2);
     assert_eq!(decoded.core.cti.as_deref(), Some("vector-002"));
     assert_eq!(decoded.cat.catv.as_deref(), Some("CAT-v1"));
@@ -235,7 +238,10 @@ fn test_vector_token_hmac_full() {
         decoded.informational.sub.as_deref(),
         Some("user:alice@example.com")
     );
-    assert_eq!(decoded.informational.iat, Some(v["claims"]["iat"].as_i64().unwrap()));
+    assert_eq!(
+        decoded.informational.iat,
+        Some(v["claims"]["iat"].as_i64().unwrap())
+    );
 }
 
 #[test]
@@ -250,7 +256,10 @@ fn test_vector_token_es256() {
     let token_str = v["token"].as_str().unwrap();
 
     let decoded = decode_token(token_str, &alg).unwrap();
-    assert_eq!(decoded.core.iss.as_deref(), Some("https://auth.example.com"));
+    assert_eq!(
+        decoded.core.iss.as_deref(),
+        Some("https://auth.example.com")
+    );
     assert_eq!(
         decoded.core.aud.as_deref(),
         Some(vec!["https://moq-relay.example.com".to_string()].as_slice())
@@ -564,7 +573,10 @@ fn test_vector_valid_basic() {
 
     // Token should decode without error
     let decoded = decode_token(token_str, &alg).unwrap();
-    assert_eq!(decoded.core.iss.as_deref(), Some("https://auth.example.com"));
+    assert_eq!(
+        decoded.core.iss.as_deref(),
+        Some("https://auth.example.com")
+    );
 }
 
 #[test]
@@ -594,8 +606,7 @@ fn test_vector_invalid_wrong_key() {
 
     assert_eq!(v["id"], "invalid_wrong_key");
 
-    let wrong_key =
-        hex::decode(v["validation"]["wrong_key_hex"].as_str().unwrap()).unwrap();
+    let wrong_key = hex::decode(v["validation"]["wrong_key_hex"].as_str().unwrap()).unwrap();
     let alg = HmacSha256Algorithm::new(&wrong_key);
     let token_str = v["token"].as_str().unwrap();
 
