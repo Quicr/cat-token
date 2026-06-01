@@ -3,6 +3,8 @@
 
 use cat_token::*;
 use chrono::{Duration, Utc};
+use p256::ecdsa::SigningKey;
+use p256::pkcs8::DecodePrivateKey;
 use std::env;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -11,10 +13,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if args.len() < 2 {
         println!("Usage: {} <command> [args...]", args[0]);
         println!("Commands:");
-        println!("  generate-hmac - Generate HMAC key and sample token");
-        println!("  generate-es256 - Generate ES256 key pair and sample token");
-        println!("  generate-ps256 - Generate PS256 key pair and sample token");
-        println!("  verify <token> <algorithm> - Verify a token");
+        println!("  generate-hmac        - Generate HMAC key and sample token");
+        println!("  generate-es256       - Generate ES256 key pair and sample token");
+        println!("  generate-ps256       - Generate PS256 key pair and sample token");
+        println!("  verify <token> <alg> - Verify a token");
+        println!("  moqt-token <key.pem> <role> <namespace> [options]");
+        println!("    Generate a MOQT-scoped C4M token for relay auth testing.");
+        println!("    role: publisher | subscriber");
+        println!("    Options: --issuer <iss> --audience <aud> --subject <sub> --expires <secs>");
         return Ok(());
     }
 
@@ -28,6 +34,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 return Ok(());
             }
             verify_token(&args[2], &args[3])?;
+        }
+        "moqt-token" => {
+            if args.len() < 5 {
+                println!(
+                    "Usage: {} moqt-token <key.pem> <role> <namespace> [--issuer X] [--audience X] [--subject X] [--expires SECS]",
+                    args[0]
+                );
+                return Ok(());
+            }
+            generate_moqt_token(&args[2..]).map_err(|e| {
+                eprintln!("Error: {e}");
+                e
+            })?;
         }
         _ => {
             println!("Unknown command: {}", args[1]);
@@ -113,6 +132,76 @@ fn verify_token(token_str: &str, alg: &str) -> Result<(), Box<dyn std::error::Er
     println!("This is a placeholder for token verification logic.");
     println!("Token: {}", token_str);
     println!("Algorithm: {}", alg);
+    Ok(())
+}
+
+fn generate_moqt_token(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+    let key_path = &args[0];
+    let role = &args[1];
+    let namespace = &args[2];
+
+    let mut issuer = "cat-cli".to_string();
+    let mut audience = "moq-relay".to_string();
+    let mut subject = "user".to_string();
+    let mut expires: i64 = 3600;
+
+    let mut i = 3;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--issuer" => {
+                i += 1;
+                issuer = args[i].clone();
+            }
+            "--audience" => {
+                i += 1;
+                audience = args[i].clone();
+            }
+            "--subject" => {
+                i += 1;
+                subject = args[i].clone();
+            }
+            "--expires" => {
+                i += 1;
+                expires = args[i].parse()?;
+            }
+            other => return Err(format!("unknown option: {other}").into()),
+        }
+        i += 1;
+    }
+
+    let pem = std::fs::read_to_string(key_path)?;
+    let signing_key = SigningKey::from_pkcs8_pem(&pem)
+        .or_else(|_| p256::SecretKey::from_sec1_pem(&pem).map(SigningKey::from))
+        .map_err(|e| format!("failed to load private key: {e}"))?;
+    let verifying_key = p256::ecdsa::VerifyingKey::from(&signing_key);
+    let algorithm = Es256Algorithm::from_key_pair(signing_key, verifying_key);
+
+    let mut scope_builder = match role.as_str() {
+        "publisher" => MoqtScopeBuilder::new().publisher(),
+        "subscriber" => MoqtScopeBuilder::new().subscriber(),
+        _ => return Err(format!("unknown role: {role} (use publisher or subscriber)").into()),
+    };
+    scope_builder = scope_builder
+        .namespace_path(namespace.as_bytes())
+        .track_prefix(b"");
+    let scope = scope_builder.build();
+
+    let setup_scope = MoqtScopeBuilder::new()
+        .action(MoqtAction::ClientSetup)
+        .build();
+
+    let token = CatTokenBuilder::new()
+        .issuer(&issuer)
+        .single_audience(&audience)
+        .subject(&subject)
+        .expires_in(expires)
+        .moqt_scope(scope)
+        .moqt_scope(setup_scope)
+        .build();
+
+    let encoded = encode_token(&token, &algorithm)?;
+    println!("{encoded}");
+
     Ok(())
 }
 

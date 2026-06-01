@@ -5,7 +5,10 @@ use crate::CatError;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use hmac::{Hmac, Mac};
 use p256::ecdsa::{Signature, SigningKey, VerifyingKey};
+
+pub use p256::ecdsa::VerifyingKey as Es256VerifyingKey;
 use p256::elliptic_curve::rand_core::OsRng;
+use p256::pkcs8::DecodePublicKey;
 use ring::rand::SecureRandom;
 use ring::{digest, rand};
 use rsa::pkcs1v15::{SigningKey as RsaSigningKey, VerifyingKey as RsaVerifyingKey};
@@ -156,6 +159,18 @@ impl Es256Algorithm {
             signing_key: None,
             verifying_key,
         }
+    }
+
+    pub fn from_public_key_pem(pem: &str) -> Result<Self, CatError> {
+        let verifying_key = VerifyingKey::from_public_key_pem(pem)
+            .map_err(|e| CatError::CryptoError(format!("invalid PEM: {e}")))?;
+        Ok(Self::new_verifier(verifying_key))
+    }
+
+    pub fn from_public_key_der(der: &[u8]) -> Result<Self, CatError> {
+        let verifying_key = VerifyingKey::from_public_key_der(der)
+            .map_err(|e| CatError::CryptoError(format!("invalid DER: {e}")))?;
+        Ok(Self::new_verifier(verifying_key))
     }
 
     pub fn verifying_key(&self) -> &VerifyingKey {
