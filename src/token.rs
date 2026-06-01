@@ -207,9 +207,17 @@ impl CatTokenBuilder {
         self
     }
 
+    pub fn single_audience(self, audience: impl Into<String>) -> Self {
+        self.audience(vec![audience.into()])
+    }
+
     pub fn expires_at(mut self, exp: DateTime<Utc>) -> Self {
         self.inner = self.inner.with_expiration(exp);
         self
+    }
+
+    pub fn expires_in(self, seconds: i64) -> Self {
+        self.expires_at(Utc::now() + chrono::Duration::seconds(seconds))
     }
 
     pub fn not_before(mut self, nbf: DateTime<Utc>) -> Self {
@@ -404,6 +412,15 @@ pub fn encode_token(
     let signature_b64 = URL_SAFE_NO_PAD.encode(&signature);
 
     Ok(format!("{}.{}.{}", header_b64, payload_b64, signature_b64))
+}
+
+pub fn decode_token_bytes(
+    token_bytes: &[u8],
+    algorithm: &dyn CryptographicAlgorithm,
+) -> Result<CatToken, CatError> {
+    let token_str =
+        std::str::from_utf8(token_bytes).map_err(|_| CatError::InvalidTokenFormat)?;
+    decode_token(token_str, algorithm)
 }
 
 pub fn decode_token(
