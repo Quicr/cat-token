@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2022 Quicr
 // SPDX-License-Identifier: BSD-2-Clause
 
-use cat_token::moqt::{MoqtAuthRequest, MoqtScopeBuilder, MoqtValidator, C4M_TOKEN_TYPE};
+use cat_token::moqt::{C4M_TOKEN_TYPE, MoqtAuthRequest, MoqtScopeBuilder, MoqtValidator};
 use cat_token::*;
 
 // --- CatTokenBuilder::expires_in ---
@@ -37,9 +37,11 @@ fn test_expires_in_negative_already_expired() {
     let encoded = encode_token(&token, &key).unwrap();
     let decoded = decode_token(&encoded, &key).unwrap();
 
-    let validator = CatTokenValidator::new()
-        .with_clock_skew_tolerance(0);
-    assert!(matches!(validator.validate(&decoded), Err(CatError::TokenExpired)));
+    let validator = CatTokenValidator::new().with_clock_skew_tolerance(0);
+    assert!(matches!(
+        validator.validate(&decoded),
+        Err(CatError::TokenExpired)
+    ));
 }
 
 // --- CatTokenBuilder::single_audience ---
@@ -56,12 +58,11 @@ fn test_single_audience_convenience() {
     let encoded = encode_token(&token, &key).unwrap();
     let decoded = decode_token(&encoded, &key).unwrap();
 
-    let validator = CatTokenValidator::new()
-        .with_expected_audiences(vec!["my-relay".to_string()]);
+    let validator = CatTokenValidator::new().with_expected_audiences(vec!["my-relay".to_string()]);
     assert!(validator.validate(&decoded).is_ok());
 
-    let validator_wrong = CatTokenValidator::new()
-        .with_expected_audiences(vec!["other-relay".to_string()]);
+    let validator_wrong =
+        CatTokenValidator::new().with_expected_audiences(vec!["other-relay".to_string()]);
     assert!(matches!(
         validator_wrong.validate(&decoded),
         Err(CatError::InvalidAudience)
@@ -294,7 +295,10 @@ fn test_namespace_path_allows_additional_trailing_elements() {
 fn test_c4m_token_type_value() {
     // "c4m" = 0x63 ('c'), 0x34 ('4'), 0x6d ('m') → 0x63346d
     assert_eq!(C4M_TOKEN_TYPE, 0x63346d);
-    assert_eq!(C4M_TOKEN_TYPE, (b'c' as u64) << 16 | (b'4' as u64) << 8 | (b'm' as u64));
+    assert_eq!(
+        C4M_TOKEN_TYPE,
+        (b'c' as u64) << 16 | (b'4' as u64) << 8 | (b'm' as u64)
+    );
 }
 
 // --- Full round-trip with new APIs ---

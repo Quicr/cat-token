@@ -418,8 +418,7 @@ pub fn decode_token_bytes(
     token_bytes: &[u8],
     algorithm: &dyn CryptographicAlgorithm,
 ) -> Result<CatToken, CatError> {
-    let token_str =
-        std::str::from_utf8(token_bytes).map_err(|_| CatError::InvalidTokenFormat)?;
+    let token_str = std::str::from_utf8(token_bytes).map_err(|_| CatError::InvalidTokenFormat)?;
     decode_token(token_str, algorithm)
 }
 
