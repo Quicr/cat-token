@@ -168,7 +168,7 @@ fn test_verifying_key_reexport() {
     let key_pair = Es256Algorithm::new_with_key_pair().unwrap();
     // This proves Es256VerifyingKey is usable from the public API
     let vk: &Es256VerifyingKey = key_pair.verifying_key();
-    let verifier = Es256Algorithm::new_verifier(vk.clone());
+    let verifier = Es256Algorithm::new_verifier(*vk);
 
     let token = CatTokenBuilder::new()
         .issuer("reexport-test")
