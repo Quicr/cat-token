@@ -244,13 +244,15 @@ fn test_namespace_path_ignores_empty_segments() {
     assert!(validator.authorize(&token, &request).authorized);
 }
 
-// --- MoqtScopeBuilder::namespace_path_prefix ---
+// --- MoqtScopeBuilder::namespace_path tuple-prefix semantics ---
 
 #[test]
-fn test_namespace_path_prefix_last_element_is_prefix() {
+fn test_namespace_path_allows_additional_trailing_elements() {
+    // namespace_path(b"sports/football") should match requests with
+    // more tuple elements like ["sports", "football", "spain"]
     let scope = MoqtScopeBuilder::new()
         .publisher()
-        .namespace_path_prefix(b"sports/foot")
+        .namespace_path(b"sports/football")
         .track_prefix(b"")
         .build();
 
@@ -261,7 +263,7 @@ fn test_namespace_path_prefix_last_element_is_prefix() {
 
     let validator = MoqtValidator::new();
 
-    // "football" starts with "foot" — should match
+    // Exact 2-element match
     let request = MoqtAuthRequest::new(
         MoqtAction::Publish,
         vec![b"sports".to_vec(), b"football".to_vec()],
@@ -269,57 +271,18 @@ fn test_namespace_path_prefix_last_element_is_prefix() {
     );
     assert!(validator.authorize(&token, &request).authorized);
 
-    // "footwear" also starts with "foot"
+    // 3 elements — trailing "spain" is allowed (tuple-prefix semantics)
     let request = MoqtAuthRequest::new(
         MoqtAction::Publish,
-        vec![b"sports".to_vec(), b"footwear".to_vec()],
+        vec![b"sports".to_vec(), b"football".to_vec(), b"spain".to_vec()],
         b"video".to_vec(),
     );
     assert!(validator.authorize(&token, &request).authorized);
 
-    // "basketball" does not start with "foot"
+    // Partial byte match on a tuple element must NOT work
     let request = MoqtAuthRequest::new(
         MoqtAction::Publish,
-        vec![b"sports".to_vec(), b"basketball".to_vec()],
-        b"video".to_vec(),
-    );
-    assert!(!validator.authorize(&token, &request).authorized);
-
-    // First element must exact-match "sports"
-    let request = MoqtAuthRequest::new(
-        MoqtAction::Publish,
-        vec![b"music".to_vec(), b"football".to_vec()],
-        b"video".to_vec(),
-    );
-    assert!(!validator.authorize(&token, &request).authorized);
-}
-
-#[test]
-fn test_namespace_path_prefix_single_segment() {
-    let scope = MoqtScopeBuilder::new()
-        .subscriber()
-        .namespace_path_prefix(b"sport")
-        .track_prefix(b"")
-        .build();
-
-    let token = CatTokenBuilder::new()
-        .issuer("test")
-        .moqt_scope(scope)
-        .build();
-
-    let validator = MoqtValidator::new();
-
-    // Single segment acts as prefix on first element
-    let request = MoqtAuthRequest::new(
-        MoqtAction::Subscribe,
-        vec![b"sports".to_vec()],
-        b"video".to_vec(),
-    );
-    assert!(validator.authorize(&token, &request).authorized);
-
-    let request = MoqtAuthRequest::new(
-        MoqtAction::Subscribe,
-        vec![b"music".to_vec()],
+        vec![b"sports".to_vec(), b"foot".to_vec()],
         b"video".to_vec(),
     );
     assert!(!validator.authorize(&token, &request).authorized);

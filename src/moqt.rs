@@ -326,34 +326,18 @@ impl MoqtScopeBuilder {
         self
     }
 
-    /// Add namespace matches from a `/`-separated path.
-    /// Each segment becomes a separate exact-match element in the namespace tuple.
-    /// For example, `namespace_path(b"sports/football")` is equivalent to
-    /// calling `.namespace_exact(b"sports").namespace_exact(b"football")`.
+    /// Add exact matches for each segment of a `/`-separated namespace path.
+    /// Each segment becomes a separate exact-match tuple element.
+    /// Unmatched trailing tuple elements in the request are allowed (tuple-prefix semantics).
+    ///
+    /// `namespace_path(b"sports/football")` matches any namespace starting with
+    /// `["sports", "football", ...]` — e.g. `["sports", "football", "spain"]`.
     pub fn namespace_path(mut self, path: &[u8]) -> Self {
         for segment in path.split(|&b| b == b'/') {
             if !segment.is_empty() {
                 self.namespace_matches
                     .push(NamespaceMatch::exact(segment.to_vec()));
             }
-        }
-        self
-    }
-
-    /// Add namespace prefix matches from a `/`-separated path.
-    /// Each segment becomes a prefix-match element in the namespace tuple.
-    /// The last segment uses prefix matching, all preceding use exact matching.
-    /// For example, `namespace_path_prefix(b"sports/foot")` exact-matches "sports"
-    /// and prefix-matches "foot" (matching "football", "footwear", etc.).
-    pub fn namespace_path_prefix(mut self, path: &[u8]) -> Self {
-        let segments: Vec<&[u8]> = path.split(|&b| b == b'/').filter(|s| !s.is_empty()).collect();
-        if let Some((last, preceding)) = segments.split_last() {
-            for segment in preceding {
-                self.namespace_matches
-                    .push(NamespaceMatch::exact(segment.to_vec()));
-            }
-            self.namespace_matches
-                .push(NamespaceMatch::prefix(last.to_vec()));
         }
         self
     }
