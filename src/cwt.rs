@@ -6,6 +6,116 @@ use crate::{CatClaims, CatError, CatToken, CoreClaims, GeoCoordinate};
 use ciborium::Value;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
+use std::net::IpAddr;
+
+const CBOR_TAG_IPV4: u64 = 52;
+const CBOR_TAG_IPV6: u64 = 54;
+
+fn encode_network_identifier(nip: &NetworkIdentifier) -> Value {
+    match nip {
+        NetworkIdentifier::IpAddress(addr) => match addr {
+            IpAddr::V4(v4) => Value::Tag(CBOR_TAG_IPV4, Box::new(Value::Bytes(v4.octets().to_vec()))),
+            IpAddr::V6(v6) => Value::Tag(CBOR_TAG_IPV6, Box::new(Value::Bytes(v6.octets().to_vec()))),
+        },
+        NetworkIdentifier::IpPrefix(addr, prefix_len) => {
+            let (tag, addr_bytes) = match addr {
+                IpAddr::V4(v4) => (CBOR_TAG_IPV4, v4.octets().to_vec()),
+                IpAddr::V6(v6) => (CBOR_TAG_IPV6, v6.octets().to_vec()),
+            };
+            let prefix_bytes = prefix_byte_count(*prefix_len);
+            Value::Tag(
+                tag,
+                Box::new(Value::Map(vec![(
+                    Value::Integer((*prefix_len as i64).into()),
+                    Value::Bytes(addr_bytes[..prefix_bytes].to_vec()),
+                )])),
+            )
+        }
+        NetworkIdentifier::Asn(asn) => Value::Integer((*asn).into()),
+        NetworkIdentifier::AsnRange(start, end) => Value::Array(vec![
+            Value::Integer((*start).into()),
+            Value::Integer((*end).into()),
+        ]),
+    }
+}
+
+fn prefix_byte_count(prefix_len: u8) -> usize {
+    ((prefix_len as usize) + 7) / 8
+}
+
+fn decode_network_identifier(value: &Value) -> Result<NetworkIdentifier, CatError> {
+    match value {
+        Value::Tag(tag, inner) => {
+            match inner.as_ref() {
+                Value::Bytes(bytes) => {
+                    match *tag {
+                        CBOR_TAG_IPV4 if bytes.len() == 4 => {
+                            let addr = std::net::Ipv4Addr::new(bytes[0], bytes[1], bytes[2], bytes[3]);
+                            Ok(NetworkIdentifier::IpAddress(IpAddr::V4(addr)))
+                        }
+                        CBOR_TAG_IPV6 if bytes.len() == 16 => {
+                            let mut octets = [0u8; 16];
+                            octets.copy_from_slice(bytes);
+                            let addr = std::net::Ipv6Addr::from(octets);
+                            Ok(NetworkIdentifier::IpAddress(IpAddr::V6(addr)))
+                        }
+                        _ => Err(CatError::InvalidClaimValue(format!(
+                            "Invalid IP tag/size: tag={tag}, len={}", bytes.len()
+                        ))),
+                    }
+                }
+                Value::Map(map) if map.len() == 1 => {
+                    let (k, v) = &map[0];
+                    let prefix_len = match k {
+                        Value::Integer(i) => {
+                            let val: i64 = (*i).try_into().map_err(|_| CatError::InvalidTokenFormat)?;
+                            val as u8
+                        }
+                        _ => return Err(CatError::InvalidTokenFormat),
+                    };
+                    let prefix_bytes = match v {
+                        Value::Bytes(b) => b,
+                        _ => return Err(CatError::InvalidTokenFormat),
+                    };
+                    match *tag {
+                        CBOR_TAG_IPV4 => {
+                            let mut octets = [0u8; 4];
+                            let copy_len = prefix_bytes.len().min(4);
+                            octets[..copy_len].copy_from_slice(&prefix_bytes[..copy_len]);
+                            let addr = std::net::Ipv4Addr::from(octets);
+                            Ok(NetworkIdentifier::IpPrefix(IpAddr::V4(addr), prefix_len))
+                        }
+                        CBOR_TAG_IPV6 => {
+                            let mut octets = [0u8; 16];
+                            let copy_len = prefix_bytes.len().min(16);
+                            octets[..copy_len].copy_from_slice(&prefix_bytes[..copy_len]);
+                            let addr = std::net::Ipv6Addr::from(octets);
+                            Ok(NetworkIdentifier::IpPrefix(IpAddr::V6(addr), prefix_len))
+                        }
+                        _ => Err(CatError::InvalidClaimValue(format!("Unknown IP tag: {tag}"))),
+                    }
+                }
+                _ => Err(CatError::InvalidTokenFormat),
+            }
+        }
+        Value::Integer(i) => {
+            let asn: u32 = (*i).try_into().map_err(|_| CatError::InvalidTokenFormat)?;
+            Ok(NetworkIdentifier::Asn(asn))
+        }
+        Value::Array(arr) if arr.len() == 2 => {
+            let start: u32 = match &arr[0] {
+                Value::Integer(i) => (*i).try_into().map_err(|_| CatError::InvalidTokenFormat)?,
+                _ => return Err(CatError::InvalidTokenFormat),
+            };
+            let end: u32 = match &arr[1] {
+                Value::Integer(i) => (*i).try_into().map_err(|_| CatError::InvalidTokenFormat)?,
+                _ => return Err(CatError::InvalidTokenFormat),
+            };
+            Ok(NetworkIdentifier::AsnRange(start, end))
+        }
+        _ => Err(CatError::InvalidTokenFormat),
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CwtHeader {
@@ -88,24 +198,7 @@ impl Cwt {
         if let Some(ref catnip) = self.payload.cat.catnip {
             let nip_values: Vec<Value> = catnip
                 .iter()
-                .map(|nip| match nip {
-                    NetworkIdentifier::IpAddress(ip) => Value::Text(ip.clone()),
-                    NetworkIdentifier::IpRange(range) => Value::Map(vec![(
-                        Value::Text("ip_range".to_string()),
-                        Value::Text(range.clone()),
-                    )]),
-                    NetworkIdentifier::Asn(asn) => Value::Map(vec![(
-                        Value::Text("asn".to_string()),
-                        Value::Integer((*asn).into()),
-                    )]),
-                    NetworkIdentifier::AsnRange(start, end) => Value::Map(vec![(
-                        Value::Text("asn_range".to_string()),
-                        Value::Array(vec![
-                            Value::Integer((*start).into()),
-                            Value::Integer((*end).into()),
-                        ]),
-                    )]),
-                })
+                .map(|nip| encode_network_identifier(nip))
                 .collect();
             claims_map.insert(CLAIM_CATNIP, Value::Array(nip_values));
         }
@@ -645,53 +738,7 @@ impl Cwt {
                     if let Value::Array(arr) = value {
                         let mut nips = Vec::new();
                         for item in arr {
-                            match item {
-                                Value::Text(s) => {
-                                    nips.push(NetworkIdentifier::IpAddress(s));
-                                }
-                                Value::Map(map) => {
-                                    for (k, v) in map {
-                                        if let Value::Text(key_str) = k {
-                                            match key_str.as_str() {
-                                                "ip_range" => {
-                                                    if let Value::Text(range) = v {
-                                                        nips.push(NetworkIdentifier::IpRange(
-                                                            range,
-                                                        ));
-                                                    }
-                                                }
-                                                "asn" => {
-                                                    if let Value::Integer(asn) = v
-                                                        && let Ok(asn_u32) =
-                                                            TryInto::<u32>::try_into(asn)
-                                                    {
-                                                        nips.push(NetworkIdentifier::Asn(asn_u32));
-                                                    }
-                                                }
-                                                "asn_range" => {
-                                                    if let Value::Array(range_arr) = v
-                                                        && range_arr.len() == 2
-                                                        && let (
-                                                            Value::Integer(start),
-                                                            Value::Integer(end),
-                                                        ) = (&range_arr[0], &range_arr[1])
-                                                        && let (Ok(start_u32), Ok(end_u32)) = (
-                                                            TryInto::<u32>::try_into(*start),
-                                                            TryInto::<u32>::try_into(*end),
-                                                        )
-                                                    {
-                                                        nips.push(NetworkIdentifier::AsnRange(
-                                                            start_u32, end_u32,
-                                                        ));
-                                                    }
-                                                }
-                                                _ => {}
-                                            }
-                                        }
-                                    }
-                                }
-                                _ => {}
-                            }
+                            nips.push(decode_network_identifier(&item)?);
                         }
                         cat.catnip = Some(nips);
                     }

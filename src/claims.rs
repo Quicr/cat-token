@@ -450,78 +450,78 @@ pub enum UriPattern {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum NetworkIdentifier {
-    IpAddress(String),
-    IpRange(String),
+    IpAddress(std::net::IpAddr),
+    IpPrefix(std::net::IpAddr, u8),
     Asn(u32),
     AsnRange(u32, u32),
 }
 
 impl NetworkIdentifier {
-    /// Validate that the network identifier contains valid data
+    pub fn from_ip_str(ip: &str) -> Result<Self, crate::CatError> {
+        let addr: std::net::IpAddr = ip
+            .parse()
+            .map_err(|_| crate::CatError::InvalidClaimValue(format!("Invalid IP address: {ip}")))?;
+        Ok(Self::IpAddress(addr))
+    }
+
+    pub fn from_cidr_str(cidr: &str) -> Result<Self, crate::CatError> {
+        let parts: Vec<&str> = cidr.split('/').collect();
+        if parts.len() != 2 {
+            return Err(crate::CatError::InvalidClaimValue(format!(
+                "Invalid CIDR: {cidr}"
+            )));
+        }
+        let addr: std::net::IpAddr = parts[0].parse().map_err(|_| {
+            crate::CatError::InvalidClaimValue(format!("Invalid IP in CIDR: {}", parts[0]))
+        })?;
+        let prefix_len: u8 = parts[1].parse().map_err(|_| {
+            crate::CatError::InvalidClaimValue(format!("Invalid prefix length: {}", parts[1]))
+        })?;
+        let max_prefix = match addr {
+            std::net::IpAddr::V4(_) => 32,
+            std::net::IpAddr::V6(_) => 128,
+        };
+        if prefix_len > max_prefix {
+            return Err(crate::CatError::InvalidClaimValue(format!(
+                "Prefix length {prefix_len} exceeds max {max_prefix}"
+            )));
+        }
+        Ok(Self::IpPrefix(addr, prefix_len))
+    }
+
     pub fn validate(&self) -> Result<(), crate::CatError> {
         match self {
-            NetworkIdentifier::IpAddress(ip) => {
-                // Validate IPv4 or IPv6 address
-                if ip.parse::<std::net::IpAddr>().is_err() {
+            NetworkIdentifier::IpAddress(_) => Ok(()),
+            NetworkIdentifier::IpPrefix(addr, prefix_len) => {
+                let max_prefix = match addr {
+                    std::net::IpAddr::V4(_) => 32,
+                    std::net::IpAddr::V6(_) => 128,
+                };
+                if *prefix_len > max_prefix {
                     return Err(crate::CatError::InvalidClaimValue(format!(
-                        "Invalid IP address: {}",
-                        ip
+                        "Prefix length {} exceeds max {max_prefix}",
+                        prefix_len
                     )));
                 }
+                Ok(())
             }
-            NetworkIdentifier::IpRange(range) => {
-                // Validate CIDR notation (e.g., "192.168.1.0/24" or "2001:db8::/32")
-                let parts: Vec<&str> = range.split('/').collect();
-                if parts.len() != 2 {
-                    return Err(crate::CatError::InvalidClaimValue(format!(
-                        "Invalid IP range format (expected CIDR): {}",
-                        range
-                    )));
-                }
-                if parts[0].parse::<std::net::IpAddr>().is_err() {
-                    return Err(crate::CatError::InvalidClaimValue(format!(
-                        "Invalid IP address in range: {}",
-                        parts[0]
-                    )));
-                }
-                let prefix_len: u8 = parts[1].parse().map_err(|_| {
-                    crate::CatError::InvalidClaimValue(format!(
-                        "Invalid prefix length in range: {}",
-                        parts[1]
-                    ))
-                })?;
-                // Validate prefix length based on IP version
-                let max_prefix = if parts[0].contains(':') { 128 } else { 32 };
-                if prefix_len > max_prefix {
-                    return Err(crate::CatError::InvalidClaimValue(format!(
-                        "Prefix length {} exceeds maximum {} for IP version",
-                        prefix_len, max_prefix
-                    )));
-                }
-            }
-            NetworkIdentifier::Asn(_) => {
-                // ASN is a u32, so already valid by type
-            }
+            NetworkIdentifier::Asn(_) => Ok(()),
             NetworkIdentifier::AsnRange(start, end) => {
                 if start > end {
                     return Err(crate::CatError::InvalidClaimValue(format!(
-                        "Invalid ASN range: start ({}) > end ({})",
-                        start, end
+                        "Invalid ASN range: start ({start}) > end ({end})"
                     )));
                 }
-                // Warn about overly broad ASN ranges
-                // Maximum reasonable range is 65536 (one /16 worth of ASNs)
                 const MAX_REASONABLE_ASN_RANGE: u32 = 65536;
                 let range_size = end.saturating_sub(*start);
                 if range_size > MAX_REASONABLE_ASN_RANGE {
                     return Err(crate::CatError::InvalidClaimValue(format!(
-                        "ASN range too broad: {} ASNs (max {} for meaningful network restriction)",
-                        range_size, MAX_REASONABLE_ASN_RANGE
+                        "ASN range too broad: {range_size} ASNs (max {MAX_REASONABLE_ASN_RANGE})"
                     )));
                 }
+                Ok(())
             }
         }
-        Ok(())
     }
 }
 
@@ -993,7 +993,7 @@ impl CatToken {
     }
 
     pub fn with_ip_address(mut self, ip: impl Into<String>) -> Self {
-        let nip = NetworkIdentifier::IpAddress(ip.into());
+        let nip = NetworkIdentifier::from_ip_str(&ip.into()).expect("invalid IP address");
         if let Some(ref mut nips) = self.cat.catnip {
             nips.push(nip);
         } else {
@@ -1003,7 +1003,7 @@ impl CatToken {
     }
 
     pub fn with_ip_range(mut self, range: impl Into<String>) -> Self {
-        let nip = NetworkIdentifier::IpRange(range.into());
+        let nip = NetworkIdentifier::from_cidr_str(&range.into()).expect("invalid CIDR range");
         if let Some(ref mut nips) = self.cat.catnip {
             nips.push(nip);
         } else {

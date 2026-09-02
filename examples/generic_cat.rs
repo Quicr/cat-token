@@ -47,8 +47,8 @@ fn main() {
         .subject("service-account-xyz")
         .expires_at(Utc::now() + Duration::hours(1))
         .network_identifiers(vec![
-            NetworkIdentifier::IpRange("10.0.0.0/8".to_string()),
-            NetworkIdentifier::IpRange("192.168.0.0/16".to_string()),
+            NetworkIdentifier::IpPrefix("10.0.0.0".parse().unwrap(), 8),
+            NetworkIdentifier::IpPrefix("192.168.0.0".parse().unwrap(), 16),
             NetworkIdentifier::Asn(64512),
         ])
         .uri_patterns(vec![
