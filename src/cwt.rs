@@ -63,16 +63,26 @@ impl Cwt {
             claims_map.insert(CLAIM_CTI, Value::Bytes(cti.as_bytes().to_vec()));
         }
 
-        if let Some(ref catreplay) = self.payload.cat.catreplay {
-            claims_map.insert(CLAIM_CATREPLAY, Value::Text(catreplay.clone()));
+        if let Some(catreplay) = self.payload.cat.catreplay {
+            claims_map.insert(
+                CLAIM_CATREPLAY,
+                Value::Integer((catreplay as u32).into()),
+            );
         }
 
-        if let Some(catpor) = self.payload.cat.catpor {
-            claims_map.insert(CLAIM_CATPOR, Value::Bool(catpor));
+        if let Some(ref catpor) = self.payload.cat.catpor {
+            let mut arr = vec![
+                Value::Float(catpor.probability),
+                Value::Bytes(catpor.id.clone()),
+            ];
+            if let Some(exp) = catpor.expiration {
+                arr.push(Value::Integer(exp.into()));
+            }
+            claims_map.insert(CLAIM_CATPOR, Value::Array(arr));
         }
 
-        if let Some(ref catv) = self.payload.cat.catv {
-            claims_map.insert(CLAIM_CATV, Value::Text(catv.clone()));
+        if let Some(catv) = self.payload.cat.catv {
+            claims_map.insert(CLAIM_CATV, Value::Integer(catv.into()));
         }
 
         if let Some(ref catnip) = self.payload.cat.catnip {
@@ -105,7 +115,8 @@ impl Cwt {
         }
 
         if let Some(ref catm) = self.payload.cat.catm {
-            claims_map.insert(CLAIM_CATM, Value::Text(catm.clone()));
+            let methods: Vec<Value> = catm.iter().map(|m| Value::Text(m.clone())).collect();
+            claims_map.insert(CLAIM_CATM, Value::Array(methods));
         }
 
         if let Some(ref catalpn) = self.payload.cat.catalpn {
@@ -167,12 +178,18 @@ impl Cwt {
             claims_map.insert(CLAIM_GEOHASH, Value::Text(geohash.clone()));
         }
 
-        if let Some(catgeoalt) = self.payload.cat.catgeoalt {
-            claims_map.insert(CLAIM_CATGEOALT, Value::Integer(catgeoalt.into()));
+        if let Some(ref catgeoalt) = self.payload.cat.catgeoalt {
+            claims_map.insert(
+                CLAIM_CATGEOALT,
+                Value::Array(vec![
+                    Value::Float(catgeoalt.altitude),
+                    Value::Float(catgeoalt.deviation),
+                ]),
+            );
         }
 
         if let Some(ref cattpk) = self.payload.cat.cattpk {
-            claims_map.insert(CLAIM_CATTPK, Value::Text(cattpk.clone()));
+            claims_map.insert(CLAIM_CATTPK, Value::Bytes(cattpk.clone()));
         }
 
         // Informational claims
@@ -577,18 +594,51 @@ impl Cwt {
                     _ => {}
                 },
                 CLAIM_CATREPLAY => {
-                    if let Value::Text(s) = value {
-                        cat.catreplay = Some(s);
+                    if let Value::Integer(i) = value {
+                        let v: u32 = i
+                            .try_into()
+                            .map_err(|_| CatError::InvalidClaimValue("Invalid catreplay value".to_string()))?;
+                        cat.catreplay =
+                            Some(crate::claims::ReplayProtection::try_from(v)?);
                     }
                 }
                 CLAIM_CATPOR => {
-                    if let Value::Bool(b) = value {
-                        cat.catpor = Some(b);
+                    if let Value::Array(arr) = value {
+                        if arr.len() >= 2 {
+                            let probability = match &arr[0] {
+                                Value::Float(f) => *f,
+                                Value::Integer(i) => {
+                                    let v: i64 = (*i).try_into().map_err(|_| CatError::InvalidTokenFormat)?;
+                                    v as f64
+                                }
+                                _ => return Err(CatError::InvalidClaimValue("Invalid catpor probability".to_string())),
+                            };
+                            let id = match &arr[1] {
+                                Value::Bytes(b) => b.clone(),
+                                _ => return Err(CatError::InvalidClaimValue("Invalid catpor id".to_string())),
+                            };
+                            let expiration = if arr.len() > 2 {
+                                match &arr[2] {
+                                    Value::Integer(i) => Some((*i).try_into().map_err(|_| CatError::InvalidTokenFormat)?),
+                                    _ => None,
+                                }
+                            } else {
+                                None
+                            };
+                            cat.catpor = Some(crate::claims::ProbabilityOfRejection {
+                                probability,
+                                id,
+                                expiration,
+                            });
+                        }
                     }
                 }
                 CLAIM_CATV => {
-                    if let Value::Text(s) = value {
-                        cat.catv = Some(s);
+                    if let Value::Integer(i) = value {
+                        cat.catv = Some(
+                            i.try_into()
+                                .map_err(|_| CatError::InvalidClaimValue("Invalid catv value".to_string()))?,
+                        );
                     }
                 }
                 CLAIM_CATNIP => {
@@ -652,8 +702,14 @@ impl Cwt {
                     }
                 }
                 CLAIM_CATM => {
-                    if let Value::Text(s) = value {
-                        cat.catm = Some(s);
+                    if let Value::Array(arr) = value {
+                        let mut methods = Vec::new();
+                        for item in arr {
+                            if let Value::Text(s) = item {
+                                methods.push(s);
+                            }
+                        }
+                        cat.catm = Some(methods);
                     }
                 }
                 CLAIM_CATALPN => {
@@ -752,14 +808,31 @@ impl Cwt {
                     }
                 }
                 CLAIM_CATGEOALT => {
-                    if let Value::Integer(i) = value {
-                        cat.catgeoalt =
-                            Some(i.try_into().map_err(|_| CatError::InvalidTokenFormat)?);
+                    if let Value::Array(arr) = value {
+                        if arr.len() == 2 {
+                            let altitude = match &arr[0] {
+                                Value::Float(f) => *f,
+                                Value::Integer(i) => {
+                                    let v: i64 = (*i).try_into().map_err(|_| CatError::InvalidTokenFormat)?;
+                                    v as f64
+                                }
+                                _ => return Err(CatError::InvalidClaimValue("Invalid catgeoalt altitude".to_string())),
+                            };
+                            let deviation = match &arr[1] {
+                                Value::Float(f) => *f,
+                                Value::Integer(i) => {
+                                    let v: i64 = (*i).try_into().map_err(|_| CatError::InvalidTokenFormat)?;
+                                    v as f64
+                                }
+                                _ => return Err(CatError::InvalidClaimValue("Invalid catgeoalt deviation".to_string())),
+                            };
+                            cat.catgeoalt = Some(crate::claims::GeoAltitude { altitude, deviation });
+                        }
                     }
                 }
                 CLAIM_CATTPK => {
-                    if let Value::Text(s) = value {
-                        cat.cattpk = Some(s);
+                    if let Value::Bytes(b) = value {
+                        cat.cattpk = Some(b);
                     }
                 }
                 CLAIM_SUB => {

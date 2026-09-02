@@ -142,13 +142,13 @@ fn generate_cbor_encoding_vectors() -> JsonValue {
 
     // 1.3: CAT version and usage limit
     {
-        let token = CatToken::new().with_version("CAT-v1").with_usage_limit(5);
+        let token = CatToken::new().with_version(1).with_usage_limit(5);
         let cwt = Cwt::new(ALG_HMAC256_256, token);
         let payload_cbor = cwt.encode_payload().unwrap();
         vectors.push(json!({
             "id": "cbor_cat_version_usage",
-            "description": "CAT version string and usage limit",
-            "claims": {"catv": "CAT-v1", "catu": 5},
+            "description": "CAT version (uint 1) and usage limit",
+            "claims": {"catv": 1, "catu": 5},
             "payload_cbor_hex": hex::encode(&payload_cbor),
         }));
     }
@@ -184,7 +184,10 @@ fn generate_cbor_encoding_vectors() -> JsonValue {
             .with_geohash("9q8yyk");
         let mut token = token;
         token.cat.catgeoiso3166 = Some(vec!["US".to_string(), "CA".to_string()]);
-        token.cat.catgeoalt = Some(10);
+        token.cat.catgeoalt = Some(cat_token::GeoAltitude {
+            altitude: 10.0,
+            deviation: 5.0,
+        });
 
         let cwt = Cwt::new(ALG_HMAC256_256, token);
         let payload_cbor = cwt.encode_payload().unwrap();
@@ -291,7 +294,7 @@ fn generate_token_structure_vectors() -> JsonValue {
                 "https://relay2.example.com".to_string(),
             ])
             .with_cwt_id("vector-002")
-            .with_version("CAT-v1")
+            .with_version(1)
             .with_usage_limit(10)
             .with_subject("user:alice@example.com")
             .with_ip_address("203.0.113.50");

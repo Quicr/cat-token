@@ -30,10 +30,9 @@ fn test_comprehensive_token_creation() {
         .not_before(now)
         .cwt_id("token-12345")
         // CAT claims
-        .version("1.2.0")
+        .version(1)
         .usage_limit(500)
-        .replay_protection("nonce-67890")
-        .proof_of_possession(true)
+        .replay_protection(cat_token::ReplayProtection::Prohibited)
         .geo_coordinate(40.7128, -74.0060, Some(100.0)) // New York City
         .geohash("dr5regw")
         .uri_patterns(uri_patterns.clone())
@@ -62,10 +61,9 @@ fn test_comprehensive_token_creation() {
     );
     assert_eq!(token.core.cti, Some("token-12345".to_string()));
 
-    assert_eq!(token.cat.catv, Some("1.2.0".to_string()));
+    assert_eq!(token.cat.catv, Some(1));
     assert_eq!(token.cat.catu, Some(500));
-    assert_eq!(token.cat.catreplay, Some("nonce-67890".to_string()));
-    assert_eq!(token.cat.catpor, Some(true));
+    assert_eq!(token.cat.catreplay, Some(cat_token::ReplayProtection::Prohibited));
     assert_eq!(token.cat.geohash, Some("dr5regw".to_string()));
     assert_eq!(token.cat.cath.as_ref().unwrap().len(), 5);
 
@@ -206,7 +204,7 @@ fn test_cwt_encoding_decoding() {
         .with_issuer("https://test.issuer.com")
         .with_audience(vec!["test-client".to_string()])
         .with_expiration(now + chrono::Duration::hours(1))
-        .with_version("1.0")
+        .with_version(1)
         .with_subject("test-user")
         .with_confirmation(b"test-confirmation".to_vec())
         .with_interface_claim("test-interface");
@@ -369,10 +367,9 @@ fn test_maximal_token() {
         .with_not_before(now - chrono::Duration::minutes(5))
         .with_cwt_id("maximal-token-id")
         // All CAT claims
-        .with_version("2.1.0")
+        .with_version(1)
         .with_usage_limit(1000)
-        .with_replay_protection("max-nonce")
-        .with_proof_of_possession(true)
+        .with_replay_protection(cat_token::ReplayProtection::Prohibited)
         .with_geo_coordinate(51.5074, -0.1278, Some(25.0)) // London
         .with_geohash("gcpvj0du")
         .with_uri_patterns(vec![
@@ -404,7 +401,6 @@ fn test_maximal_token() {
     assert!(token.cat.catv.is_some());
     assert!(token.cat.catu.is_some());
     assert!(token.cat.catreplay.is_some());
-    assert!(token.cat.catpor.is_some());
     assert!(token.cat.catgeocoord.is_some());
     assert!(token.cat.geohash.is_some());
     assert!(token.cat.cath.is_some());

@@ -41,17 +41,15 @@ fn test_core_claims() {
 #[test]
 fn test_cat_claims() {
     let token = CatToken::new()
-        .with_version("1.0")
+        .with_version(1)
         .with_usage_limit(100)
-        .with_replay_protection("nonce-12345")
-        .with_proof_of_possession(true)
+        .with_replay_protection(cat_token::ReplayProtection::Prohibited)
         .with_geo_coordinate(37.7749, -122.4194, Some(10.0))
         .with_geohash("9q8yy");
 
-    assert_eq!(token.cat.catv, Some("1.0".to_string()));
+    assert_eq!(token.cat.catv, Some(1));
     assert_eq!(token.cat.catu, Some(100));
-    assert_eq!(token.cat.catreplay, Some("nonce-12345".to_string()));
-    assert_eq!(token.cat.catpor, Some(true));
+    assert_eq!(token.cat.catreplay, Some(cat_token::ReplayProtection::Prohibited));
 
     assert!(token.cat.catgeocoord.is_some());
     let coords = token.cat.catgeocoord.unwrap();
@@ -122,14 +120,14 @@ fn test_token_builder() {
         .issuer("https://auth.example.com")
         .audience(vec!["client1".to_string()])
         .expires_at(Utc::now() + chrono::Duration::hours(2))
-        .version("2.0")
+        .version(1)
         .subject("user456")
         .confirmation(jkt.clone())
         .interface_claim("if789")
         .build();
 
     assert_eq!(token.core.iss, Some("https://auth.example.com".to_string()));
-    assert_eq!(token.cat.catv, Some("2.0".to_string()));
+    assert_eq!(token.cat.catv, Some(1));
     assert_eq!(token.informational.sub, Some("user456".to_string()));
     assert!(token.dpop.cnf.is_some());
     assert_eq!(token.dpop.cnf.as_ref().unwrap().jkt, jkt);

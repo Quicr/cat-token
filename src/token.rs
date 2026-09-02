@@ -230,7 +230,7 @@ impl CatTokenBuilder {
         self
     }
 
-    pub fn version(mut self, version: impl Into<String>) -> Self {
+    pub fn version(mut self, version: u32) -> Self {
         self.inner = self.inner.with_version(version);
         self
     }
@@ -240,13 +240,20 @@ impl CatTokenBuilder {
         self
     }
 
-    pub fn replay_protection(mut self, nonce: impl Into<String>) -> Self {
-        self.inner = self.inner.with_replay_protection(nonce);
+    pub fn replay_protection(mut self, mode: crate::claims::ReplayProtection) -> Self {
+        self.inner = self.inner.with_replay_protection(mode);
         self
     }
 
-    pub fn proof_of_possession(mut self, enabled: bool) -> Self {
-        self.inner = self.inner.with_proof_of_possession(enabled);
+    pub fn probability_of_rejection(
+        mut self,
+        probability: f64,
+        id: Vec<u8>,
+        expiration: Option<i64>,
+    ) -> Self {
+        self.inner =
+            self.inner
+                .with_probability_of_rejection(probability, id, expiration);
         self
     }
 

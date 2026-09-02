@@ -15,10 +15,9 @@ fn test_cat_token_creation() {
         .expires_at(exp)
         .not_before(now)
         .cwt_id("test-token-id")
-        .version("1.0")
+        .version(1)
         .usage_limit(100)
-        .replay_protection("nonce-12345")
-        .proof_of_possession(true)
+        .replay_protection(cat_token::ReplayProtection::Prohibited)
         .geo_coordinate(37.7749, -122.4194, Some(100.0))
         .geohash("9q8yy")
         .build();
@@ -29,10 +28,9 @@ fn test_cat_token_creation() {
         Some(vec!["https://api.example.com".to_string()])
     );
     assert_eq!(token.core.cti, Some("test-token-id".to_string()));
-    assert_eq!(token.cat.catv, Some("1.0".to_string()));
+    assert_eq!(token.cat.catv, Some(1));
     assert_eq!(token.cat.catu, Some(100));
-    assert_eq!(token.cat.catreplay, Some("nonce-12345".to_string()));
-    assert_eq!(token.cat.catpor, Some(true));
+    assert_eq!(token.cat.catreplay, Some(cat_token::ReplayProtection::Prohibited));
     assert_eq!(token.cat.geohash, Some("9q8yy".to_string()));
 
     if let Some(coords) = &token.cat.catgeocoord {
@@ -57,7 +55,7 @@ fn test_hmac_token_encoding_decoding() {
         .audience(vec!["https://api.test.com".to_string()])
         .expires_at(exp)
         .cwt_id("test-hmac-token")
-        .version("1.0")
+        .version(1)
         .build();
 
     let encoded = encode_token(&token, &algorithm).unwrap();
@@ -83,7 +81,7 @@ fn test_es256_token_encoding_decoding() {
         .audience(vec!["https://api.test.com".to_string()])
         .expires_at(exp)
         .cwt_id("test-es256-token")
-        .version("1.0")
+        .version(1)
         .build();
 
     let encoded = encode_token(&token, &algorithm).unwrap();
@@ -109,7 +107,7 @@ fn test_ps256_token_encoding_decoding() {
         .audience(vec!["https://api.test.com".to_string()])
         .expires_at(exp)
         .cwt_id("test-ps256-token")
-        .version("1.0")
+        .version(1)
         .build();
 
     let encoded = encode_token(&token, &algorithm).unwrap();
@@ -134,7 +132,7 @@ fn test_token_validation_success() {
         .expires_at(exp)
         .not_before(now)
         .cwt_id("valid-token")
-        .version("1.0")
+        .version(1)
         .geo_coordinate(40.7128, -74.0060, Some(50.0))
         .geohash("dr5reg")
         .build();
@@ -240,10 +238,9 @@ fn test_cwt_payload_encoding_decoding() {
         .expires_at(exp)
         .not_before(now)
         .cwt_id("test-payload")
-        .version("1.0")
+        .version(1)
         .usage_limit(50)
-        .replay_protection("test-nonce")
-        .proof_of_possession(false)
+        .replay_protection(cat_token::ReplayProtection::Prohibited)
         .geo_coordinate(51.5074, -0.1278, None)
         .geohash("gcpvj")
         .build();
@@ -258,7 +255,6 @@ fn test_cwt_payload_encoding_decoding() {
     assert_eq!(decoded_token.cat.catv, token.cat.catv);
     assert_eq!(decoded_token.cat.catu, token.cat.catu);
     assert_eq!(decoded_token.cat.catreplay, token.cat.catreplay);
-    assert_eq!(decoded_token.cat.catpor, token.cat.catpor);
     assert_eq!(decoded_token.cat.geohash, token.cat.geohash);
 
     if let (Some(orig_coords), Some(decoded_coords)) =
@@ -281,15 +277,15 @@ fn test_all_cat_claims() {
             cti: Some("unique-token-id".to_string()),
         },
         cat: CatClaims {
-            catreplay: Some("replay-nonce".to_string()),
-            catpor: Some(true),
-            catv: Some("2.1".to_string()),
+            catreplay: Some(cat_token::ReplayProtection::Prohibited),
+            catpor: None,
+            catv: Some(1),
             catnip: Some(vec![
                 NetworkIdentifier::IpRange("192.168.1.0/24".to_string()),
                 NetworkIdentifier::IpRange("10.0.0.0/8".to_string()),
             ]),
             catu: Some(999),
-            catm: Some("GET,POST".to_string()),
+            catm: Some(vec!["GET".to_string(), "POST".to_string()]),
             catalpn: Some(vec!["h2".to_string(), "http/1.1".to_string()]),
             cath: Some(vec![
                 UriPattern::Exact("api.example.com".to_string()),
@@ -302,8 +298,8 @@ fn test_all_cat_claims() {
                 accuracy: Some(25.5),
             }),
             geohash: Some("9q5ct".to_string()),
-            catgeoalt: Some(100),
-            cattpk: Some("thumbprint-data".to_string()),
+            catgeoalt: Some(cat_token::GeoAltitude { altitude: 100.0, deviation: 10.0 }),
+            cattpk: Some(b"thumbprint-data".to_vec()),
         },
         informational: InformationalClaims {
             sub: None,
@@ -339,7 +335,6 @@ fn test_all_cat_claims() {
 
     // Verify all CAT claims
     assert_eq!(decoded_token.cat.catreplay, token.cat.catreplay);
-    assert_eq!(decoded_token.cat.catpor, token.cat.catpor);
     assert_eq!(decoded_token.cat.catv, token.cat.catv);
     assert_eq!(decoded_token.cat.catnip, token.cat.catnip);
     assert_eq!(decoded_token.cat.catu, token.cat.catu);

@@ -38,11 +38,11 @@
         {
           "claims": {
             "catu": 5,
-            "catv": "CAT-v1"
+            "catv": 1
           },
-          "description": "CAT version string and usage limit",
+          "description": "CAT version (uint 1) and usage limit",
           "id": "cbor_cat_version_usage",
-          "payload_cbor_hex": "a2190136664341542d763119013805"
+          "payload_cbor_hex": "a21901360119013805"
         },
         {
           "claims": {
@@ -88,7 +88,7 @@
           },
           "description": "Geographic claims: coordinates, geohash, ISO 3166, altitude",
           "id": "cbor_geographic_claims",
-          "payload_cbor_hex": "a419011a6639713879796b19013c8262555362434119013da3636c6174fb4042e32fec56d5d0636c6f6efbc05e9ad77318fc50686163637572616379f9564019013e0a"
+          "payload_cbor_hex": "a419011a6639713879796b19013c8262555362434119013da3636c6174fb4042e32fec56d5d0636c6f6efbc05e9ad77318fc50686163637572616379f9564019013e82f94900f94500"
         },
         {
           "claims": {
@@ -570,11 +570,11 @@
           "header_cbor_hex": "a201051063434154",
           "id": "token_hmac_full",
           "key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
-          "payload_b64": "qgF4Gmh0dHBzOi8vaXNzdWVyLm1vcS5leGFtcGxlAnZ1c2VyOmFsaWNlQGV4YW1wbGUuY29tA4J4Gmh0dHBzOi8vcmVsYXkxLmV4YW1wbGUuY29teBpodHRwczovL3JlbGF5Mi5leGFtcGxlLmNvbQQaZVVCgAUaZVPxAAYaZVPxAAdKdmVjdG9yLTAwMhkBNmZDQVQtdjEZATeBbDIwMy4wLjExMy41MBkBOAo",
-          "payload_cbor_hex": "aa01781a68747470733a2f2f6973737565722e6d6f712e6578616d706c650276757365723a616c696365406578616d706c652e636f6d0382781a68747470733a2f2f72656c6179312e6578616d706c652e636f6d781a68747470733a2f2f72656c6179322e6578616d706c652e636f6d041a65554280051a6553f100061a6553f100074a766563746f722d303032190136664341542d7631190137816c3230332e302e3131332e35301901380a",
-          "signature_b64": "OKtx62S68ZLUNUrbdFYoWrzxQ7wXA9uuMNxpdqujSp4",
-          "signature_hex": "38ab71eb64baf192d4354adb7456285abcf143bc1703dbae30dc6976aba34a9e",
-          "token": "ogEFEGNDQVQ.qgF4Gmh0dHBzOi8vaXNzdWVyLm1vcS5leGFtcGxlAnZ1c2VyOmFsaWNlQGV4YW1wbGUuY29tA4J4Gmh0dHBzOi8vcmVsYXkxLmV4YW1wbGUuY29teBpodHRwczovL3JlbGF5Mi5leGFtcGxlLmNvbQQaZVVCgAUaZVPxAAYaZVPxAAdKdmVjdG9yLTAwMhkBNmZDQVQtdjEZATeBbDIwMy4wLjExMy41MBkBOAo.OKtx62S68ZLUNUrbdFYoWrzxQ7wXA9uuMNxpdqujSp4",
+          "payload_b64": "qgF4Gmh0dHBzOi8vaXNzdWVyLm1vcS5leGFtcGxlAnZ1c2VyOmFsaWNlQGV4YW1wbGUuY29tA4J4Gmh0dHBzOi8vcmVsYXkxLmV4YW1wbGUuY29teBpodHRwczovL3JlbGF5Mi5leGFtcGxlLmNvbQQaZVVCgAUaZVPxAAYaZVPxAAdKdmVjdG9yLTAwMhkBNgEZATeBbDIwMy4wLjExMy41MBkBOAo",
+          "payload_cbor_hex": "aa01781a68747470733a2f2f6973737565722e6d6f712e6578616d706c650276757365723a616c696365406578616d706c652e636f6d0382781a68747470733a2f2f72656c6179312e6578616d706c652e636f6d781a68747470733a2f2f72656c6179322e6578616d706c652e636f6d041a65554280051a6553f100061a6553f100074a766563746f722d30303219013601190137816c3230332e302e3131332e35301901380a",
+          "signature_b64": "xoDEYNChDf_MrNQrEQR1JPhuCkxr_SEIjZPDmm0gYIw",
+          "signature_hex": "c680c460d0a10dffccacd42b11047524f86e0a4c6bfd21088d93c39a6d20608c",
+          "token": "ogEFEGNDQVQ.qgF4Gmh0dHBzOi8vaXNzdWVyLm1vcS5leGFtcGxlAnZ1c2VyOmFsaWNlQGV4YW1wbGUuY29tA4J4Gmh0dHBzOi8vcmVsYXkxLmV4YW1wbGUuY29teBpodHRwczovL3JlbGF5Mi5leGFtcGxlLmNvbQQaZVVCgAUaZVPxAAYaZVPxAAdKdmVjdG9yLTAwMhkBNgEZATeBbDIwMy4wLjExMy41MBkBOAo.xoDEYNChDf_MrNQrEQR1JPhuCkxr_SEIjZPDmm0gYIw",
           "valid": true
         },
         {

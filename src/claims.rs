@@ -67,21 +67,56 @@ pub struct CoreClaims {
     pub cti: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(u32)]
+pub enum ReplayProtection {
+    Permitted = 0,
+    Prohibited = 1,
+    ReuseDetection = 2,
+}
+
+impl TryFrom<u32> for ReplayProtection {
+    type Error = crate::CatError;
+    fn try_from(v: u32) -> Result<Self, Self::Error> {
+        match v {
+            0 => Ok(Self::Permitted),
+            1 => Ok(Self::Prohibited),
+            2 => Ok(Self::ReuseDetection),
+            _ => Err(crate::CatError::InvalidClaimValue(format!(
+                "Invalid catreplay value: {v}"
+            ))),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProbabilityOfRejection {
+    pub probability: f64,
+    pub id: Vec<u8>,
+    pub expiration: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GeoAltitude {
+    pub altitude: f64,
+    pub deviation: f64,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CatClaims {
-    pub catreplay: Option<String>,
-    pub catpor: Option<bool>,
-    pub catv: Option<String>,
+    pub catreplay: Option<ReplayProtection>,
+    pub catpor: Option<ProbabilityOfRejection>,
+    pub catv: Option<u32>,
     pub catnip: Option<Vec<NetworkIdentifier>>,
     pub catu: Option<u32>,
-    pub catm: Option<String>,
+    pub catm: Option<Vec<String>>,
     pub catalpn: Option<Vec<String>>,
     pub cath: Option<Vec<UriPattern>>,
     pub catgeoiso3166: Option<Vec<String>>,
     pub catgeocoord: Option<GeoCoordinate>,
     pub geohash: Option<String>,
-    pub catgeoalt: Option<i32>,
-    pub cattpk: Option<String>,
+    pub catgeoalt: Option<GeoAltitude>,
+    pub cattpk: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -867,8 +902,8 @@ impl CatToken {
         self
     }
 
-    pub fn with_version(mut self, version: impl Into<String>) -> Self {
-        self.cat.catv = Some(version.into());
+    pub fn with_version(mut self, version: u32) -> Self {
+        self.cat.catv = Some(version);
         self
     }
 
@@ -877,13 +912,22 @@ impl CatToken {
         self
     }
 
-    pub fn with_replay_protection(mut self, nonce: impl Into<String>) -> Self {
-        self.cat.catreplay = Some(nonce.into());
+    pub fn with_replay_protection(mut self, mode: ReplayProtection) -> Self {
+        self.cat.catreplay = Some(mode);
         self
     }
 
-    pub fn with_proof_of_possession(mut self, enabled: bool) -> Self {
-        self.cat.catpor = Some(enabled);
+    pub fn with_probability_of_rejection(
+        mut self,
+        probability: f64,
+        id: Vec<u8>,
+        expiration: Option<i64>,
+    ) -> Self {
+        self.cat.catpor = Some(ProbabilityOfRejection {
+            probability,
+            id,
+            expiration,
+        });
         self
     }
 

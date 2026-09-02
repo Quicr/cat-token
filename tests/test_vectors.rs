@@ -80,7 +80,7 @@ fn test_vector_cbor_cat_version_usage() {
 
     assert_eq!(v["id"], "cbor_cat_version_usage");
 
-    let token = CatToken::new().with_version("CAT-v1").with_usage_limit(5);
+    let token = CatToken::new().with_version(1).with_usage_limit(5);
     let cwt = Cwt::new(ALG_HMAC256_256, token);
     let payload = cwt.encode_payload().unwrap();
 
@@ -121,7 +121,7 @@ fn test_vector_cbor_geographic_claims() {
         .with_geohash("9q8yyk");
     let mut token = token;
     token.cat.catgeoiso3166 = Some(vec!["US".to_string(), "CA".to_string()]);
-    token.cat.catgeoalt = Some(10);
+    token.cat.catgeoalt = Some(cat_token::GeoAltitude { altitude: 10.0, deviation: 5.0 });
 
     let cwt = Cwt::new(ALG_HMAC256_256, token);
     let payload = cwt.encode_payload().unwrap();
@@ -232,7 +232,7 @@ fn test_vector_token_hmac_full() {
     );
     assert_eq!(decoded.core.aud.as_ref().unwrap().len(), 2);
     assert_eq!(decoded.core.cti.as_deref(), Some("vector-002"));
-    assert_eq!(decoded.cat.catv.as_deref(), Some("CAT-v1"));
+    assert_eq!(decoded.cat.catv, Some(1));
     assert_eq!(decoded.cat.catu, Some(10));
     assert_eq!(
         decoded.informational.sub.as_deref(),

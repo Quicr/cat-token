@@ -186,7 +186,7 @@ fn test_asn_validation_ranges() {
 fn test_mixed_network_identifiers_comprehensive() {
     let token = CatTokenBuilder::new()
         .issuer("https://network.example.com")
-        .version("1.0")
+        .version(1)
         // IPv4 addresses
         .ip_address("192.168.1.1")
         .ip_address("10.0.0.1")
@@ -205,7 +205,7 @@ fn test_mixed_network_identifiers_comprehensive() {
         token.core.iss,
         Some("https://network.example.com".to_string())
     );
-    assert_eq!(token.cat.catv, Some("1.0".to_string()));
+    assert_eq!(token.cat.catv, Some(1));
 
     let nips = token.cat.catnip.unwrap();
     assert_eq!(nips.len(), 8);
