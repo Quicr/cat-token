@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 use crate::CatError;
-use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use hmac::{Hmac, Mac};
 use p256::ecdsa::{Signature, SigningKey, VerifyingKey};
 
@@ -279,10 +278,32 @@ impl CryptographicAlgorithm for Ps256Algorithm {
     }
 }
 
-pub fn create_signing_input(header: &[u8], payload: &[u8]) -> Vec<u8> {
-    let header_b64 = URL_SAFE_NO_PAD.encode(header);
-    let payload_b64 = URL_SAFE_NO_PAD.encode(payload);
-    format!("{}.{}", header_b64, payload_b64).into_bytes()
+pub fn create_signing_input(
+    header_protected: &[u8],
+    payload: &[u8],
+    alg_id: i64,
+) -> Vec<u8> {
+    let context = cose_context_string(alg_id);
+    create_cose_structure(context, header_protected, payload)
+}
+
+fn cose_context_string(alg_id: i64) -> &'static str {
+    match alg_id {
+        ALG_HMAC256_256 => "MAC0",
+        _ => "Signature1",
+    }
+}
+
+fn create_cose_structure(context: &str, body_protected: &[u8], payload: &[u8]) -> Vec<u8> {
+    let structure = ciborium::Value::Array(vec![
+        ciborium::Value::Text(context.to_string()),
+        ciborium::Value::Bytes(body_protected.to_vec()),
+        ciborium::Value::Bytes(vec![]), // external_aad
+        ciborium::Value::Bytes(payload.to_vec()),
+    ]);
+    let mut buf = Vec::new();
+    ciborium::ser::into_writer(&structure, &mut buf).expect("COSE structure serialization");
+    buf
 }
 
 pub fn hash_sha256(data: &[u8]) -> Vec<u8> {

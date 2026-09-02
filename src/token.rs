@@ -404,7 +404,8 @@ pub fn encode_token(
 
     let payload_cbor = cwt.encode_payload()?;
 
-    let signing_input = crate::crypto::create_signing_input(&header_cbor, &payload_cbor);
+    let signing_input =
+        crate::crypto::create_signing_input(&header_cbor, &payload_cbor, algorithm.algorithm_id());
     let signature = algorithm.sign(&signing_input)?;
 
     let header_b64 = URL_SAFE_NO_PAD.encode(&header_cbor);
@@ -450,7 +451,8 @@ pub fn decode_token(
         });
     }
 
-    let signing_input = crate::crypto::create_signing_input(&header_cbor, &payload_cbor);
+    let signing_input =
+        crate::crypto::create_signing_input(&header_cbor, &payload_cbor, algorithm.algorithm_id());
 
     if !algorithm.verify(&signing_input, &signature)? {
         return Err(CatError::SignatureVerificationFailed);
