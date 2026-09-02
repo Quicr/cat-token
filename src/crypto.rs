@@ -17,7 +17,7 @@ use rsa::{RsaPrivateKey, RsaPublicKey};
 use sha2::Sha256;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-pub const ALG_HMAC256_256: i64 = -4;
+pub const ALG_HMAC256_256: i64 = 5;
 pub const ALG_ES256: i64 = -7;
 pub const ALG_PS256: i64 = -37;
 
