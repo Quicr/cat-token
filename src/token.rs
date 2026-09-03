@@ -96,6 +96,14 @@ impl CatTokenValidator {
             }
         }
 
+        if let Some(catv) = token.cat.catv
+            && catv != 1
+        {
+            return Err(CatError::InvalidClaimValue(format!(
+                "Unsupported CAT version: {catv} (only version 1 is supported)"
+            )));
+        }
+
         self.validate_geographic_restrictions(token)?;
         self.validate_usage_limits(token)?;
         self.validate_regex_ere(token)?;

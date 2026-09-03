@@ -80,6 +80,14 @@ fn validate_float(f: f64, claim_name: &str) -> Result<(), CatError> {
     Ok(())
 }
 
+fn encode_number_shortest(f: f64) -> Value {
+    if f.is_finite() && f == f.trunc() && f.abs() < (i64::MAX as f64) {
+        Value::Integer((f as i64).into())
+    } else {
+        Value::Float(f)
+    }
+}
+
 fn encode_match_value(m: &MatchValue) -> (Value, Value) {
     match m {
         MatchValue::Exact(s) => (Value::Integer(MATCH_EXACT.into()), Value::Text(s.clone())),
@@ -331,7 +339,7 @@ impl Cwt {
         if let Some(ref catpor) = self.payload.cat.catpor {
             validate_float(catpor.probability, "catpor.probability")?;
             let mut arr = vec![
-                Value::Float(catpor.probability),
+                encode_number_shortest(catpor.probability),
                 Value::Bytes(catpor.id.clone()),
             ];
             if let Some(exp) = catpor.expiration {
@@ -402,7 +410,7 @@ impl Cwt {
             let zones: Vec<Value> = catgeocoord
                 .iter()
                 .map(|coord| {
-                    let mut zone = vec![Value::Float(coord.lat), Value::Float(coord.lon)];
+                    let mut zone = vec![encode_number_shortest(coord.lat), encode_number_shortest(coord.lon)];
                     if let Some(radius) = coord.radius {
                         zone.push(Value::Integer((radius as i64).into()));
                     }
@@ -427,8 +435,8 @@ impl Cwt {
             claims_map.insert(
                 CLAIM_CATGEOALT,
                 Value::Array(vec![
-                    Value::Float(catgeoalt.altitude),
-                    Value::Float(catgeoalt.deviation),
+                    encode_number_shortest(catgeoalt.altitude),
+                    encode_number_shortest(catgeoalt.deviation),
                 ]),
             );
         }
@@ -600,7 +608,7 @@ impl Cwt {
         #[cfg(feature = "moqt")]
         if let Some(moqt_reval) = self.payload.moqt.moqt_reval {
             validate_float(moqt_reval, "moqt_reval")?;
-            claims_map.insert(CLAIM_MOQT_REVAL, Value::Float(moqt_reval));
+            claims_map.insert(CLAIM_MOQT_REVAL, encode_number_shortest(moqt_reval));
         }
 
         for (key, value) in &self.payload.custom {
@@ -1015,6 +1023,12 @@ impl Cwt {
                 }
                 CLAIM_CATM => {
                     if let Value::Array(arr) = value {
+                        if arr.len() > 50 {
+                            return Err(CatError::InvalidClaimValue(format!(
+                                "catm: too many methods ({}, max 50)",
+                                arr.len()
+                            )));
+                        }
                         let mut methods = Vec::new();
                         for item in arr {
                             if let Value::Text(s) = item {
@@ -1026,6 +1040,12 @@ impl Cwt {
                 }
                 CLAIM_CATALPN => {
                     if let Value::Array(arr) = value {
+                        if arr.len() > 50 {
+                            return Err(CatError::InvalidClaimValue(format!(
+                                "catalpn: too many entries ({}, max 50)",
+                                arr.len()
+                            )));
+                        }
                         let mut alpns = Vec::new();
                         for item in arr {
                             match item {

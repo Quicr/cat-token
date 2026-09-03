@@ -113,7 +113,7 @@ pub struct GeoAltitude {
     pub deviation: f64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct CatClaims {
     pub catreplay: Option<ReplayProtection>,
     pub catpor: Option<ProbabilityOfRejection>,
