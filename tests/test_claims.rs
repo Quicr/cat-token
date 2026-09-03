@@ -97,12 +97,23 @@ fn test_dpop_claims() {
 
 #[test]
 fn test_request_claims() {
+    let action = CatIfAction {
+        status: 401,
+        headers: None,
+        kid: None,
+    };
     let token = CatToken::new()
-        .with_interface_claim("interface123")
-        .with_request_claim("request456");
+        .with_if_action(CLAIM_EXP, action.clone())
+        .with_renewal(CatRenewal::automatic().with_expadd(3600));
 
-    assert_eq!(token.request.catif, Some("interface123".to_string()));
-    assert_eq!(token.request.catr, Some("request456".to_string()));
+    let catif = token.request.catif.unwrap();
+    assert_eq!(catif.len(), 1);
+    assert_eq!(catif[0].0, CLAIM_EXP);
+    assert_eq!(catif[0].1.status, 401);
+
+    let catr = token.request.catr.unwrap();
+    assert_eq!(catr.renewal_type, CatRenewalType::Automatic);
+    assert_eq!(catr.expadd, Some(3600));
 }
 
 #[test]
@@ -147,7 +158,7 @@ fn test_token_builder() {
         .version(1)
         .subject("user456")
         .confirmation(jkt.clone())
-        .interface_claim("if789")
+        .if_action(CLAIM_EXP, CatIfAction { status: 403, headers: None, kid: None })
         .build();
 
     assert_eq!(token.core.iss, Some("https://auth.example.com".to_string()));
@@ -155,7 +166,8 @@ fn test_token_builder() {
     assert_eq!(token.informational.sub, Some("user456".to_string()));
     assert!(token.dpop.cnf.is_some());
     assert_eq!(token.dpop.cnf.as_ref().unwrap().jkt, jkt);
-    assert_eq!(token.request.catif, Some("if789".to_string()));
+    assert!(token.request.catif.is_some());
+    assert_eq!(token.request.catif.unwrap()[0].1.status, 403);
 }
 
 #[test]

@@ -447,11 +447,70 @@ impl Cwt {
 
         // Request claims
         if let Some(ref catif) = self.payload.request.catif {
-            claims_map.insert(CLAIM_CATIF, Value::Text(catif.clone()));
+            let entries: Vec<(Value, Value)> = catif
+                .iter()
+                .map(|(claim_key, action)| {
+                    let mut arr = vec![Value::Integer(action.status.into())];
+                    if let Some(ref headers) = action.headers {
+                        let header_map: Vec<(Value, Value)> = headers
+                            .iter()
+                            .map(|(k, v)| (Value::Text(k.clone()), Value::Text(v.clone())))
+                            .collect();
+                        arr.push(Value::Map(header_map));
+                    }
+                    if let Some(ref kid) = action.kid {
+                        if action.headers.is_none() {
+                            arr.push(Value::Map(vec![]));
+                        }
+                        arr.push(Value::Text(kid.clone()));
+                    }
+                    (Value::Integer((*claim_key).into()), Value::Array(arr))
+                })
+                .collect();
+            claims_map.insert(CLAIM_CATIF, Value::Map(entries));
         }
 
         if let Some(ref catr) = self.payload.request.catr {
-            claims_map.insert(CLAIM_CATR, Value::Text(catr.clone()));
+            let mut renewal_map: Vec<(Value, Value)> = Vec::new();
+            renewal_map.push((
+                Value::Integer(CATR_TYPE.into()),
+                Value::Integer((catr.renewal_type as u32).into()),
+            ));
+            if let Some(expadd) = catr.expadd {
+                renewal_map.push((
+                    Value::Integer(CATR_EXPADD.into()),
+                    Value::Integer(expadd.into()),
+                ));
+            }
+            if let Some(deadline) = catr.deadline {
+                renewal_map.push((
+                    Value::Integer(CATR_DEADLINE.into()),
+                    Value::Integer(deadline.into()),
+                ));
+            }
+            if let Some(ref name) = catr.name {
+                renewal_map.push((
+                    Value::Integer(CATR_NAME.into()),
+                    Value::Text(name.clone()),
+                ));
+            }
+            if let Some(ref params) = catr.params {
+                let param_map: Vec<(Value, Value)> = params
+                    .iter()
+                    .map(|(k, v)| (Value::Text(k.clone()), Value::Text(v.clone())))
+                    .collect();
+                renewal_map.push((
+                    Value::Integer(CATR_PARAMS.into()),
+                    Value::Map(param_map),
+                ));
+            }
+            if let Some(code) = catr.code {
+                renewal_map.push((
+                    Value::Integer(CATR_CODE.into()),
+                    Value::Integer(code.into()),
+                ));
+            }
+            claims_map.insert(CLAIM_CATR, Value::Map(renewal_map));
         }
 
         #[cfg(feature = "moqt")]
@@ -1127,13 +1186,125 @@ impl Cwt {
                     }
                 }
                 CLAIM_CATIF => {
-                    if let Value::Text(s) = value {
-                        request.catif = Some(s);
+                    if let Value::Map(entries) = value {
+                        let mut actions = Vec::new();
+                        for (k, v) in entries {
+                            let claim_key: i64 = match k {
+                                Value::Integer(i) => i.try_into().unwrap_or(0),
+                                _ => continue,
+                            };
+                            if let Value::Array(arr) = v {
+                                if arr.is_empty() {
+                                    continue;
+                                }
+                                let status: u32 = match &arr[0] {
+                                    Value::Integer(i) => (*i).try_into().unwrap_or(0),
+                                    _ => continue,
+                                };
+                                let headers = if arr.len() > 1 {
+                                    if let Value::Map(hmap) = &arr[1] {
+                                        if hmap.is_empty() {
+                                            None
+                                        } else {
+                                            let mut hdrs = Vec::new();
+                                            for (hk, hv) in hmap {
+                                                if let (Value::Text(k), Value::Text(v)) = (hk, hv) {
+                                                    hdrs.push((k.clone(), v.clone()));
+                                                }
+                                            }
+                                            Some(hdrs)
+                                        }
+                                    } else {
+                                        None
+                                    }
+                                } else {
+                                    None
+                                };
+                                let kid = if arr.len() > 2 {
+                                    if let Value::Text(s) = &arr[2] {
+                                        Some(s.clone())
+                                    } else {
+                                        None
+                                    }
+                                } else {
+                                    None
+                                };
+                                actions.push((
+                                    claim_key,
+                                    CatIfAction { status, headers, kid },
+                                ));
+                            }
+                        }
+                        if !actions.is_empty() {
+                            request.catif = Some(actions);
+                        }
                     }
                 }
                 CLAIM_CATR => {
-                    if let Value::Text(s) = value {
-                        request.catr = Some(s);
+                    if let Value::Map(entries) = value {
+                        let mut renewal_type = None;
+                        let mut expadd = None;
+                        let mut deadline = None;
+                        let mut name = None;
+                        let mut params = None;
+                        let mut code = None;
+
+                        for (k, v) in entries {
+                            let key: i64 = match k {
+                                Value::Integer(i) => i.try_into().unwrap_or(-1),
+                                _ => continue,
+                            };
+                            match key {
+                                CATR_TYPE => {
+                                    if let Value::Integer(i) = v {
+                                        let t: u32 = i.try_into().unwrap_or(0);
+                                        renewal_type = CatRenewalType::from_u32(t);
+                                    }
+                                }
+                                CATR_EXPADD => {
+                                    if let Value::Integer(i) = v {
+                                        expadd = Some(i.try_into().unwrap_or(0i64));
+                                    }
+                                }
+                                CATR_DEADLINE => {
+                                    if let Value::Integer(i) = v {
+                                        deadline = Some(i.try_into().unwrap_or(0i64));
+                                    }
+                                }
+                                CATR_NAME => {
+                                    if let Value::Text(s) = v {
+                                        name = Some(s);
+                                    }
+                                }
+                                CATR_PARAMS => {
+                                    if let Value::Map(pmap) = v {
+                                        let mut p = Vec::new();
+                                        for (pk, pv) in pmap {
+                                            if let (Value::Text(k), Value::Text(v)) = (pk, pv) {
+                                                p.push((k, v));
+                                            }
+                                        }
+                                        params = Some(p);
+                                    }
+                                }
+                                CATR_CODE => {
+                                    if let Value::Integer(i) = v {
+                                        code = Some(i.try_into().unwrap_or(0u32));
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                        if let Some(rt) = renewal_type {
+                            request.catr = Some(CatRenewal {
+                                renewal_type: rt,
+                                expadd,
+                                deadline,
+                                name,
+                                params,
+                                code,
+                            });
+                        }
                     }
                 }
                 #[cfg(feature = "moqt")]

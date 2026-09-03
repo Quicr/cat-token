@@ -307,13 +307,18 @@ impl CatTokenBuilder {
         self
     }
 
-    pub fn interface_claim(mut self, interface: impl Into<String>) -> Self {
-        self.inner = self.inner.with_interface_claim(interface);
+    pub fn if_action(mut self, claim_key: i64, action: crate::claims::CatIfAction) -> Self {
+        self.inner = self.inner.with_if_action(claim_key, action);
         self
     }
 
-    pub fn request_claim(mut self, request: impl Into<String>) -> Self {
-        self.inner = self.inner.with_request_claim(request);
+    pub fn if_actions(mut self, actions: Vec<(i64, crate::claims::CatIfAction)>) -> Self {
+        self.inner = self.inner.with_if_actions(actions);
+        self
+    }
+
+    pub fn renewal(mut self, renewal: crate::claims::CatRenewal) -> Self {
+        self.inner = self.inner.with_renewal(renewal);
         self
     }
 

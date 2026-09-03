@@ -60,8 +60,8 @@ fn test_comprehensive_token_creation() {
         .confirmation(b"jwk-thumbprint-xyz".to_vec())
         .dpop_settings(cat_token::CatDpopSettings::new().with_window(300))
         // Request claims
-        .interface_claim("auth-interface")
-        .request_claim("login-request-abc")
+        .if_action(CLAIM_EXP, CatIfAction { status: 401, headers: None, kid: None })
+        .renewal(CatRenewal::automatic().with_expadd(3600))
         .build();
 
     // Verify all claims are properly set
@@ -104,8 +104,12 @@ fn test_comprehensive_token_creation() {
     assert!(token.dpop.catdpop.is_some());
     assert_eq!(token.dpop.catdpop.as_ref().unwrap().window, Some(300));
 
-    assert_eq!(token.request.catif, Some("auth-interface".to_string()));
-    assert_eq!(token.request.catr, Some("login-request-abc".to_string()));
+    let catif = token.request.catif.as_ref().unwrap();
+    assert_eq!(catif[0].0, CLAIM_EXP);
+    assert_eq!(catif[0].1.status, 401);
+    let catr = token.request.catr.as_ref().unwrap();
+    assert_eq!(catr.renewal_type, CatRenewalType::Automatic);
+    assert_eq!(catr.expadd, Some(3600));
 }
 
 #[test]
@@ -226,7 +230,7 @@ fn test_cwt_encoding_decoding() {
         .with_version(1)
         .with_subject("test-user")
         .with_confirmation(b"test-confirmation".to_vec())
-        .with_interface_claim("test-interface");
+        .with_if_action(CLAIM_EXP, CatIfAction { status: 403, headers: None, kid: None });
 
     let cwt = Cwt::new(-7, original_token.clone()); // ES256 algorithm
 
@@ -426,8 +430,8 @@ fn test_maximal_token() {
                 .with_jti_processing(true),
         )
         // All request claims
-        .with_interface_claim("maximal-interface")
-        .with_request_claim("maximal-request");
+        .with_if_action(CLAIM_EXP, CatIfAction { status: 401, headers: None, kid: None })
+        .with_renewal(CatRenewal::cookie("token").with_expadd(7200));
 
     // Verify all claims are set
     assert!(token.core.iss.is_some());

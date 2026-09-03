@@ -46,6 +46,14 @@ pub const CATDPOP_HONOR_JTI: i64 = 1;
 pub const CLAIM_CATIF: i64 = 322;
 pub const CLAIM_CATR: i64 = 323;
 
+// catr sub-map keys (CTA-5007-B §4.9.2)
+pub const CATR_TYPE: i64 = 0;
+pub const CATR_EXPADD: i64 = 1;
+pub const CATR_DEADLINE: i64 = 2;
+pub const CATR_NAME: i64 = 3;
+pub const CATR_PARAMS: i64 = 4;
+pub const CATR_CODE: i64 = 5;
+
 // Composite Claims (RFC draft-lemmons-cose-composite-claims-01)
 pub const CLAIM_OR: i64 = 324;
 pub const CLAIM_NOR: i64 = 325;
@@ -206,10 +214,124 @@ pub struct DpopClaims {
     pub catdpop: Option<CatDpopSettings>,
 }
 
+/// Per-claim failure action (CTA-5007-B §4.9.1).
+/// When a specific claim fails validation, the action tells the recipient
+/// what HTTP status code, headers, and/or signing key to use in the response.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CatIfAction {
+    pub status: u32,
+    pub headers: Option<Vec<(String, String)>>,
+    pub kid: Option<String>,
+}
+
+/// Renewal type (CTA-5007-B §4.9.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(u32)]
+pub enum CatRenewalType {
+    Automatic = 0,
+    Cookie = 1,
+    Header = 2,
+    Redirect = 3,
+}
+
+impl CatRenewalType {
+    pub fn from_u32(v: u32) -> Option<Self> {
+        match v {
+            0 => Some(Self::Automatic),
+            1 => Some(Self::Cookie),
+            2 => Some(Self::Header),
+            3 => Some(Self::Redirect),
+            _ => None,
+        }
+    }
+}
+
+/// Token renewal parameters (CTA-5007-B §4.9.2).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CatRenewal {
+    pub renewal_type: CatRenewalType,
+    pub expadd: Option<i64>,
+    pub deadline: Option<i64>,
+    pub name: Option<String>,
+    pub params: Option<Vec<(String, String)>>,
+    pub code: Option<u32>,
+}
+
+impl CatRenewal {
+    pub fn automatic() -> Self {
+        Self {
+            renewal_type: CatRenewalType::Automatic,
+            expadd: None,
+            deadline: None,
+            name: None,
+            params: None,
+            code: None,
+        }
+    }
+
+    pub fn cookie(name: impl Into<String>) -> Self {
+        Self {
+            renewal_type: CatRenewalType::Cookie,
+            expadd: None,
+            deadline: None,
+            name: Some(name.into()),
+            params: None,
+            code: None,
+        }
+    }
+
+    pub fn header(name: impl Into<String>) -> Self {
+        Self {
+            renewal_type: CatRenewalType::Header,
+            expadd: None,
+            deadline: None,
+            name: Some(name.into()),
+            params: None,
+            code: None,
+        }
+    }
+
+    pub fn redirect(code: u32) -> Self {
+        Self {
+            renewal_type: CatRenewalType::Redirect,
+            expadd: None,
+            deadline: None,
+            name: None,
+            params: None,
+            code: Some(code),
+        }
+    }
+
+    pub fn with_expadd(mut self, seconds: i64) -> Self {
+        self.expadd = Some(seconds);
+        self
+    }
+
+    pub fn with_deadline(mut self, timestamp: i64) -> Self {
+        self.deadline = Some(timestamp);
+        self
+    }
+
+    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+        self.name = Some(name.into());
+        self
+    }
+
+    pub fn with_params(mut self, params: Vec<(String, String)>) -> Self {
+        self.params = Some(params);
+        self
+    }
+
+    pub fn with_code(mut self, code: u32) -> Self {
+        self.code = Some(code);
+        self
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RequestClaims {
-    pub catif: Option<String>,
-    pub catr: Option<String>,
+    pub catif: Option<Vec<(i64, CatIfAction)>>,
+    pub catr: Option<CatRenewal>,
 }
 
 /// Logical operators for composite claims
@@ -1061,13 +1183,21 @@ impl CatToken {
         self
     }
 
-    pub fn with_interface_claim(mut self, interface: impl Into<String>) -> Self {
-        self.request.catif = Some(interface.into());
+    pub fn with_if_action(mut self, claim_key: i64, action: CatIfAction) -> Self {
+        match self.request.catif {
+            Some(ref mut v) => v.push((claim_key, action)),
+            None => self.request.catif = Some(vec![(claim_key, action)]),
+        }
         self
     }
 
-    pub fn with_request_claim(mut self, request: impl Into<String>) -> Self {
-        self.request.catr = Some(request.into());
+    pub fn with_if_actions(mut self, actions: Vec<(i64, CatIfAction)>) -> Self {
+        self.request.catif = Some(actions);
+        self
+    }
+
+    pub fn with_renewal(mut self, renewal: CatRenewal) -> Self {
+        self.request.catr = Some(renewal);
         self
     }
 
