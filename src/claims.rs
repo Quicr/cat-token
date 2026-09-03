@@ -124,7 +124,7 @@ pub struct CatClaims {
 pub struct InformationalClaims {
     pub sub: Option<String>,
     pub iat: Option<i64>,
-    pub catifdata: Option<String>,
+    pub catifdata: Option<Vec<String>>,
 }
 
 /// Confirmation claim for DPoP key binding.
@@ -1032,7 +1032,16 @@ impl CatToken {
     }
 
     pub fn with_interface_data(mut self, data: impl Into<String>) -> Self {
-        self.informational.catifdata = Some(data.into());
+        let d = data.into();
+        match self.informational.catifdata {
+            Some(ref mut v) => v.push(d),
+            None => self.informational.catifdata = Some(vec![d]),
+        }
+        self
+    }
+
+    pub fn with_interface_data_array(mut self, data: Vec<String>) -> Self {
+        self.informational.catifdata = Some(data);
         self
     }
 

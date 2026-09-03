@@ -375,7 +375,12 @@ impl Cwt {
         }
 
         if let Some(ref catifdata) = self.payload.informational.catifdata {
-            claims_map.insert(CLAIM_CATIFDATA, Value::Text(catifdata.clone()));
+            if catifdata.len() == 1 {
+                claims_map.insert(CLAIM_CATIFDATA, Value::Text(catifdata[0].clone()));
+            } else {
+                let arr: Vec<Value> = catifdata.iter().map(|s| Value::Text(s.clone())).collect();
+                claims_map.insert(CLAIM_CATIFDATA, Value::Array(arr));
+            }
         }
 
         // DPoP claims - cnf is a map with jkt (key 3) containing the JWK thumbprint
@@ -1013,8 +1018,22 @@ impl Cwt {
                     }
                 }
                 CLAIM_CATIFDATA => {
-                    if let Value::Text(s) = value {
-                        informational.catifdata = Some(s);
+                    match value {
+                        Value::Text(s) => {
+                            informational.catifdata = Some(vec![s]);
+                        }
+                        Value::Array(arr) => {
+                            let mut items = Vec::new();
+                            for item in arr {
+                                if let Value::Text(s) = item {
+                                    items.push(s);
+                                }
+                            }
+                            if !items.is_empty() {
+                                informational.catifdata = Some(items);
+                            }
+                        }
+                        _ => {}
                     }
                 }
                 CLAIM_CNF => {

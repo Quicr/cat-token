@@ -78,7 +78,7 @@ fn test_informational_claims() {
     assert_eq!(token.informational.iat, Some(iat.timestamp()));
     assert_eq!(
         token.informational.catifdata,
-        Some("interface-data".to_string())
+        Some(vec!["interface-data".to_string()])
     );
 }
 

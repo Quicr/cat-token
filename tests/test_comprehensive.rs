@@ -93,7 +93,7 @@ fn test_comprehensive_token_creation() {
     assert_eq!(token.informational.iat, Some(iat.timestamp()));
     assert_eq!(
         token.informational.catifdata,
-        Some("mobile-interface-v2".to_string())
+        Some(vec!["mobile-interface-v2".to_string()])
     );
 
     assert!(token.dpop.cnf.is_some());
