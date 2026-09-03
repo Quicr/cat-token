@@ -11,6 +11,7 @@ pub mod jwk;
 pub mod moqt;
 pub mod prelude;
 pub mod token;
+pub mod uri;
 
 // Conditional trie module selection based on features
 // qp-trie takes precedence if both are enabled
@@ -33,3 +34,4 @@ pub use jwk::*;
 #[cfg(feature = "moqt")]
 pub use moqt::*;
 pub use token::*;
+pub use uri::*;
