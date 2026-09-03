@@ -442,11 +442,22 @@ impl Cwt {
 
         // DPoP claims - cnf is a map with jkt (key 3) containing the JWK thumbprint
         if let Some(ref cnf) = self.payload.dpop.cnf {
-            let cnf_map = vec![(
-                Value::Integer(CNF_JKT.into()),
-                Value::Bytes(cnf.jkt.clone()),
-            )];
-            claims_map.insert(CLAIM_CNF, Value::Map(cnf_map));
+            let mut cnf_map = Vec::new();
+            if !cnf.jkt.is_empty() {
+                cnf_map.push((
+                    Value::Integer(CNF_JKT.into()),
+                    Value::Bytes(cnf.jkt.clone()),
+                ));
+            }
+            if let Some(ref ckt) = cnf.ckt {
+                cnf_map.push((
+                    Value::Integer(CNF_CKT.into()),
+                    Value::Bytes(ckt.clone()),
+                ));
+            }
+            if !cnf_map.is_empty() {
+                claims_map.insert(CLAIM_CNF, Value::Map(cnf_map));
+            }
         }
 
         if let Some(ref catdpop) = self.payload.dpop.catdpop {
@@ -1158,18 +1169,29 @@ impl Cwt {
                     }
                 }
                 CLAIM_CNF => {
-                    // cnf is a map with jkt (key 3) containing the JWK thumbprint
                     if let Value::Map(map) = value {
+                        let mut jkt = Vec::new();
+                        let mut ckt = None;
                         for (k, v) in map {
                             if let Value::Integer(key_int) = k {
-                                // Unknown keys (conversion failure) default to -1, which is ignored
                                 let key_val: i64 = key_int.try_into().unwrap_or(-1);
-                                if key_val == CNF_JKT
-                                    && let Value::Bytes(jkt) = v
-                                {
-                                    dpop.cnf = Some(ConfirmationClaim::new(jkt));
+                                match key_val {
+                                    CNF_JKT => {
+                                        if let Value::Bytes(b) = v {
+                                            jkt = b;
+                                        }
+                                    }
+                                    CNF_CKT => {
+                                        if let Value::Bytes(b) = v {
+                                            ckt = Some(b);
+                                        }
+                                    }
+                                    _ => {}
                                 }
                             }
+                        }
+                        if !jkt.is_empty() || ckt.is_some() {
+                            dpop.cnf = Some(ConfirmationClaim { jkt, ckt });
                         }
                     }
                 }

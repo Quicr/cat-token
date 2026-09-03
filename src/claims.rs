@@ -36,6 +36,7 @@ pub const CLAIM_CATDPOP: i64 = 321;
 
 // DPoP sub-claim keys (within cnf map)
 pub const CNF_JKT: i64 = 3; // JWK Thumbprint
+pub const CNF_CKT: i64 = 6; // COSE Key Thumbprint (RFC 9679)
 
 // catdpop sub-claim keys
 pub const CATDPOP_CRIT: i64 = -1;
@@ -135,26 +136,34 @@ pub struct InformationalClaims {
     pub catifdata: Option<Vec<String>>,
 }
 
-/// Confirmation claim for DPoP key binding.
+/// Confirmation claim for key binding (CTA-5007-B §4.8.1).
 ///
-/// The `jkt` field contains a JWK Thumbprint (SHA-256 hash of the public key).
-/// This is not sensitive data - it's derived from the public key and is safe to clone.
+/// Supports both JWK Thumbprint (jkt, key 3) and COSE Key Thumbprint (ckt, key 6, RFC 9679).
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct ConfirmationClaim {
     pub jkt: Vec<u8>,
+    pub ckt: Option<Vec<u8>>,
 }
 
 impl std::fmt::Debug for ConfirmationClaim {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ConfirmationClaim")
-            .field("jkt", &format!("[REDACTED {} bytes]", self.jkt.len()))
-            .finish()
+        let mut d = f.debug_struct("ConfirmationClaim");
+        d.field("jkt", &format!("[REDACTED {} bytes]", self.jkt.len()));
+        if let Some(ref ckt) = self.ckt {
+            d.field("ckt", &format!("[REDACTED {} bytes]", ckt.len()));
+        }
+        d.finish()
     }
 }
 
 impl ConfirmationClaim {
     pub fn new(jkt: Vec<u8>) -> Self {
-        Self { jkt }
+        Self { jkt, ckt: None }
+    }
+
+    pub fn with_ckt(mut self, ckt: Vec<u8>) -> Self {
+        self.ckt = Some(ckt);
+        self
     }
 }
 
@@ -1169,6 +1178,14 @@ impl CatToken {
 
     pub fn with_confirmation(mut self, jkt: Vec<u8>) -> Self {
         self.dpop.cnf = Some(ConfirmationClaim::new(jkt));
+        self
+    }
+
+    pub fn with_cose_key_thumbprint(mut self, ckt: Vec<u8>) -> Self {
+        match self.dpop.cnf {
+            Some(ref mut cnf) => cnf.ckt = Some(ckt),
+            None => self.dpop.cnf = Some(ConfirmationClaim { jkt: Vec::new(), ckt: Some(ckt) }),
+        }
         self
     }
 

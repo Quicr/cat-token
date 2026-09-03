@@ -297,6 +297,11 @@ impl CatTokenBuilder {
         self
     }
 
+    pub fn cose_key_thumbprint(mut self, ckt: Vec<u8>) -> Self {
+        self.inner = self.inner.with_cose_key_thumbprint(ckt);
+        self
+    }
+
     pub fn dpop_settings(mut self, settings: crate::claims::CatDpopSettings) -> Self {
         self.inner = self.inner.with_dpop_settings(settings);
         self
