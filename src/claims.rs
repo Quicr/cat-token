@@ -35,7 +35,8 @@ pub const CLAIM_CNF: i64 = 8;
 pub const CLAIM_CATDPOP: i64 = 321;
 
 // DPoP sub-claim keys (within cnf map)
-pub const CNF_JKT: i64 = 3; // JWK Thumbprint
+pub const CNF_JKT: i64 = 323; // JWK Thumbprint (CTA-5007-B §4.8.1, Annex E.3)
+pub const CNF_JKT_LEGACY: i64 = 3; // Legacy JWK Thumbprint key for backward compatibility
 pub const CNF_CKT: i64 = 6; // COSE Key Thumbprint (RFC 9679)
 
 // catdpop sub-claim keys

@@ -1206,7 +1206,7 @@ impl Cwt {
                             if let Value::Integer(key_int) = k {
                                 let key_val: i64 = key_int.try_into().unwrap_or(-1);
                                 match key_val {
-                                    CNF_JKT => {
+                                    CNF_JKT | CNF_JKT_LEGACY => {
                                         if let Value::Bytes(b) = v {
                                             jkt = b;
                                         }
