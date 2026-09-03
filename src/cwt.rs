@@ -892,16 +892,26 @@ impl Cwt {
                         core.aud = Some(audiences);
                     }
                 }
-                CLAIM_EXP => {
-                    if let Value::Integer(i) = value {
+                CLAIM_EXP => match value {
+                    Value::Integer(i) => {
                         core.exp = Some(i.try_into().map_err(|_| CatError::InvalidTokenFormat)?);
                     }
-                }
-                CLAIM_NBF => {
-                    if let Value::Integer(i) = value {
+                    Value::Float(f) => {
+                        validate_float(f, "exp")?;
+                        core.exp = Some(f as i64);
+                    }
+                    _ => {}
+                },
+                CLAIM_NBF => match value {
+                    Value::Integer(i) => {
                         core.nbf = Some(i.try_into().map_err(|_| CatError::InvalidTokenFormat)?);
                     }
-                }
+                    Value::Float(f) => {
+                        validate_float(f, "nbf")?;
+                        core.nbf = Some(f as i64);
+                    }
+                    _ => {}
+                },
                 CLAIM_CTI => match value {
                     Value::Bytes(b) => {
                         core.cti = Some(b);
@@ -1175,12 +1185,17 @@ impl Cwt {
                         informational.sub = Some(s);
                     }
                 }
-                CLAIM_IAT => {
-                    if let Value::Integer(i) = value {
+                CLAIM_IAT => match value {
+                    Value::Integer(i) => {
                         informational.iat =
                             Some(i.try_into().map_err(|_| CatError::InvalidTokenFormat)?);
                     }
-                }
+                    Value::Float(f) => {
+                        validate_float(f, "iat")?;
+                        informational.iat = Some(f as i64);
+                    }
+                    _ => {}
+                },
                 CLAIM_CATIFDATA => match value {
                     Value::Text(s) => {
                         informational.catifdata = Some(vec![s]);
