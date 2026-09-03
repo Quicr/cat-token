@@ -22,8 +22,9 @@ pub use crate::dpop::{
 pub use crate::error::CatError;
 pub use crate::jwk::Jwk;
 pub use crate::token::{
-    CatTokenBuilder, CatTokenValidator, decode_token, decode_token_base64, encode_token,
-    encode_token_base64,
+    CatPorBlockList, CatTokenBuilder, CatTokenValidator, apply_match_value, decode_token,
+    decode_token_base64, encode_token, encode_token_base64, enforce_catpor, strip_token_from_uri,
+    unfold_header_value, validate_header, validate_method,
 };
 
 // MOQT-specific types (only when moqt feature is enabled)

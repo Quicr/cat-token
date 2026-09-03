@@ -4,7 +4,8 @@
 use crate::{CatError, CatToken, CryptographicAlgorithm, Cwt, CwtHeader, NetworkIdentifier};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, Utc};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::sync::Mutex;
 
 const COSE_TAG_SIGN1: u64 = 18;
 const COSE_TAG_MAC0: u64 = 17;
@@ -218,6 +219,175 @@ impl CatTokenValidator {
         }
 
         Ok(())
+    }
+}
+
+/// Check whether `method` is allowed by the token's `catm` claim.
+/// Case-sensitive comparison per CTA-5007-B §4.6.11.
+pub fn validate_method(token: &CatToken, method: &str) -> Result<(), CatError> {
+    if let Some(ref methods) = token.cat.catm {
+        if !methods.iter().any(|m| m == method) {
+            return Err(CatError::InvalidClaimValue(format!(
+                "Method not allowed: {method}"
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Apply a single `MatchValue` against an input string.
+pub fn apply_match_value(mv: &crate::claims::MatchValue, input: &str) -> bool {
+    use crate::claims::MatchValue;
+    match mv {
+        MatchValue::Exact(s) => input == s,
+        MatchValue::Prefix(s) => input.starts_with(s.as_str()),
+        MatchValue::Suffix(s) => input.ends_with(s.as_str()),
+        MatchValue::Contains(s) => input.contains(s.as_str()),
+        MatchValue::Regex(pattern) => regex::Regex::new(pattern)
+            .map(|re| re.is_match(input))
+            .unwrap_or(false),
+        MatchValue::Sha256(expected) => {
+            use sha2::{Digest, Sha256};
+            let hash = Sha256::digest(input.as_bytes());
+            hash.as_slice() == expected.as_slice()
+        }
+        MatchValue::Sha512_256(expected) => {
+            use sha2::{Digest, Sha512_256};
+            let hash = Sha512_256::digest(input.as_bytes());
+            hash.as_slice() == expected.as_slice()
+        }
+    }
+}
+
+/// Validate an HTTP header against `cath` rules.
+/// Header name comparison is case-insensitive per CTA-5007-B §4.6.13.
+pub fn validate_header(
+    token: &CatToken,
+    name: &str,
+    value: &str,
+) -> Result<(), CatError> {
+    if let Some(ref rules) = token.cat.cath {
+        for rule in rules {
+            if rule.name.eq_ignore_ascii_case(name) {
+                let unfolded = unfold_header_value(value);
+                if !rule.matches.iter().any(|mv| apply_match_value(mv, &unfolded)) {
+                    return Err(CatError::InvalidClaimValue(format!(
+                        "Header '{name}' value does not match any rule"
+                    )));
+                }
+                return Ok(());
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Unfold multi-line header values per RFC 9110 §5.2.
+/// Joins comma-separated values and removes obs-fold (CRLF + whitespace).
+pub fn unfold_header_value(value: &str) -> String {
+    let mut result = String::with_capacity(value.len());
+    let bytes = value.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if i + 2 < bytes.len() && bytes[i] == b'\r' && bytes[i + 1] == b'\n' && (bytes[i + 2] == b' ' || bytes[i + 2] == b'\t') {
+            result.push(' ');
+            i += 3;
+            while i < bytes.len() && (bytes[i] == b' ' || bytes[i] == b'\t') {
+                i += 1;
+            }
+        } else {
+            result.push(bytes[i] as char);
+            i += 1;
+        }
+    }
+    result
+}
+
+/// Strip token query parameters from a URI before matching per CTA-5007-B §4.6.10.
+/// Block list for catpor probability-of-rejection enforcement.
+pub struct CatPorBlockList {
+    entries: Mutex<HashMap<Vec<u8>, Option<i64>>>,
+}
+
+impl CatPorBlockList {
+    pub fn new() -> Self {
+        Self {
+            entries: Mutex::new(HashMap::new()),
+        }
+    }
+
+    pub fn is_blocked(&self, id: &[u8]) -> bool {
+        let entries = self.entries.lock().unwrap();
+        if let Some(exp) = entries.get(id) {
+            if let Some(exp_ts) = exp {
+                Utc::now().timestamp() < *exp_ts
+            } else {
+                true
+            }
+        } else {
+            false
+        }
+    }
+
+    pub fn add(&self, id: Vec<u8>, expiration: Option<i64>) {
+        let mut entries = self.entries.lock().unwrap();
+        entries.insert(id, expiration);
+    }
+}
+
+impl Default for CatPorBlockList {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Enforce the catpor (probability of rejection) claim.
+/// Returns `Err(RejectedByProbability)` if the token should be rejected,
+/// either by random chance or by block list.
+pub fn enforce_catpor(
+    token: &CatToken,
+    block_list: &CatPorBlockList,
+) -> Result<(), CatError> {
+    if let Some(ref catpor) = token.cat.catpor {
+        if block_list.is_blocked(&catpor.id) {
+            return Err(CatError::RejectedByProbability);
+        }
+
+        let random: f64 = {
+            use ring::rand::{SecureRandom, SystemRandom};
+            let rng = SystemRandom::new();
+            let mut buf = [0u8; 8];
+            rng.fill(&mut buf).map_err(|_| CatError::CryptoError("RNG failed".to_string()))?;
+            let val = u64::from_le_bytes(buf);
+            (val as f64) / (u64::MAX as f64)
+        };
+
+        if random < catpor.probability {
+            block_list.add(catpor.id.clone(), catpor.expiration);
+            return Err(CatError::RejectedByProbability);
+        }
+    }
+    Ok(())
+}
+
+pub fn strip_token_from_uri(uri: &str, param_names: &[&str]) -> String {
+    if let Some(qmark) = uri.find('?') {
+        let base = &uri[..qmark];
+        let query = &uri[qmark + 1..];
+        let filtered: Vec<&str> = query
+            .split('&')
+            .filter(|param| {
+                let key = param.split('=').next().unwrap_or("");
+                !param_names.iter().any(|name| key == *name)
+            })
+            .collect();
+        if filtered.is_empty() {
+            base.to_string()
+        } else {
+            format!("{base}?{}", filtered.join("&"))
+        }
+    } else {
+        uri.to_string()
     }
 }
 

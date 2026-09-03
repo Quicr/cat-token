@@ -67,4 +67,10 @@ pub enum CatError {
 
     #[error("Revalidation interval too short")]
     RevalidationIntervalTooShort,
+
+    #[error("Token rejected by probability of rejection")]
+    RejectedByProbability,
+
+    #[error("Method not allowed: {0}")]
+    MethodNotAllowed(String),
 }
