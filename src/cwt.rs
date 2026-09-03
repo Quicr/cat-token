@@ -10,6 +10,40 @@ use std::net::IpAddr;
 
 const CBOR_TAG_IPV4: u64 = 52;
 const CBOR_TAG_IPV6: u64 = 54;
+const CBOR_TAG_CRS: u64 = 279;
+const CRS_WGS84: u64 = 0;
+
+fn unwrap_crs_tag(value: Value) -> Result<Value, CatError> {
+    match value {
+        Value::Tag(tag, inner) if tag == CBOR_TAG_CRS => {
+            if let Value::Array(ref arr) = *inner {
+                if arr.len() == 2 {
+                    let crs_id = match &arr[0] {
+                        Value::Integer(i) => {
+                            let v: u64 = (*i).try_into().unwrap_or(u64::MAX);
+                            v
+                        }
+                        _ => {
+                            return Err(CatError::InvalidClaimValue(
+                                "CRS Wrapper: invalid CRS identifier type".to_string(),
+                            ));
+                        }
+                    };
+                    if crs_id != CRS_WGS84 {
+                        return Err(CatError::InvalidClaimValue(format!(
+                            "Unsupported CRS identifier: {crs_id} (only WGS84/0 is supported)"
+                        )));
+                    }
+                    return Ok(arr[1].clone());
+                }
+            }
+            Err(CatError::InvalidClaimValue(
+                "CRS Wrapper tag 279: expected [crs_id, value]".to_string(),
+            ))
+        }
+        other => Ok(other),
+    }
+}
 
 fn validate_cbor_map_ordering(map: &[(Value, Value)]) -> Result<(), CatError> {
     let mut prev_key: Option<i64> = None;
@@ -998,6 +1032,7 @@ impl Cwt {
                     }
                 }
                 CLAIM_CATGEOCOORD => {
+                    let value = unwrap_crs_tag(value)?;
                     if let Value::Array(zones) = value {
                         let mut coords = Vec::new();
                         for zone in zones {
@@ -1041,6 +1076,7 @@ impl Cwt {
                     }
                 }
                 CLAIM_GEOHASH => {
+                    let value = unwrap_crs_tag(value)?;
                     match value {
                         Value::Text(s) => {
                             cat.geohash = Some(vec![s]);
@@ -1060,6 +1096,7 @@ impl Cwt {
                     }
                 }
                 CLAIM_CATGEOALT => {
+                    let value = unwrap_crs_tag(value)?;
                     if let Value::Array(arr) = value {
                         if arr.len() == 2 {
                             let altitude = match &arr[0] {
