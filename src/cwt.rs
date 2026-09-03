@@ -16,26 +16,26 @@ const CRS_WGS84: u64 = 0;
 fn unwrap_crs_tag(value: Value) -> Result<Value, CatError> {
     match value {
         Value::Tag(tag, inner) if tag == CBOR_TAG_CRS => {
-            if let Value::Array(ref arr) = *inner {
-                if arr.len() == 2 {
-                    let crs_id = match &arr[0] {
-                        Value::Integer(i) => {
-                            let v: u64 = (*i).try_into().unwrap_or(u64::MAX);
-                            v
-                        }
-                        _ => {
-                            return Err(CatError::InvalidClaimValue(
-                                "CRS Wrapper: invalid CRS identifier type".to_string(),
-                            ));
-                        }
-                    };
-                    if crs_id != CRS_WGS84 {
-                        return Err(CatError::InvalidClaimValue(format!(
-                            "Unsupported CRS identifier: {crs_id} (only WGS84/0 is supported)"
-                        )));
+            if let Value::Array(ref arr) = *inner
+                && arr.len() == 2
+            {
+                let crs_id = match &arr[0] {
+                    Value::Integer(i) => {
+                        let v: u64 = (*i).try_into().unwrap_or(u64::MAX);
+                        v
                     }
-                    return Ok(arr[1].clone());
+                    _ => {
+                        return Err(CatError::InvalidClaimValue(
+                            "CRS Wrapper: invalid CRS identifier type".to_string(),
+                        ));
+                    }
+                };
+                if crs_id != CRS_WGS84 {
+                    return Err(CatError::InvalidClaimValue(format!(
+                        "Unsupported CRS identifier: {crs_id} (only WGS84/0 is supported)"
+                    )));
                 }
+                return Ok(arr[1].clone());
             }
             Err(CatError::InvalidClaimValue(
                 "CRS Wrapper tag 279: expected [crs_id, value]".to_string(),
@@ -209,7 +209,7 @@ fn encode_network_identifier(nip: &NetworkIdentifier) -> Value {
 }
 
 fn prefix_byte_count(prefix_len: u8) -> usize {
-    ((prefix_len as usize) + 7) / 8
+    (prefix_len as usize).div_ceil(8)
 }
 
 fn decode_network_identifier(value: &Value) -> Result<NetworkIdentifier, CatError> {
@@ -371,10 +371,7 @@ impl Cwt {
         }
 
         if let Some(ref catnip) = self.payload.cat.catnip {
-            let nip_values: Vec<Value> = catnip
-                .iter()
-                .map(|nip| encode_network_identifier(nip))
-                .collect();
+            let nip_values: Vec<Value> = catnip.iter().map(encode_network_identifier).collect();
             claims_map.insert(CLAIM_CATNIP, Value::Array(nip_values));
         }
 
@@ -383,7 +380,7 @@ impl Cwt {
                 .iter()
                 .map(|rule| {
                     let match_map: Vec<(Value, Value)> =
-                        rule.matches.iter().map(|m| encode_match_value(m)).collect();
+                        rule.matches.iter().map(encode_match_value).collect();
                     (Value::Integer(rule.component.into()), Value::Map(match_map))
                 })
                 .collect();
@@ -405,7 +402,7 @@ impl Cwt {
                 .iter()
                 .map(|rule| {
                     let match_map: Vec<(Value, Value)> =
-                        rule.matches.iter().map(|m| encode_match_value(m)).collect();
+                        rule.matches.iter().map(encode_match_value).collect();
                     (Value::Text(rule.name.clone()), Value::Map(match_map))
                 })
                 .collect();
@@ -974,48 +971,46 @@ impl Cwt {
                 }
                 CLAIM_CATPOR => {
                     reject_unexpected_tag(&value, "catpor")?;
-                    if let Value::Array(arr) = value {
-                        if arr.len() >= 2 {
-                            let probability = match &arr[0] {
-                                Value::Float(f) => *f,
-                                Value::Integer(i) => {
-                                    let v: i64 = (*i)
-                                        .try_into()
-                                        .map_err(|_| CatError::InvalidTokenFormat)?;
-                                    v as f64
-                                }
-                                _ => {
-                                    return Err(CatError::InvalidClaimValue(
-                                        "Invalid catpor probability".to_string(),
-                                    ));
-                                }
-                            };
-                            let id = match &arr[1] {
-                                Value::Bytes(b) => b.clone(),
-                                _ => {
-                                    return Err(CatError::InvalidClaimValue(
-                                        "Invalid catpor id".to_string(),
-                                    ));
-                                }
-                            };
-                            let expiration = if arr.len() > 2 {
-                                match &arr[2] {
-                                    Value::Integer(i) => Some(
-                                        (*i).try_into()
-                                            .map_err(|_| CatError::InvalidTokenFormat)?,
-                                    ),
-                                    _ => None,
-                                }
-                            } else {
-                                None
-                            };
-                            validate_float(probability, "catpor.probability")?;
-                            cat.catpor = Some(crate::claims::ProbabilityOfRejection {
-                                probability,
-                                id,
-                                expiration,
-                            });
-                        }
+                    if let Value::Array(arr) = value
+                        && arr.len() >= 2
+                    {
+                        let probability = match &arr[0] {
+                            Value::Float(f) => *f,
+                            Value::Integer(i) => {
+                                let v: i64 =
+                                    (*i).try_into().map_err(|_| CatError::InvalidTokenFormat)?;
+                                v as f64
+                            }
+                            _ => {
+                                return Err(CatError::InvalidClaimValue(
+                                    "Invalid catpor probability".to_string(),
+                                ));
+                            }
+                        };
+                        let id = match &arr[1] {
+                            Value::Bytes(b) => b.clone(),
+                            _ => {
+                                return Err(CatError::InvalidClaimValue(
+                                    "Invalid catpor id".to_string(),
+                                ));
+                            }
+                        };
+                        let expiration = if arr.len() > 2 {
+                            match &arr[2] {
+                                Value::Integer(i) => Some(
+                                    (*i).try_into().map_err(|_| CatError::InvalidTokenFormat)?,
+                                ),
+                                _ => None,
+                            }
+                        } else {
+                            None
+                        };
+                        validate_float(probability, "catpor.probability")?;
+                        cat.catpor = Some(crate::claims::ProbabilityOfRejection {
+                            probability,
+                            id,
+                            expiration,
+                        });
                     }
                 }
                 CLAIM_CATV => {
@@ -1136,38 +1131,38 @@ impl Cwt {
                     if let Value::Array(zones) = value {
                         let mut coords = Vec::new();
                         for zone in zones {
-                            if let Value::Array(elements) = zone {
-                                if elements.len() >= 2 {
-                                    let lat = match &elements[0] {
-                                        Value::Float(f) => *f,
-                                        Value::Integer(i) => {
-                                            let v: i64 = (*i).try_into().unwrap_or(0);
-                                            v as f64
-                                        }
-                                        _ => continue,
-                                    };
-                                    let lon = match &elements[1] {
-                                        Value::Float(f) => *f,
-                                        Value::Integer(i) => {
-                                            let v: i64 = (*i).try_into().unwrap_or(0);
-                                            v as f64
-                                        }
-                                        _ => continue,
-                                    };
-                                    let radius = if elements.len() > 2 {
-                                        if let Value::Integer(r) = &elements[2] {
-                                            let v: i64 = (*r).try_into().unwrap_or(0);
-                                            Some(v as u32)
-                                        } else {
-                                            None
-                                        }
+                            if let Value::Array(elements) = zone
+                                && elements.len() >= 2
+                            {
+                                let lat = match &elements[0] {
+                                    Value::Float(f) => *f,
+                                    Value::Integer(i) => {
+                                        let v: i64 = (*i).try_into().unwrap_or(0);
+                                        v as f64
+                                    }
+                                    _ => continue,
+                                };
+                                let lon = match &elements[1] {
+                                    Value::Float(f) => *f,
+                                    Value::Integer(i) => {
+                                        let v: i64 = (*i).try_into().unwrap_or(0);
+                                        v as f64
+                                    }
+                                    _ => continue,
+                                };
+                                let radius = if elements.len() > 2 {
+                                    if let Value::Integer(r) = &elements[2] {
+                                        let v: i64 = (*r).try_into().unwrap_or(0);
+                                        Some(v as u32)
                                     } else {
                                         None
-                                    };
-                                    validate_float(lat, "catgeocoord.lat")?;
-                                    validate_float(lon, "catgeocoord.lon")?;
-                                    coords.push(GeoCoordinate { lat, lon, radius });
-                                }
+                                    }
+                                } else {
+                                    None
+                                };
+                                validate_float(lat, "catgeocoord.lat")?;
+                                validate_float(lon, "catgeocoord.lon")?;
+                                coords.push(GeoCoordinate { lat, lon, radius });
                             }
                         }
                         if !coords.is_empty() {
@@ -1197,43 +1192,41 @@ impl Cwt {
                 }
                 CLAIM_CATGEOALT => {
                     let value = unwrap_crs_tag(value)?;
-                    if let Value::Array(arr) = value {
-                        if arr.len() == 2 {
-                            let altitude = match &arr[0] {
-                                Value::Float(f) => *f,
-                                Value::Integer(i) => {
-                                    let v: i64 = (*i)
-                                        .try_into()
-                                        .map_err(|_| CatError::InvalidTokenFormat)?;
-                                    v as f64
-                                }
-                                _ => {
-                                    return Err(CatError::InvalidClaimValue(
-                                        "Invalid catgeoalt altitude".to_string(),
-                                    ));
-                                }
-                            };
-                            let deviation = match &arr[1] {
-                                Value::Float(f) => *f,
-                                Value::Integer(i) => {
-                                    let v: i64 = (*i)
-                                        .try_into()
-                                        .map_err(|_| CatError::InvalidTokenFormat)?;
-                                    v as f64
-                                }
-                                _ => {
-                                    return Err(CatError::InvalidClaimValue(
-                                        "Invalid catgeoalt deviation".to_string(),
-                                    ));
-                                }
-                            };
-                            validate_float(altitude, "catgeoalt.altitude")?;
-                            validate_float(deviation, "catgeoalt.deviation")?;
-                            cat.catgeoalt = Some(crate::claims::GeoAltitude {
-                                altitude,
-                                deviation,
-                            });
-                        }
+                    if let Value::Array(arr) = value
+                        && arr.len() == 2
+                    {
+                        let altitude = match &arr[0] {
+                            Value::Float(f) => *f,
+                            Value::Integer(i) => {
+                                let v: i64 =
+                                    (*i).try_into().map_err(|_| CatError::InvalidTokenFormat)?;
+                                v as f64
+                            }
+                            _ => {
+                                return Err(CatError::InvalidClaimValue(
+                                    "Invalid catgeoalt altitude".to_string(),
+                                ));
+                            }
+                        };
+                        let deviation = match &arr[1] {
+                            Value::Float(f) => *f,
+                            Value::Integer(i) => {
+                                let v: i64 =
+                                    (*i).try_into().map_err(|_| CatError::InvalidTokenFormat)?;
+                                v as f64
+                            }
+                            _ => {
+                                return Err(CatError::InvalidClaimValue(
+                                    "Invalid catgeoalt deviation".to_string(),
+                                ));
+                            }
+                        };
+                        validate_float(altitude, "catgeoalt.altitude")?;
+                        validate_float(deviation, "catgeoalt.deviation")?;
+                        cat.catgeoalt = Some(crate::claims::GeoAltitude {
+                            altitude,
+                            deviation,
+                        });
                     }
                 }
                 CLAIM_CATTPK => {

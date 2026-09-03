@@ -146,10 +146,10 @@ pub fn cose_decrypt0(cose_bytes: &[u8], key: &[u8]) -> Result<Vec<u8>, CatError>
                 if let Value::Integer(ki) = k {
                     let key_val: i64 =
                         (*ki).try_into().map_err(|_| CatError::InvalidTokenFormat)?;
-                    if key_val == 5 {
-                        if let Value::Bytes(b) = v {
-                            nonce = Some(b.clone());
-                        }
+                    if key_val == 5
+                        && let Value::Bytes(b) = v
+                    {
+                        nonce = Some(b.clone());
                     }
                 }
             }
@@ -171,10 +171,10 @@ pub fn cose_decrypt0(cose_bytes: &[u8], key: &[u8]) -> Result<Vec<u8>, CatError>
             for (k, v) in map {
                 if let Value::Integer(ki) = k {
                     let key_val: i64 = ki.try_into().map_err(|_| CatError::InvalidTokenFormat)?;
-                    if key_val == 1 {
-                        if let Value::Integer(ai) = v {
-                            alg = Some(ai.try_into().map_err(|_| CatError::InvalidTokenFormat)?);
-                        }
+                    if key_val == 1
+                        && let Value::Integer(ai) = v
+                    {
+                        alg = Some(ai.try_into().map_err(|_| CatError::InvalidTokenFormat)?);
                     }
                 }
             }

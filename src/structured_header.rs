@@ -62,19 +62,17 @@ pub fn parse_sf_dictionary(input: &str) -> Result<Vec<(String, String)>, CatErro
 /// This handles whitespace normalization, quoting, etc.
 pub fn normalize_sf_value(input: &str) -> Result<String, CatError> {
     if let Ok(item) = sfv::Parser::parse_item(input.as_bytes()) {
-        return Ok(sfv::SerializeValue::serialize_value(&item).map_err(|_| {
-            CatError::InvalidClaimValue("Failed to serialize SF-Item".to_string())
-        })?);
+        return sfv::SerializeValue::serialize_value(&item)
+            .map_err(|_| CatError::InvalidClaimValue("Failed to serialize SF-Item".to_string()));
     }
     if let Ok(list) = sfv::Parser::parse_list(input.as_bytes()) {
-        return Ok(sfv::SerializeValue::serialize_value(&list).map_err(|_| {
-            CatError::InvalidClaimValue("Failed to serialize SF-List".to_string())
-        })?);
+        return sfv::SerializeValue::serialize_value(&list)
+            .map_err(|_| CatError::InvalidClaimValue("Failed to serialize SF-List".to_string()));
     }
     if let Ok(dict) = sfv::Parser::parse_dictionary(input.as_bytes()) {
-        return Ok(sfv::SerializeValue::serialize_value(&dict).map_err(|_| {
+        return sfv::SerializeValue::serialize_value(&dict).map_err(|_| {
             CatError::InvalidClaimValue("Failed to serialize SF-Dictionary".to_string())
-        })?);
+        });
     }
     Err(CatError::InvalidClaimValue(
         "Not a valid RFC 8941 structured field value".to_string(),

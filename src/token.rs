@@ -172,10 +172,10 @@ impl CatTokenValidator {
         if let Some(ref rules) = token.cat.catu {
             for rule in rules {
                 for mv in &rule.matches {
-                    if let crate::claims::MatchValue::Regex(pattern) = mv {
-                        if let Some(err) = crate::claims::validate_posix_ere(pattern) {
-                            return Err(CatError::InvalidClaimValue(format!("catu regex: {err}")));
-                        }
+                    if let crate::claims::MatchValue::Regex(pattern) = mv
+                        && let Some(err) = crate::claims::validate_posix_ere(pattern)
+                    {
+                        return Err(CatError::InvalidClaimValue(format!("catu regex: {err}")));
                     }
                 }
             }
@@ -183,10 +183,10 @@ impl CatTokenValidator {
         if let Some(ref rules) = token.cat.cath {
             for rule in rules {
                 for mv in &rule.matches {
-                    if let crate::claims::MatchValue::Regex(pattern) = mv {
-                        if let Some(err) = crate::claims::validate_posix_ere(pattern) {
-                            return Err(CatError::InvalidClaimValue(format!("cath regex: {err}")));
-                        }
+                    if let crate::claims::MatchValue::Regex(pattern) = mv
+                        && let Some(err) = crate::claims::validate_posix_ere(pattern)
+                    {
+                        return Err(CatError::InvalidClaimValue(format!("cath regex: {err}")));
                     }
                 }
             }
@@ -225,12 +225,12 @@ impl CatTokenValidator {
 /// Check whether `method` is allowed by the token's `catm` claim.
 /// Case-sensitive comparison per CTA-5007-B §4.6.11.
 pub fn validate_method(token: &CatToken, method: &str) -> Result<(), CatError> {
-    if let Some(ref methods) = token.cat.catm {
-        if !methods.iter().any(|m| m == method) {
-            return Err(CatError::InvalidClaimValue(format!(
-                "Method not allowed: {method}"
-            )));
-        }
+    if let Some(ref methods) = token.cat.catm
+        && !methods.iter().any(|m| m == method)
+    {
+        return Err(CatError::InvalidClaimValue(format!(
+            "Method not allowed: {method}"
+        )));
     }
     Ok(())
 }
@@ -380,7 +380,7 @@ pub fn strip_token_from_uri(uri: &str, param_names: &[&str]) -> String {
             .split('&')
             .filter(|param| {
                 let key = param.split('=').next().unwrap_or("");
-                !param_names.iter().any(|name| key == *name)
+                !param_names.contains(&key)
             })
             .collect();
         if filtered.is_empty() {
@@ -770,10 +770,10 @@ fn extract_algorithm_from_header(header_cbor: &[u8]) -> Result<i64, CatError> {
     for (key, val) in map {
         if let ciborium::Value::Integer(k) = key {
             let k_i64: i64 = k.try_into().map_err(|_| CatError::InvalidTokenFormat)?;
-            if k_i64 == 1 {
-                if let ciborium::Value::Integer(alg) = val {
-                    return alg.try_into().map_err(|_| CatError::InvalidTokenFormat);
-                }
+            if k_i64 == 1
+                && let ciborium::Value::Integer(alg) = val
+            {
+                return alg.try_into().map_err(|_| CatError::InvalidTokenFormat);
             }
         }
     }

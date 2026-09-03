@@ -201,10 +201,8 @@ fn remove_dot_segments(path: &str) -> String {
     if !result.starts_with('/') && path.starts_with('/') {
         result.insert(0, '/');
     }
-    if path.ends_with("/.") || path.ends_with("/..") {
-        if !result.ends_with('/') {
-            result.push('/');
-        }
+    if (path.ends_with("/.") || path.ends_with("/..")) && !result.ends_with('/') {
+        result.push('/');
     }
     result
 }
@@ -215,21 +213,22 @@ fn normalize_percent_encoding(s: &str) -> String {
     let mut i = 0;
 
     while i < bytes.len() {
-        if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let (Some(hi), Some(lo)) = (hex_val(bytes[i + 1]), hex_val(bytes[i + 2])) {
-                let decoded = (hi << 4) | lo;
-                if is_unreserved(decoded) {
-                    // §6.2.2.2: decode unreserved characters
-                    result.push(decoded as char);
-                } else {
-                    // §6.2.2.2: uppercase hex digits for reserved/other
-                    result.push('%');
-                    result.push(to_upper_hex(hi));
-                    result.push(to_upper_hex(lo));
-                }
-                i += 3;
-                continue;
+        if bytes[i] == b'%'
+            && i + 2 < bytes.len()
+            && let (Some(hi), Some(lo)) = (hex_val(bytes[i + 1]), hex_val(bytes[i + 2]))
+        {
+            let decoded = (hi << 4) | lo;
+            if is_unreserved(decoded) {
+                // §6.2.2.2: decode unreserved characters
+                result.push(decoded as char);
+            } else {
+                // §6.2.2.2: uppercase hex digits for reserved/other
+                result.push('%');
+                result.push(to_upper_hex(hi));
+                result.push(to_upper_hex(lo));
             }
+            i += 3;
+            continue;
         }
         result.push(bytes[i] as char);
         i += 1;
