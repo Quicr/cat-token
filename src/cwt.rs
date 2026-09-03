@@ -341,7 +341,12 @@ impl Cwt {
         }
 
         if let Some(ref geohash) = self.payload.cat.geohash {
-            claims_map.insert(CLAIM_GEOHASH, Value::Text(geohash.clone()));
+            if geohash.len() == 1 {
+                claims_map.insert(CLAIM_GEOHASH, Value::Text(geohash[0].clone()));
+            } else {
+                let arr: Vec<Value> = geohash.iter().map(|g| Value::Text(g.clone())).collect();
+                claims_map.insert(CLAIM_GEOHASH, Value::Array(arr));
+            }
         }
 
         if let Some(ref catgeoalt) = self.payload.cat.catgeoalt {
@@ -947,8 +952,22 @@ impl Cwt {
                     }
                 }
                 CLAIM_GEOHASH => {
-                    if let Value::Text(s) = value {
-                        cat.geohash = Some(s);
+                    match value {
+                        Value::Text(s) => {
+                            cat.geohash = Some(vec![s]);
+                        }
+                        Value::Array(arr) => {
+                            let mut hashes = Vec::new();
+                            for item in arr {
+                                if let Value::Text(s) = item {
+                                    hashes.push(s);
+                                }
+                            }
+                            if !hashes.is_empty() {
+                                cat.geohash = Some(hashes);
+                            }
+                        }
+                        _ => {}
                     }
                 }
                 CLAIM_CATGEOALT => {

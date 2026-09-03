@@ -82,7 +82,7 @@ fn test_comprehensive_token_creation() {
     assert_eq!(token.cat.catu.as_ref().unwrap()[0].component, URI_COMPONENT_HOST);
     assert_eq!(token.cat.catu.as_ref().unwrap()[0].matches.len(), 2);
     assert_eq!(token.cat.catreplay, Some(cat_token::ReplayProtection::Prohibited));
-    assert_eq!(token.cat.geohash, Some("dr5regw".to_string()));
+    assert_eq!(token.cat.geohash, Some(vec!["dr5regw".to_string()]));
     assert_eq!(token.cat.cath.as_ref().unwrap().len(), 1);
     assert_eq!(token.cat.cath.as_ref().unwrap()[0].name, "Authorization");
 

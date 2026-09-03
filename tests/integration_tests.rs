@@ -40,7 +40,7 @@ fn test_cat_token_creation() {
         }])
     );
     assert_eq!(token.cat.catreplay, Some(cat_token::ReplayProtection::Prohibited));
-    assert_eq!(token.cat.geohash, Some("9q8yy".to_string()));
+    assert_eq!(token.cat.geohash, Some(vec!["9q8yy".to_string()]));
 
     if let Some(coords) = &token.cat.catgeocoord {
         assert_eq!(coords[0].lat, 37.7749);
@@ -324,7 +324,7 @@ fn test_all_cat_claims() {
                 lon: -118.2437,
                 radius: Some(25),
             }]),
-            geohash: Some("9q5ct".to_string()),
+            geohash: Some(vec!["9q5ct".to_string()]),
             catgeoalt: Some(cat_token::GeoAltitude { altitude: 100.0, deviation: 10.0 }),
             cattpk: Some(b"thumbprint-data".to_vec()),
         },
@@ -436,7 +436,7 @@ fn test_geographic_validation() {
 
     // Test invalid geohash
     token.cat.catgeocoord = None;
-    token.cat.geohash = Some("".to_string()); // Empty geohash
+    token.cat.geohash = Some(vec!["".to_string()]); // Empty geohash
 
     let result = validator.validate(&token);
     assert!(matches!(

@@ -63,7 +63,7 @@ fn test_cat_claims() {
     assert_eq!(coords[0].lon, -122.4194);
     assert_eq!(coords[0].radius, Some(10));
 
-    assert_eq!(token.cat.geohash, Some("9q8yy".to_string()));
+    assert_eq!(token.cat.geohash, Some(vec!["9q8yy".to_string()]));
 }
 
 #[test]

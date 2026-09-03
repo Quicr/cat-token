@@ -113,29 +113,27 @@ impl CatTokenValidator {
             }
         }
 
-        if let Some(ref geohash) = token.cat.geohash {
-            // Minimum length of 4 provides ~40km precision
-            // Maximum length of 12 is the practical limit for geohash precision
+        if let Some(ref geohashes) = token.cat.geohash {
             const MIN_GEOHASH_LENGTH: usize = 4;
             const MAX_GEOHASH_LENGTH: usize = 12;
-
-            if geohash.len() < MIN_GEOHASH_LENGTH || geohash.len() > MAX_GEOHASH_LENGTH {
-                return Err(CatError::GeographicValidationFailed(format!(
-                    "Invalid geohash length: {} (must be {}-{} characters for meaningful precision)",
-                    geohash.len(),
-                    MIN_GEOHASH_LENGTH,
-                    MAX_GEOHASH_LENGTH
-                )));
-            }
-            // Validate geohash character set (base32: 0-9, b-h, j-n, p, q-z)
-            // Excludes: a, i, l, o
             const VALID_GEOHASH_CHARS: &str = "0123456789bcdefghjkmnpqrstuvwxyz";
-            for c in geohash.chars() {
-                if !VALID_GEOHASH_CHARS.contains(c) {
+
+            for geohash in geohashes {
+                if geohash.len() < MIN_GEOHASH_LENGTH || geohash.len() > MAX_GEOHASH_LENGTH {
                     return Err(CatError::GeographicValidationFailed(format!(
-                        "Invalid geohash character: '{}'",
-                        c
+                        "Invalid geohash length: {} (must be {}-{} characters for meaningful precision)",
+                        geohash.len(),
+                        MIN_GEOHASH_LENGTH,
+                        MAX_GEOHASH_LENGTH
                     )));
+                }
+                for c in geohash.chars() {
+                    if !VALID_GEOHASH_CHARS.contains(c) {
+                        return Err(CatError::GeographicValidationFailed(format!(
+                            "Invalid geohash character: '{}'",
+                            c
+                        )));
+                    }
                 }
             }
         }

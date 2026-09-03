@@ -115,7 +115,7 @@ pub struct CatClaims {
     pub cath: Option<Vec<HeaderMatchRule>>,
     pub catgeoiso3166: Option<Vec<String>>,
     pub catgeocoord: Option<Vec<GeoCoordinate>>,
-    pub geohash: Option<String>,
+    pub geohash: Option<Vec<String>>,
     pub catgeoalt: Option<GeoAltitude>,
     pub cattpk: Option<Vec<u8>>,
 }
@@ -1013,7 +1013,11 @@ impl CatToken {
     }
 
     pub fn with_geohash(mut self, geohash: impl Into<String>) -> Self {
-        self.cat.geohash = Some(geohash.into());
+        let gh = geohash.into();
+        match self.cat.geohash {
+            Some(ref mut v) => v.push(gh),
+            None => self.cat.geohash = Some(vec![gh]),
+        }
         self
     }
 
