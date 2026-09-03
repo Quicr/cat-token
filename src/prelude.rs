@@ -19,6 +19,7 @@ pub use crate::dpop::{DpopProof, DpopValidator};
 pub use crate::dpop::{
     compute_access_token_hash, confirmation_from_jwk, confirmation_matches_jwk, generate_jti,
 };
+pub use crate::encrypt::{EncryptionAlgorithm, cose_decrypt0, cose_encrypt0};
 pub use crate::error::CatError;
 pub use crate::jwk::Jwk;
 pub use crate::token::{

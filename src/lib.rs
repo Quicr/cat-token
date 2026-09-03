@@ -5,6 +5,7 @@ pub mod claims;
 pub mod crypto;
 pub mod cwt;
 pub mod dpop;
+pub mod encrypt;
 pub mod error;
 pub mod jwk;
 #[cfg(feature = "moqt")]
@@ -29,6 +30,7 @@ pub use claims::*;
 pub use crypto::*;
 pub use cwt::*;
 pub use dpop::*;
+pub use encrypt::*;
 pub use error::*;
 pub use jwk::*;
 #[cfg(feature = "moqt")]
