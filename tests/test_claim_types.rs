@@ -94,8 +94,7 @@ fn test_catpor_structured_type() {
 
 #[test]
 fn test_catpor_without_expiration() {
-    let token =
-        CatToken::new().with_probability_of_rejection(0.05, b"test-id".to_vec(), None);
+    let token = CatToken::new().with_probability_of_rejection(0.05, b"test-id".to_vec(), None);
     let cwt = Cwt::new(ALG_ES256, token);
     let payload = cwt.encode_payload().unwrap();
     let decoded = Cwt::decode_payload(&payload).unwrap();

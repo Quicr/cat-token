@@ -27,12 +27,10 @@ fn test_comprehensive_token_creation() {
         },
     ];
 
-    let header_match_rules = vec![
-        HeaderMatchRule {
-            name: "Authorization".to_string(),
-            matches: vec![MatchValue::Prefix("Bearer ".to_string())],
-        },
-    ];
+    let header_match_rules = vec![HeaderMatchRule {
+        name: "Authorization".to_string(),
+        matches: vec![MatchValue::Prefix("Bearer ".to_string())],
+    }];
 
     let token = CatTokenBuilder::new()
         // Core claims
@@ -60,7 +58,14 @@ fn test_comprehensive_token_creation() {
         .confirmation(b"jwk-thumbprint-xyz".to_vec())
         .dpop_settings(cat_token::CatDpopSettings::new().with_window(300))
         // Request claims
-        .if_action(CLAIM_EXP, CatIfAction { status: 401, headers: None, kid: None })
+        .if_action(
+            CLAIM_EXP,
+            CatIfAction {
+                status: 401,
+                headers: None,
+                kid: None,
+            },
+        )
         .renewal(CatRenewal::automatic().with_expadd(3600))
         .build();
 
@@ -79,9 +84,15 @@ fn test_comprehensive_token_creation() {
 
     assert_eq!(token.cat.catv, Some(1));
     assert_eq!(token.cat.catu.as_ref().unwrap().len(), 2);
-    assert_eq!(token.cat.catu.as_ref().unwrap()[0].component, URI_COMPONENT_HOST);
+    assert_eq!(
+        token.cat.catu.as_ref().unwrap()[0].component,
+        URI_COMPONENT_HOST
+    );
     assert_eq!(token.cat.catu.as_ref().unwrap()[0].matches.len(), 2);
-    assert_eq!(token.cat.catreplay, Some(cat_token::ReplayProtection::Prohibited));
+    assert_eq!(
+        token.cat.catreplay,
+        Some(cat_token::ReplayProtection::Prohibited)
+    );
     assert_eq!(token.cat.geohash, Some(vec!["dr5regw".to_string()]));
     assert_eq!(token.cat.cath.as_ref().unwrap().len(), 1);
     assert_eq!(token.cat.cath.as_ref().unwrap()[0].name, "Authorization");
@@ -230,7 +241,14 @@ fn test_cwt_encoding_decoding() {
         .with_version(1)
         .with_subject("test-user")
         .with_confirmation(b"test-confirmation".to_vec())
-        .with_if_action(CLAIM_EXP, CatIfAction { status: 403, headers: None, kid: None });
+        .with_if_action(
+            CLAIM_EXP,
+            CatIfAction {
+                status: 403,
+                headers: None,
+                kid: None,
+            },
+        );
 
     let cwt = Cwt::new(-7, original_token.clone()); // ES256 algorithm
 
@@ -300,18 +318,24 @@ fn test_uri_match_rule_encoding_decoding() {
     assert_eq!(decoded_uri_rules.len(), uri_rules.len());
     assert_eq!(decoded_uri_rules[0].component, URI_COMPONENT_HOST);
     assert_eq!(decoded_uri_rules[0].matches.len(), 2);
-    assert!(matches!(&decoded_uri_rules[0].matches[0], MatchValue::Exact(s) if s == "api.example.com"));
+    assert!(
+        matches!(&decoded_uri_rules[0].matches[0], MatchValue::Exact(s) if s == "api.example.com")
+    );
     assert!(matches!(&decoded_uri_rules[0].matches[1], MatchValue::Prefix(s) if s == "secure."));
     assert_eq!(decoded_uri_rules[1].component, URI_COMPONENT_PATH);
     assert_eq!(decoded_uri_rules[1].matches.len(), 2);
     assert!(matches!(&decoded_uri_rules[1].matches[0], MatchValue::Suffix(s) if s == "/api/data"));
-    assert!(matches!(&decoded_uri_rules[1].matches[1], MatchValue::Regex(s) if s == r"^https://.*\.test\.com$"));
+    assert!(
+        matches!(&decoded_uri_rules[1].matches[1], MatchValue::Regex(s) if s == r"^https://.*\.test\.com$")
+    );
 
     // Verify header match rules (cath)
     let decoded_header_rules = decoded_token.cat.cath.as_ref().unwrap();
     assert_eq!(decoded_header_rules.len(), header_rules.len());
     assert_eq!(decoded_header_rules[0].name, "Content-Type");
-    assert!(matches!(&decoded_header_rules[0].matches[0], MatchValue::Exact(s) if s == "application/json"));
+    assert!(
+        matches!(&decoded_header_rules[0].matches[0], MatchValue::Exact(s) if s == "application/json")
+    );
     assert_eq!(decoded_header_rules[1].name, "Authorization");
     assert!(matches!(&decoded_header_rules[1].matches[0], MatchValue::Prefix(s) if s == "Bearer "));
 }
@@ -400,24 +424,20 @@ fn test_maximal_token() {
         .with_cwt_id_str("maximal-token-id")
         // All CAT claims
         .with_version(1)
-        .with_uri_match_rules(vec![
-            UriMatchRule {
-                component: URI_COMPONENT_HOST,
-                matches: vec![
-                    MatchValue::Exact("maximal.example.com".to_string()),
-                    MatchValue::Prefix("api.".to_string()),
-                ],
-            },
-        ])
+        .with_uri_match_rules(vec![UriMatchRule {
+            component: URI_COMPONENT_HOST,
+            matches: vec![
+                MatchValue::Exact("maximal.example.com".to_string()),
+                MatchValue::Prefix("api.".to_string()),
+            ],
+        }])
         .with_replay_protection(cat_token::ReplayProtection::Prohibited)
         .with_geo_coordinate(51.5074, -0.1278, Some(25)) // London
         .with_geohash("gcpvj0du")
-        .with_header_match_rules(vec![
-            HeaderMatchRule {
-                name: "Accept".to_string(),
-                matches: vec![MatchValue::Exact("application/json".to_string())],
-            },
-        ])
+        .with_header_match_rules(vec![HeaderMatchRule {
+            name: "Accept".to_string(),
+            matches: vec![MatchValue::Exact("application/json".to_string())],
+        }])
         // All informational claims
         .with_subject("maximal-user@example.com")
         .with_issued_at(now)
@@ -430,7 +450,14 @@ fn test_maximal_token() {
                 .with_jti_processing(true),
         )
         // All request claims
-        .with_if_action(CLAIM_EXP, CatIfAction { status: 401, headers: None, kid: None })
+        .with_if_action(
+            CLAIM_EXP,
+            CatIfAction {
+                status: 401,
+                headers: None,
+                kid: None,
+            },
+        )
         .with_renewal(CatRenewal::cookie("token").with_expadd(7200));
 
     // Verify all claims are set

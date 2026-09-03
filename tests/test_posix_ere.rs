@@ -56,11 +56,10 @@ fn test_lookahead_rejected() {
 
 #[test]
 fn test_validator_rejects_non_ere_regex_in_catu() {
-    let token = CatToken::new()
-        .with_uri_match_rules(vec![UriMatchRule {
-            component: URI_COMPONENT_PATH,
-            matches: vec![MatchValue::Regex("\\d+".to_string())],
-        }]);
+    let token = CatToken::new().with_uri_match_rules(vec![UriMatchRule {
+        component: URI_COMPONENT_PATH,
+        matches: vec![MatchValue::Regex("\\d+".to_string())],
+    }]);
 
     let validator = CatTokenValidator::new();
     let result = validator.validate(&token);
@@ -75,11 +74,10 @@ fn test_validator_rejects_non_ere_regex_in_catu() {
 
 #[test]
 fn test_validator_rejects_non_ere_regex_in_cath() {
-    let token = CatToken::new()
-        .with_header_match_rules(vec![HeaderMatchRule {
-            name: "Content-Type".to_string(),
-            matches: vec![MatchValue::Regex("\\w+/\\w+".to_string())],
-        }]);
+    let token = CatToken::new().with_header_match_rules(vec![HeaderMatchRule {
+        name: "Content-Type".to_string(),
+        matches: vec![MatchValue::Regex("\\w+/\\w+".to_string())],
+    }]);
 
     let validator = CatTokenValidator::new();
     let result = validator.validate(&token);
@@ -94,11 +92,10 @@ fn test_validator_rejects_non_ere_regex_in_cath() {
 
 #[test]
 fn test_validator_accepts_ere_regex() {
-    let token = CatToken::new()
-        .with_uri_match_rules(vec![UriMatchRule {
-            component: URI_COMPONENT_PATH,
-            matches: vec![MatchValue::Regex("^/v[0-9]+/.*$".to_string())],
-        }]);
+    let token = CatToken::new().with_uri_match_rules(vec![UriMatchRule {
+        component: URI_COMPONENT_PATH,
+        matches: vec![MatchValue::Regex("^/v[0-9]+/.*$".to_string())],
+    }]);
 
     let validator = CatTokenValidator::new();
     assert!(validator.validate(&token).is_ok());

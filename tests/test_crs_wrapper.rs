@@ -111,8 +111,7 @@ fn test_catgeoalt_rejects_unsupported_crs() {
 
 #[test]
 fn test_catgeocoord_without_crs_wrapper_still_works() {
-    let token = CatToken::new()
-        .with_geo_coordinate(37.7749, -122.4194, Some(10));
+    let token = CatToken::new().with_geo_coordinate(37.7749, -122.4194, Some(10));
 
     let cwt = Cwt::new(-7, token);
     let encoded = cwt.encode_payload().unwrap();

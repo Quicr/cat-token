@@ -27,9 +27,14 @@ fn main() -> Result<(), CatError> {
         )
         .build();
 
-    // 3. Encode the token (returns base64url string)
+    // 3. Encode the token (returns COSE_Sign1 CBOR bytes)
     let encoded = encode_token(&token, &key)?;
-    println!("Token: {}...({} bytes)", &encoded[..40], encoded.len());
+    let encoded_b64 = encode_token_base64(&token, &key)?;
+    println!(
+        "Token (b64): {}...({} bytes)",
+        &encoded_b64[..40],
+        encoded.len()
+    );
 
     // 4. Decode and verify (relay does this)
     let decoded = decode_token(&encoded, &key)?;

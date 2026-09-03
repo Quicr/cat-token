@@ -52,13 +52,11 @@ fn validate_cbor_map_ordering(map: &[(Value, Value)]) -> Result<(), CatError> {
             let k: i64 = (*i).try_into().unwrap_or(i64::MAX);
             if let Some(prev) = prev_key {
                 if k == prev {
-                    return Err(CatError::InvalidCbor(format!(
-                        "Duplicate map key: {k}"
-                    )));
+                    return Err(CatError::InvalidCbor(format!("Duplicate map key: {k}")));
                 }
                 if k < prev {
                     return Err(CatError::InvalidCbor(
-                        "Map keys not in deterministic order per RFC 8949 §4.2.1".to_string()
+                        "Map keys not in deterministic order per RFC 8949 §4.2.1".to_string(),
                     ));
                 }
             }
@@ -87,10 +85,16 @@ fn encode_match_value(m: &MatchValue) -> (Value, Value) {
         MatchValue::Exact(s) => (Value::Integer(MATCH_EXACT.into()), Value::Text(s.clone())),
         MatchValue::Prefix(s) => (Value::Integer(MATCH_PREFIX.into()), Value::Text(s.clone())),
         MatchValue::Suffix(s) => (Value::Integer(MATCH_SUFFIX.into()), Value::Text(s.clone())),
-        MatchValue::Contains(s) => (Value::Integer(MATCH_CONTAINS.into()), Value::Text(s.clone())),
+        MatchValue::Contains(s) => (
+            Value::Integer(MATCH_CONTAINS.into()),
+            Value::Text(s.clone()),
+        ),
         MatchValue::Regex(s) => (Value::Integer(MATCH_REGEX.into()), Value::Text(s.clone())),
         MatchValue::Sha256(h) => (Value::Integer(MATCH_SHA256.into()), Value::Bytes(h.clone())),
-        MatchValue::Sha512_256(h) => (Value::Integer(MATCH_SHA512_256.into()), Value::Bytes(h.clone())),
+        MatchValue::Sha512_256(h) => (
+            Value::Integer(MATCH_SHA512_256.into()),
+            Value::Bytes(h.clone()),
+        ),
     }
 }
 
@@ -101,42 +105,69 @@ fn decode_match_value(key: &Value, val: &Value) -> Result<MatchValue, CatError> 
     };
     match match_type {
         MATCH_EXACT => {
-            if let Value::Text(s) = val { Ok(MatchValue::Exact(s.clone())) }
-            else { Err(CatError::InvalidTokenFormat) }
+            if let Value::Text(s) = val {
+                Ok(MatchValue::Exact(s.clone()))
+            } else {
+                Err(CatError::InvalidTokenFormat)
+            }
         }
         MATCH_PREFIX => {
-            if let Value::Text(s) = val { Ok(MatchValue::Prefix(s.clone())) }
-            else { Err(CatError::InvalidTokenFormat) }
+            if let Value::Text(s) = val {
+                Ok(MatchValue::Prefix(s.clone()))
+            } else {
+                Err(CatError::InvalidTokenFormat)
+            }
         }
         MATCH_SUFFIX => {
-            if let Value::Text(s) = val { Ok(MatchValue::Suffix(s.clone())) }
-            else { Err(CatError::InvalidTokenFormat) }
+            if let Value::Text(s) = val {
+                Ok(MatchValue::Suffix(s.clone()))
+            } else {
+                Err(CatError::InvalidTokenFormat)
+            }
         }
         MATCH_CONTAINS => {
-            if let Value::Text(s) = val { Ok(MatchValue::Contains(s.clone())) }
-            else { Err(CatError::InvalidTokenFormat) }
+            if let Value::Text(s) = val {
+                Ok(MatchValue::Contains(s.clone()))
+            } else {
+                Err(CatError::InvalidTokenFormat)
+            }
         }
         MATCH_REGEX => {
-            if let Value::Text(s) = val { Ok(MatchValue::Regex(s.clone())) }
-            else { Err(CatError::InvalidTokenFormat) }
+            if let Value::Text(s) = val {
+                Ok(MatchValue::Regex(s.clone()))
+            } else {
+                Err(CatError::InvalidTokenFormat)
+            }
         }
         MATCH_SHA256 => {
-            if let Value::Bytes(b) = val { Ok(MatchValue::Sha256(b.clone())) }
-            else { Err(CatError::InvalidTokenFormat) }
+            if let Value::Bytes(b) = val {
+                Ok(MatchValue::Sha256(b.clone()))
+            } else {
+                Err(CatError::InvalidTokenFormat)
+            }
         }
         MATCH_SHA512_256 => {
-            if let Value::Bytes(b) = val { Ok(MatchValue::Sha512_256(b.clone())) }
-            else { Err(CatError::InvalidTokenFormat) }
+            if let Value::Bytes(b) = val {
+                Ok(MatchValue::Sha512_256(b.clone()))
+            } else {
+                Err(CatError::InvalidTokenFormat)
+            }
         }
-        _ => Err(CatError::InvalidClaimValue(format!("Unknown match type: {match_type}"))),
+        _ => Err(CatError::InvalidClaimValue(format!(
+            "Unknown match type: {match_type}"
+        ))),
     }
 }
 
 fn encode_network_identifier(nip: &NetworkIdentifier) -> Value {
     match nip {
         NetworkIdentifier::IpAddress(addr) => match addr {
-            IpAddr::V4(v4) => Value::Tag(CBOR_TAG_IPV4, Box::new(Value::Bytes(v4.octets().to_vec()))),
-            IpAddr::V6(v6) => Value::Tag(CBOR_TAG_IPV6, Box::new(Value::Bytes(v6.octets().to_vec()))),
+            IpAddr::V4(v4) => {
+                Value::Tag(CBOR_TAG_IPV4, Box::new(Value::Bytes(v4.octets().to_vec())))
+            }
+            IpAddr::V6(v6) => {
+                Value::Tag(CBOR_TAG_IPV6, Box::new(Value::Bytes(v6.octets().to_vec())))
+            }
         },
         NetworkIdentifier::IpPrefix(addr, prefix_len) => {
             let (tag, addr_bytes) = match addr {
@@ -166,59 +197,58 @@ fn prefix_byte_count(prefix_len: u8) -> usize {
 
 fn decode_network_identifier(value: &Value) -> Result<NetworkIdentifier, CatError> {
     match value {
-        Value::Tag(tag, inner) => {
-            match inner.as_ref() {
-                Value::Bytes(bytes) => {
-                    match *tag {
-                        CBOR_TAG_IPV4 if bytes.len() == 4 => {
-                            let addr = std::net::Ipv4Addr::new(bytes[0], bytes[1], bytes[2], bytes[3]);
-                            Ok(NetworkIdentifier::IpAddress(IpAddr::V4(addr)))
-                        }
-                        CBOR_TAG_IPV6 if bytes.len() == 16 => {
-                            let mut octets = [0u8; 16];
-                            octets.copy_from_slice(bytes);
-                            let addr = std::net::Ipv6Addr::from(octets);
-                            Ok(NetworkIdentifier::IpAddress(IpAddr::V6(addr)))
-                        }
-                        _ => Err(CatError::InvalidClaimValue(format!(
-                            "Invalid IP tag/size: tag={tag}, len={}", bytes.len()
-                        ))),
-                    }
+        Value::Tag(tag, inner) => match inner.as_ref() {
+            Value::Bytes(bytes) => match *tag {
+                CBOR_TAG_IPV4 if bytes.len() == 4 => {
+                    let addr = std::net::Ipv4Addr::new(bytes[0], bytes[1], bytes[2], bytes[3]);
+                    Ok(NetworkIdentifier::IpAddress(IpAddr::V4(addr)))
                 }
-                Value::Map(map) if map.len() == 1 => {
-                    let (k, v) = &map[0];
-                    let prefix_len = match k {
-                        Value::Integer(i) => {
-                            let val: i64 = (*i).try_into().map_err(|_| CatError::InvalidTokenFormat)?;
-                            val as u8
-                        }
-                        _ => return Err(CatError::InvalidTokenFormat),
-                    };
-                    let prefix_bytes = match v {
-                        Value::Bytes(b) => b,
-                        _ => return Err(CatError::InvalidTokenFormat),
-                    };
-                    match *tag {
-                        CBOR_TAG_IPV4 => {
-                            let mut octets = [0u8; 4];
-                            let copy_len = prefix_bytes.len().min(4);
-                            octets[..copy_len].copy_from_slice(&prefix_bytes[..copy_len]);
-                            let addr = std::net::Ipv4Addr::from(octets);
-                            Ok(NetworkIdentifier::IpPrefix(IpAddr::V4(addr), prefix_len))
-                        }
-                        CBOR_TAG_IPV6 => {
-                            let mut octets = [0u8; 16];
-                            let copy_len = prefix_bytes.len().min(16);
-                            octets[..copy_len].copy_from_slice(&prefix_bytes[..copy_len]);
-                            let addr = std::net::Ipv6Addr::from(octets);
-                            Ok(NetworkIdentifier::IpPrefix(IpAddr::V6(addr), prefix_len))
-                        }
-                        _ => Err(CatError::InvalidClaimValue(format!("Unknown IP tag: {tag}"))),
-                    }
+                CBOR_TAG_IPV6 if bytes.len() == 16 => {
+                    let mut octets = [0u8; 16];
+                    octets.copy_from_slice(bytes);
+                    let addr = std::net::Ipv6Addr::from(octets);
+                    Ok(NetworkIdentifier::IpAddress(IpAddr::V6(addr)))
                 }
-                _ => Err(CatError::InvalidTokenFormat),
+                _ => Err(CatError::InvalidClaimValue(format!(
+                    "Invalid IP tag/size: tag={tag}, len={}",
+                    bytes.len()
+                ))),
+            },
+            Value::Map(map) if map.len() == 1 => {
+                let (k, v) = &map[0];
+                let prefix_len = match k {
+                    Value::Integer(i) => {
+                        let val: i64 = (*i).try_into().map_err(|_| CatError::InvalidTokenFormat)?;
+                        val as u8
+                    }
+                    _ => return Err(CatError::InvalidTokenFormat),
+                };
+                let prefix_bytes = match v {
+                    Value::Bytes(b) => b,
+                    _ => return Err(CatError::InvalidTokenFormat),
+                };
+                match *tag {
+                    CBOR_TAG_IPV4 => {
+                        let mut octets = [0u8; 4];
+                        let copy_len = prefix_bytes.len().min(4);
+                        octets[..copy_len].copy_from_slice(&prefix_bytes[..copy_len]);
+                        let addr = std::net::Ipv4Addr::from(octets);
+                        Ok(NetworkIdentifier::IpPrefix(IpAddr::V4(addr), prefix_len))
+                    }
+                    CBOR_TAG_IPV6 => {
+                        let mut octets = [0u8; 16];
+                        let copy_len = prefix_bytes.len().min(16);
+                        octets[..copy_len].copy_from_slice(&prefix_bytes[..copy_len]);
+                        let addr = std::net::Ipv6Addr::from(octets);
+                        Ok(NetworkIdentifier::IpPrefix(IpAddr::V6(addr), prefix_len))
+                    }
+                    _ => Err(CatError::InvalidClaimValue(format!(
+                        "Unknown IP tag: {tag}"
+                    ))),
+                }
             }
-        }
+            _ => Err(CatError::InvalidTokenFormat),
+        },
         Value::Integer(i) => {
             let asn: u32 = (*i).try_into().map_err(|_| CatError::InvalidTokenFormat)?;
             Ok(NetworkIdentifier::Asn(asn))
@@ -295,10 +325,7 @@ impl Cwt {
         }
 
         if let Some(catreplay) = self.payload.cat.catreplay {
-            claims_map.insert(
-                CLAIM_CATREPLAY,
-                Value::Integer((catreplay as u32).into()),
-            );
+            claims_map.insert(CLAIM_CATREPLAY, Value::Integer((catreplay as u32).into()));
         }
 
         if let Some(ref catpor) = self.payload.cat.catpor {
@@ -329,15 +356,9 @@ impl Cwt {
             let uri_map: Vec<(Value, Value)> = catu
                 .iter()
                 .map(|rule| {
-                    let match_map: Vec<(Value, Value)> = rule
-                        .matches
-                        .iter()
-                        .map(|m| encode_match_value(m))
-                        .collect();
-                    (
-                        Value::Integer(rule.component.into()),
-                        Value::Map(match_map),
-                    )
+                    let match_map: Vec<(Value, Value)> =
+                        rule.matches.iter().map(|m| encode_match_value(m)).collect();
+                    (Value::Integer(rule.component.into()), Value::Map(match_map))
                 })
                 .collect();
             claims_map.insert(CLAIM_CATU, Value::Map(uri_map));
@@ -357,15 +378,9 @@ impl Cwt {
             let header_map: Vec<(Value, Value)> = cath
                 .iter()
                 .map(|rule| {
-                    let match_map: Vec<(Value, Value)> = rule
-                        .matches
-                        .iter()
-                        .map(|m| encode_match_value(m))
-                        .collect();
-                    (
-                        Value::Text(rule.name.clone()),
-                        Value::Map(match_map),
-                    )
+                    let match_map: Vec<(Value, Value)> =
+                        rule.matches.iter().map(|m| encode_match_value(m)).collect();
+                    (Value::Text(rule.name.clone()), Value::Map(match_map))
                 })
                 .collect();
             claims_map.insert(CLAIM_CATH, Value::Map(header_map));
@@ -450,10 +465,7 @@ impl Cwt {
                 ));
             }
             if let Some(ref ckt) = cnf.ckt {
-                cnf_map.push((
-                    Value::Integer(CNF_CKT.into()),
-                    Value::Bytes(ckt.clone()),
-                ));
+                cnf_map.push((Value::Integer(CNF_CKT.into()), Value::Bytes(ckt.clone())));
             }
             if !cnf_map.is_empty() {
                 claims_map.insert(CLAIM_CNF, Value::Map(cnf_map));
@@ -463,10 +475,8 @@ impl Cwt {
         if let Some(ref catdpop) = self.payload.dpop.catdpop {
             let mut dpop_map = Vec::new();
             if let Some(ref crit) = catdpop.crit {
-                let crit_array: Vec<Value> = crit
-                    .iter()
-                    .map(|&k| Value::Integer(k.into()))
-                    .collect();
+                let crit_array: Vec<Value> =
+                    crit.iter().map(|&k| Value::Integer(k.into())).collect();
                 dpop_map.push((
                     Value::Integer(CATDPOP_CRIT.into()),
                     Value::Array(crit_array),
@@ -534,20 +544,14 @@ impl Cwt {
                 ));
             }
             if let Some(ref name) = catr.name {
-                renewal_map.push((
-                    Value::Integer(CATR_NAME.into()),
-                    Value::Text(name.clone()),
-                ));
+                renewal_map.push((Value::Integer(CATR_NAME.into()), Value::Text(name.clone())));
             }
             if let Some(ref params) = catr.params {
                 let param_map: Vec<(Value, Value)> = params
                     .iter()
                     .map(|(k, v)| (Value::Text(k.clone()), Value::Text(v.clone())))
                     .collect();
-                renewal_map.push((
-                    Value::Integer(CATR_PARAMS.into()),
-                    Value::Map(param_map),
-                ));
+                renewal_map.push((Value::Integer(CATR_PARAMS.into()), Value::Map(param_map)));
             }
             if let Some(code) = catr.code {
                 renewal_map.push((
@@ -909,11 +913,10 @@ impl Cwt {
                 },
                 CLAIM_CATREPLAY => {
                     if let Value::Integer(i) = value {
-                        let v: u32 = i
-                            .try_into()
-                            .map_err(|_| CatError::InvalidClaimValue("Invalid catreplay value".to_string()))?;
-                        cat.catreplay =
-                            Some(crate::claims::ReplayProtection::try_from(v)?);
+                        let v: u32 = i.try_into().map_err(|_| {
+                            CatError::InvalidClaimValue("Invalid catreplay value".to_string())
+                        })?;
+                        cat.catreplay = Some(crate::claims::ReplayProtection::try_from(v)?);
                     }
                 }
                 CLAIM_CATPOR => {
@@ -922,18 +925,31 @@ impl Cwt {
                             let probability = match &arr[0] {
                                 Value::Float(f) => *f,
                                 Value::Integer(i) => {
-                                    let v: i64 = (*i).try_into().map_err(|_| CatError::InvalidTokenFormat)?;
+                                    let v: i64 = (*i)
+                                        .try_into()
+                                        .map_err(|_| CatError::InvalidTokenFormat)?;
                                     v as f64
                                 }
-                                _ => return Err(CatError::InvalidClaimValue("Invalid catpor probability".to_string())),
+                                _ => {
+                                    return Err(CatError::InvalidClaimValue(
+                                        "Invalid catpor probability".to_string(),
+                                    ));
+                                }
                             };
                             let id = match &arr[1] {
                                 Value::Bytes(b) => b.clone(),
-                                _ => return Err(CatError::InvalidClaimValue("Invalid catpor id".to_string())),
+                                _ => {
+                                    return Err(CatError::InvalidClaimValue(
+                                        "Invalid catpor id".to_string(),
+                                    ));
+                                }
                             };
                             let expiration = if arr.len() > 2 {
                                 match &arr[2] {
-                                    Value::Integer(i) => Some((*i).try_into().map_err(|_| CatError::InvalidTokenFormat)?),
+                                    Value::Integer(i) => Some(
+                                        (*i).try_into()
+                                            .map_err(|_| CatError::InvalidTokenFormat)?,
+                                    ),
                                     _ => None,
                                 }
                             } else {
@@ -950,10 +966,9 @@ impl Cwt {
                 }
                 CLAIM_CATV => {
                     if let Value::Integer(i) = value {
-                        cat.catv = Some(
-                            i.try_into()
-                                .map_err(|_| CatError::InvalidClaimValue("Invalid catv value".to_string()))?,
-                        );
+                        cat.catv = Some(i.try_into().map_err(|_| {
+                            CatError::InvalidClaimValue("Invalid catv value".to_string())
+                        })?);
                     }
                 }
                 CLAIM_CATNIP => {
@@ -970,7 +985,9 @@ impl Cwt {
                         let mut rules = Vec::new();
                         for (k, v) in map {
                             let component: i64 = match k {
-                                Value::Integer(i) => i.try_into().map_err(|_| CatError::InvalidTokenFormat)?,
+                                Value::Integer(i) => {
+                                    i.try_into().map_err(|_| CatError::InvalidTokenFormat)?
+                                }
                                 _ => continue,
                             };
                             let match_map = match v {
@@ -1113,22 +1130,37 @@ impl Cwt {
                             let altitude = match &arr[0] {
                                 Value::Float(f) => *f,
                                 Value::Integer(i) => {
-                                    let v: i64 = (*i).try_into().map_err(|_| CatError::InvalidTokenFormat)?;
+                                    let v: i64 = (*i)
+                                        .try_into()
+                                        .map_err(|_| CatError::InvalidTokenFormat)?;
                                     v as f64
                                 }
-                                _ => return Err(CatError::InvalidClaimValue("Invalid catgeoalt altitude".to_string())),
+                                _ => {
+                                    return Err(CatError::InvalidClaimValue(
+                                        "Invalid catgeoalt altitude".to_string(),
+                                    ));
+                                }
                             };
                             let deviation = match &arr[1] {
                                 Value::Float(f) => *f,
                                 Value::Integer(i) => {
-                                    let v: i64 = (*i).try_into().map_err(|_| CatError::InvalidTokenFormat)?;
+                                    let v: i64 = (*i)
+                                        .try_into()
+                                        .map_err(|_| CatError::InvalidTokenFormat)?;
                                     v as f64
                                 }
-                                _ => return Err(CatError::InvalidClaimValue("Invalid catgeoalt deviation".to_string())),
+                                _ => {
+                                    return Err(CatError::InvalidClaimValue(
+                                        "Invalid catgeoalt deviation".to_string(),
+                                    ));
+                                }
                             };
                             validate_float(altitude, "catgeoalt.altitude")?;
                             validate_float(deviation, "catgeoalt.deviation")?;
-                            cat.catgeoalt = Some(crate::claims::GeoAltitude { altitude, deviation });
+                            cat.catgeoalt = Some(crate::claims::GeoAltitude {
+                                altitude,
+                                deviation,
+                            });
                         }
                     }
                 }
@@ -1149,25 +1181,23 @@ impl Cwt {
                             Some(i.try_into().map_err(|_| CatError::InvalidTokenFormat)?);
                     }
                 }
-                CLAIM_CATIFDATA => {
-                    match value {
-                        Value::Text(s) => {
-                            informational.catifdata = Some(vec![s]);
-                        }
-                        Value::Array(arr) => {
-                            let mut items = Vec::new();
-                            for item in arr {
-                                if let Value::Text(s) = item {
-                                    items.push(s);
-                                }
-                            }
-                            if !items.is_empty() {
-                                informational.catifdata = Some(items);
-                            }
-                        }
-                        _ => {}
+                CLAIM_CATIFDATA => match value {
+                    Value::Text(s) => {
+                        informational.catifdata = Some(vec![s]);
                     }
-                }
+                    Value::Array(arr) => {
+                        let mut items = Vec::new();
+                        for item in arr {
+                            if let Value::Text(s) = item {
+                                items.push(s);
+                            }
+                        }
+                        if !items.is_empty() {
+                            informational.catifdata = Some(items);
+                        }
+                    }
+                    _ => {}
+                },
                 CLAIM_CNF => {
                     if let Value::Map(map) = value {
                         let mut jkt = Vec::new();
@@ -1290,7 +1320,11 @@ impl Cwt {
                                 };
                                 actions.push((
                                     claim_key,
-                                    CatIfAction { status, headers, kid },
+                                    CatIfAction {
+                                        status,
+                                        headers,
+                                        kid,
+                                    },
                                 ));
                             }
                         }

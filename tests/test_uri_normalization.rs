@@ -5,23 +5,38 @@ use cat_token::*;
 #[test]
 fn test_normalize_scheme_case() {
     assert_eq!(normalize_uri("HTTP://example.com/"), "http://example.com/");
-    assert_eq!(normalize_uri("HtTpS://example.com/"), "https://example.com/");
+    assert_eq!(
+        normalize_uri("HtTpS://example.com/"),
+        "https://example.com/"
+    );
 }
 
 #[test]
 fn test_normalize_host_case() {
-    assert_eq!(normalize_uri("https://EXAMPLE.COM/path"), "https://example.com/path");
-    assert_eq!(normalize_uri("https://Api.Example.Com/"), "https://api.example.com/");
+    assert_eq!(
+        normalize_uri("https://EXAMPLE.COM/path"),
+        "https://example.com/path"
+    );
+    assert_eq!(
+        normalize_uri("https://Api.Example.Com/"),
+        "https://api.example.com/"
+    );
 }
 
 #[test]
 fn test_normalize_default_port_http() {
-    assert_eq!(normalize_uri("http://example.com:80/path"), "http://example.com/path");
+    assert_eq!(
+        normalize_uri("http://example.com:80/path"),
+        "http://example.com/path"
+    );
 }
 
 #[test]
 fn test_normalize_default_port_https() {
-    assert_eq!(normalize_uri("https://example.com:443/path"), "https://example.com/path");
+    assert_eq!(
+        normalize_uri("https://example.com:443/path"),
+        "https://example.com/path"
+    );
 }
 
 #[test]

@@ -7,9 +7,7 @@ fn test_single_geohash_roundtrip() {
     let alg = HmacSha256Algorithm::generate_key().unwrap();
     let algorithm = HmacSha256Algorithm::from_secret_key(&alg);
 
-    let token = CatToken::new()
-        .with_issuer("test")
-        .with_geohash("9q8yyk");
+    let token = CatToken::new().with_issuer("test").with_geohash("9q8yyk");
 
     let encoded = encode_token(&token, &algorithm).unwrap();
     let decoded = decode_token(&encoded, &algorithm).unwrap();
@@ -75,10 +73,7 @@ fn test_validator_accepts_valid_array() {
     let validator = CatTokenValidator::new();
 
     let mut token = CatToken::new();
-    token.cat.geohash = Some(vec![
-        "9q8yyk".to_string(),
-        "dr5regw".to_string(),
-    ]);
+    token.cat.geohash = Some(vec!["9q8yyk".to_string(), "dr5regw".to_string()]);
 
     assert!(validator.validate(&token).is_ok());
 }

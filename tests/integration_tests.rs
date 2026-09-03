@@ -39,7 +39,10 @@ fn test_cat_token_creation() {
             matches: vec![MatchValue::Exact("example.com".to_string())],
         }])
     );
-    assert_eq!(token.cat.catreplay, Some(cat_token::ReplayProtection::Prohibited));
+    assert_eq!(
+        token.cat.catreplay,
+        Some(cat_token::ReplayProtection::Prohibited)
+    );
     assert_eq!(token.cat.geohash, Some(vec!["9q8yy".to_string()]));
 
     if let Some(coords) = &token.cat.catgeocoord {
@@ -69,7 +72,7 @@ fn test_hmac_token_encoding_decoding() {
 
     let encoded = encode_token(&token, &algorithm).unwrap();
     assert!(!encoded.is_empty());
-    assert_eq!(encoded.split('.').count(), 3);
+    assert!(encoded.len() > 10);
 
     let decoded = decode_token(&encoded, &algorithm).unwrap();
     assert_eq!(decoded.core.iss, token.core.iss);
@@ -95,7 +98,7 @@ fn test_es256_token_encoding_decoding() {
 
     let encoded = encode_token(&token, &algorithm).unwrap();
     assert!(!encoded.is_empty());
-    assert_eq!(encoded.split('.').count(), 3);
+    assert!(encoded.len() > 10);
 
     let decoded = decode_token(&encoded, &algorithm).unwrap();
     assert_eq!(decoded.core.iss, token.core.iss);
@@ -121,7 +124,7 @@ fn test_ps256_token_encoding_decoding() {
 
     let encoded = encode_token(&token, &algorithm).unwrap();
     assert!(!encoded.is_empty());
-    assert_eq!(encoded.split('.').count(), 3);
+    assert!(encoded.len() > 10);
 
     let decoded = decode_token(&encoded, &algorithm).unwrap();
     assert_eq!(decoded.core.iss, token.core.iss);
@@ -325,7 +328,10 @@ fn test_all_cat_claims() {
                 radius: Some(25),
             }]),
             geohash: Some(vec!["9q5ct".to_string()]),
-            catgeoalt: Some(cat_token::GeoAltitude { altitude: 100.0, deviation: 10.0 }),
+            catgeoalt: Some(cat_token::GeoAltitude {
+                altitude: 100.0,
+                deviation: 10.0,
+            }),
             cattpk: Some(b"thumbprint-data".to_vec()),
         },
         informational: InformationalClaims {
@@ -405,15 +411,15 @@ fn test_invalid_token_format() {
     let key = HmacSha256Algorithm::generate_key().unwrap();
     let algorithm = HmacSha256Algorithm::from_secret_key(&key);
 
-    // Test with wrong number of parts
-    let result = decode_token("invalid", &algorithm);
-    assert!(matches!(result, Err(CatError::InvalidTokenFormat)));
+    // Test with invalid CBOR bytes
+    let result = decode_token(b"invalid", &algorithm);
+    assert!(result.is_err());
 
-    let result = decode_token("too.few", &algorithm);
-    assert!(matches!(result, Err(CatError::InvalidTokenFormat)));
+    let result = decode_token(b"\x00\x01", &algorithm);
+    assert!(result.is_err());
 
-    let result = decode_token("too.many.parts.here", &algorithm);
-    assert!(matches!(result, Err(CatError::InvalidTokenFormat)));
+    let result = decode_token(&[], &algorithm);
+    assert!(result.is_err());
 }
 
 #[test]

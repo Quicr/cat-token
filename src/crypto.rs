@@ -278,11 +278,7 @@ impl CryptographicAlgorithm for Ps256Algorithm {
     }
 }
 
-pub fn create_signing_input(
-    header_protected: &[u8],
-    payload: &[u8],
-    alg_id: i64,
-) -> Vec<u8> {
+pub fn create_signing_input(header_protected: &[u8], payload: &[u8], alg_id: i64) -> Vec<u8> {
     let context = cose_context_string(alg_id);
     create_cose_structure(context, header_protected, payload)
 }

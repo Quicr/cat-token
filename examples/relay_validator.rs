@@ -77,7 +77,7 @@ fn main() {
     // Scenario 4: Invalid token
     print!("4. Invalid token: ");
     match validate_and_authorize(
-        "invalid.token.here",
+        b"invalid-cose-bytes",
         &key,
         &token_validator,
         &moqt_validator,
@@ -109,7 +109,7 @@ fn main() {
 }
 
 fn validate_and_authorize(
-    token_str: &str,
+    token_bytes: &[u8],
     key: &Es256Algorithm,
     token_validator: &CatTokenValidator,
     moqt_validator: &MoqtValidator,
@@ -117,8 +117,8 @@ fn validate_and_authorize(
     namespace: &[u8],
     track: &[u8],
 ) -> Result<MoqtAuthResult, String> {
-    // Step 1: Decode and verify signature
-    let token = decode_token(token_str, key).map_err(|e| e.to_string())?;
+    // Step 1: Decode and verify COSE structure
+    let token = decode_token(token_bytes, key).map_err(|e| e.to_string())?;
 
     // Step 2: Validate standard claims
     token_validator
@@ -141,7 +141,7 @@ fn validate_and_authorize(
     }
 }
 
-fn create_test_token(key: &Es256Algorithm) -> String {
+fn create_test_token(key: &Es256Algorithm) -> Vec<u8> {
     let now = Utc::now();
 
     let scope = MoqtScopeBuilder::new()
@@ -163,7 +163,7 @@ fn create_test_token(key: &Es256Algorithm) -> String {
     encode_token(&token, key).expect("Failed to encode token")
 }
 
-fn create_expired_token(key: &Es256Algorithm) -> String {
+fn create_expired_token(key: &Es256Algorithm) -> Vec<u8> {
     let now = Utc::now();
 
     let token = CatTokenBuilder::new()

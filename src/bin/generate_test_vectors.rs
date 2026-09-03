@@ -38,6 +38,56 @@ fn es256_algorithm() -> Es256Algorithm {
     Es256Algorithm::from_key_pair(signing_key, verifying_key)
 }
 
+struct CoseComponents {
+    protected_header: Vec<u8>,
+    payload: Vec<u8>,
+    signature: Vec<u8>,
+}
+
+fn extract_cose_components(cose_bytes: &[u8]) -> CoseComponents {
+    let value: ciborium::Value = ciborium::de::from_reader(cose_bytes).unwrap();
+    let arr = match value {
+        ciborium::Value::Tag(_, inner) => match *inner {
+            ciborium::Value::Array(a) => a,
+            _ => panic!("expected COSE array"),
+        },
+        _ => panic!("expected COSE tag"),
+    };
+    CoseComponents {
+        protected_header: match &arr[0] {
+            ciborium::Value::Bytes(b) => b.clone(),
+            _ => panic!("expected bytes"),
+        },
+        payload: match &arr[2] {
+            ciborium::Value::Bytes(b) => b.clone(),
+            _ => panic!("expected bytes"),
+        },
+        signature: match &arr[3] {
+            ciborium::Value::Bytes(b) => b.clone(),
+            _ => panic!("expected bytes"),
+        },
+    }
+}
+
+fn tamper_cose_signature(cose_bytes: &[u8]) -> Vec<u8> {
+    let value: ciborium::Value = ciborium::de::from_reader(cose_bytes).unwrap();
+    let (tag, arr) = match value {
+        ciborium::Value::Tag(tag, inner) => match *inner {
+            ciborium::Value::Array(a) => (tag, a),
+            _ => panic!("expected COSE array"),
+        },
+        _ => panic!("expected COSE tag"),
+    };
+    let mut parts: Vec<ciborium::Value> = arr;
+    if let ciborium::Value::Bytes(ref mut sig) = parts[3] {
+        sig[0] ^= 0xff;
+    }
+    let tampered = ciborium::Value::Tag(tag, Box::new(ciborium::Value::Array(parts)));
+    let mut buf = Vec::new();
+    ciborium::ser::into_writer(&tampered, &mut buf).unwrap();
+    buf
+}
+
 fn main() {
     let output_dir = std::path::Path::new("tests/test_data");
     fs::create_dir_all(output_dir).unwrap();
@@ -142,12 +192,13 @@ fn generate_cbor_encoding_vectors() -> JsonValue {
 
     // 1.3: CAT version and usage limit
     {
-        let token = CatToken::new().with_version(1).with_uri_match_rules(vec![
-            cat_token::UriMatchRule {
-                component: cat_token::URI_COMPONENT_HOST,
-                matches: vec![cat_token::MatchValue::Exact("example.com".to_string())],
-            },
-        ]);
+        let token =
+            CatToken::new()
+                .with_version(1)
+                .with_uri_match_rules(vec![cat_token::UriMatchRule {
+                    component: cat_token::URI_COMPONENT_HOST,
+                    matches: vec![cat_token::MatchValue::Exact("example.com".to_string())],
+                }]);
         let cwt = Cwt::new(ALG_HMAC256_256, token);
         let payload_cbor = cwt.encode_payload().unwrap();
         vectors.push(json!({
@@ -275,21 +326,19 @@ fn generate_token_structure_vectors() -> JsonValue {
 
         let alg = HmacSha256Algorithm::new(&hmac_key());
         let encoded = encode_token(&token, &alg).unwrap();
+        let c = extract_cose_components(&encoded);
 
-        let parts: Vec<&str> = encoded.split('.').collect();
         vectors.push(json!({
             "id": "token_hmac_minimal",
-            "description": "Minimal token signed with HMAC-SHA256",
+            "description": "Minimal COSE_Mac0 token signed with HMAC-SHA256",
             "algorithm": "HMAC-SHA256",
             "algorithm_id": ALG_HMAC256_256,
             "key_hex": HMAC_KEY_HEX,
-            "token": encoded,
-            "header_b64": parts[0],
-            "payload_b64": parts[1],
-            "signature_b64": parts[2],
-            "header_cbor_hex": hex::encode(URL_SAFE_NO_PAD.decode(parts[0]).unwrap()),
-            "payload_cbor_hex": hex::encode(URL_SAFE_NO_PAD.decode(parts[1]).unwrap()),
-            "signature_hex": hex::encode(URL_SAFE_NO_PAD.decode(parts[2]).unwrap()),
+            "cose_hex": hex::encode(&encoded),
+            "cose_b64": URL_SAFE_NO_PAD.encode(&encoded),
+            "header_cbor_hex": hex::encode(&c.protected_header),
+            "payload_cbor_hex": hex::encode(&c.payload),
+            "tag_hex": hex::encode(&c.signature),
             "claims": {
                 "iss": "https://auth.example.com",
                 "aud": ["https://relay.example.com"],
@@ -322,21 +371,19 @@ fn generate_token_structure_vectors() -> JsonValue {
 
         let alg = HmacSha256Algorithm::new(&hmac_key());
         let encoded = encode_token(&token, &alg).unwrap();
+        let c = extract_cose_components(&encoded);
 
-        let parts: Vec<&str> = encoded.split('.').collect();
         vectors.push(json!({
             "id": "token_hmac_full",
-            "description": "Token with core + CAT + informational claims, HMAC-SHA256",
+            "description": "COSE_Mac0 token with core + CAT + informational claims, HMAC-SHA256",
             "algorithm": "HMAC-SHA256",
             "algorithm_id": ALG_HMAC256_256,
             "key_hex": HMAC_KEY_HEX,
-            "token": encoded,
-            "header_b64": parts[0],
-            "payload_b64": parts[1],
-            "signature_b64": parts[2],
-            "header_cbor_hex": hex::encode(URL_SAFE_NO_PAD.decode(parts[0]).unwrap()),
-            "payload_cbor_hex": hex::encode(URL_SAFE_NO_PAD.decode(parts[1]).unwrap()),
-            "signature_hex": hex::encode(URL_SAFE_NO_PAD.decode(parts[2]).unwrap()),
+            "cose_hex": hex::encode(&encoded),
+            "cose_b64": URL_SAFE_NO_PAD.encode(&encoded),
+            "header_cbor_hex": hex::encode(&c.protected_header),
+            "payload_cbor_hex": hex::encode(&c.payload),
+            "tag_hex": hex::encode(&c.signature),
             "claims": {
                 "iss": "https://issuer.moq.example",
                 "aud": ["https://relay1.example.com", "https://relay2.example.com"],
@@ -364,26 +411,23 @@ fn generate_token_structure_vectors() -> JsonValue {
 
         let alg = es256_algorithm();
         let encoded = encode_token(&token, &alg).unwrap();
-
-        let parts: Vec<&str> = encoded.split('.').collect();
+        let c = extract_cose_components(&encoded);
         let vk = *es256_signing_key().verifying_key();
         let point = vk.to_encoded_point(false);
 
         vectors.push(json!({
             "id": "token_es256",
-            "description": "Token signed with ES256 (P-256 ECDSA, deterministic RFC 6979)",
+            "description": "COSE_Sign1 token signed with ES256 (P-256 ECDSA, deterministic RFC 6979)",
             "algorithm": "ES256",
             "algorithm_id": ALG_ES256,
             "private_key_hex": ES256_PRIVATE_KEY_HEX,
             "public_key_x_hex": hex::encode(point.x().unwrap()),
             "public_key_y_hex": hex::encode(point.y().unwrap()),
-            "token": encoded,
-            "header_b64": parts[0],
-            "payload_b64": parts[1],
-            "signature_b64": parts[2],
-            "header_cbor_hex": hex::encode(URL_SAFE_NO_PAD.decode(parts[0]).unwrap()),
-            "payload_cbor_hex": hex::encode(URL_SAFE_NO_PAD.decode(parts[1]).unwrap()),
-            "signature_hex": hex::encode(URL_SAFE_NO_PAD.decode(parts[2]).unwrap()),
+            "cose_hex": hex::encode(&encoded),
+            "cose_b64": URL_SAFE_NO_PAD.encode(&encoded),
+            "header_cbor_hex": hex::encode(&c.protected_header),
+            "payload_cbor_hex": hex::encode(&c.payload),
+            "signature_hex": hex::encode(&c.signature),
             "claims": {
                 "iss": "https://auth.example.com",
                 "aud": ["https://moq-relay.example.com"],
@@ -395,7 +439,7 @@ fn generate_token_structure_vectors() -> JsonValue {
     }
 
     json!({
-        "description": "Full token structure (header.payload.signature) with cryptographic verification",
+        "description": "COSE_Sign1/COSE_Mac0 token structure with cryptographic verification",
         "vectors": vectors,
     })
 }
@@ -420,13 +464,14 @@ fn generate_moqt_scope_vectors() -> JsonValue {
 
         let alg = HmacSha256Algorithm::new(&hmac_key());
         let encoded = encode_token(&token, &alg).unwrap();
-        let parts: Vec<&str> = encoded.split('.').collect();
+        let c = extract_cose_components(&encoded);
 
         vectors.push(json!({
             "id": "moqt_publisher_exact",
             "description": "Publisher scope: exact namespace match, prefix track match",
-            "token": encoded,
-            "payload_cbor_hex": hex::encode(URL_SAFE_NO_PAD.decode(parts[1]).unwrap()),
+            "cose_hex": hex::encode(&encoded),
+            "cose_b64": URL_SAFE_NO_PAD.encode(&encoded),
+            "payload_cbor_hex": hex::encode(&c.payload),
             "moqt_scopes": [{
                 "actions": [2, 6],
                 "action_names": ["PublishNamespace", "Publish"],
@@ -464,13 +509,14 @@ fn generate_moqt_scope_vectors() -> JsonValue {
 
         let alg = HmacSha256Algorithm::new(&hmac_key());
         let encoded = encode_token(&token, &alg).unwrap();
-        let parts: Vec<&str> = encoded.split('.').collect();
+        let c = extract_cose_components(&encoded);
 
         vectors.push(json!({
             "id": "moqt_subscriber_prefix",
             "description": "Subscriber scope: prefix namespace match, any track",
-            "token": encoded,
-            "payload_cbor_hex": hex::encode(URL_SAFE_NO_PAD.decode(parts[1]).unwrap()),
+            "cose_hex": hex::encode(&encoded),
+            "cose_b64": URL_SAFE_NO_PAD.encode(&encoded),
+            "payload_cbor_hex": hex::encode(&c.payload),
             "moqt_scopes": [{
                 "actions": [3, 4, 7],
                 "action_names": ["SubscribeNamespace", "Subscribe", "Fetch"],
@@ -508,13 +554,14 @@ fn generate_moqt_scope_vectors() -> JsonValue {
 
         let alg = HmacSha256Algorithm::new(&hmac_key());
         let encoded = encode_token(&token, &alg).unwrap();
-        let parts: Vec<&str> = encoded.split('.').collect();
+        let c = extract_cose_components(&encoded);
 
         vectors.push(json!({
             "id": "moqt_multi_scope",
             "description": "Multi-scope token: publish to specific namespace, subscribe to prefix, with revalidation",
-            "token": encoded,
-            "payload_cbor_hex": hex::encode(URL_SAFE_NO_PAD.decode(parts[1]).unwrap()),
+            "cose_hex": hex::encode(&encoded),
+            "cose_b64": URL_SAFE_NO_PAD.encode(&encoded),
+            "payload_cbor_hex": hex::encode(&c.payload),
             "moqt_reval": 300.0,
             "moqt_scopes": [
                 {
@@ -566,13 +613,14 @@ fn generate_moqt_scope_vectors() -> JsonValue {
 
         let alg = HmacSha256Algorithm::new(&hmac_key());
         let encoded = encode_token(&token, &alg).unwrap();
-        let parts: Vec<&str> = encoded.split('.').collect();
+        let c = extract_cose_components(&encoded);
 
         vectors.push(json!({
             "id": "moqt_admin_wildcard",
             "description": "Admin scope: all actions, no namespace/track restriction",
-            "token": encoded,
-            "payload_cbor_hex": hex::encode(URL_SAFE_NO_PAD.decode(parts[1]).unwrap()),
+            "cose_hex": hex::encode(&encoded),
+            "cose_b64": URL_SAFE_NO_PAD.encode(&encoded),
+            "payload_cbor_hex": hex::encode(&c.payload),
             "moqt_scopes": [{
                 "actions": [0, 1, 2, 3, 4, 5, 6, 7, 8],
                 "action_names": ["ClientSetup", "ServerSetup", "PublishNamespace", "SubscribeNamespace", "Subscribe", "RequestUpdate", "Publish", "Fetch", "TrackStatus"],
@@ -602,13 +650,14 @@ fn generate_moqt_scope_vectors() -> JsonValue {
 
         let alg = HmacSha256Algorithm::new(&hmac_key());
         let encoded = encode_token(&token, &alg).unwrap();
-        let parts: Vec<&str> = encoded.split('.').collect();
+        let c = extract_cose_components(&encoded);
 
         vectors.push(json!({
             "id": "moqt_suffix_match",
             "description": "Suffix matching on both namespace and track",
-            "token": encoded,
-            "payload_cbor_hex": hex::encode(URL_SAFE_NO_PAD.decode(parts[1]).unwrap()),
+            "cose_hex": hex::encode(&encoded),
+            "cose_b64": URL_SAFE_NO_PAD.encode(&encoded),
+            "payload_cbor_hex": hex::encode(&c.payload),
             "moqt_scopes": [{
                 "actions": [4],
                 "action_names": ["Subscribe"],
@@ -649,7 +698,8 @@ fn generate_validation_vectors() -> JsonValue {
         vectors.push(json!({
             "id": "valid_basic",
             "description": "Valid token with correct issuer, audience, and time bounds",
-            "token": encoded,
+            "cose_hex": hex::encode(&encoded),
+            "cose_b64": URL_SAFE_NO_PAD.encode(&encoded),
             "validation": {
                 "expected_issuers": ["https://auth.example.com"],
                 "expected_audiences": ["https://relay.example.com"],
@@ -669,7 +719,8 @@ fn generate_validation_vectors() -> JsonValue {
         vectors.push(json!({
             "id": "invalid_expired",
             "description": "Token with expiration in the past",
-            "token": encoded,
+            "cose_hex": hex::encode(&encoded),
+            "cose_b64": URL_SAFE_NO_PAD.encode(&encoded),
             "validation": {
                 "reference_time": FIXED_IAT,
                 "expected_result": "error",
@@ -689,7 +740,8 @@ fn generate_validation_vectors() -> JsonValue {
         vectors.push(json!({
             "id": "invalid_not_yet_valid",
             "description": "Token with not-before in the future",
-            "token": encoded,
+            "cose_hex": hex::encode(&encoded),
+            "cose_b64": URL_SAFE_NO_PAD.encode(&encoded),
             "validation": {
                 "reference_time": FIXED_IAT,
                 "expected_result": "error",
@@ -710,7 +762,8 @@ fn generate_validation_vectors() -> JsonValue {
         vectors.push(json!({
             "id": "invalid_wrong_issuer",
             "description": "Token from untrusted issuer",
-            "token": encoded,
+            "cose_hex": hex::encode(&encoded),
+            "cose_b64": URL_SAFE_NO_PAD.encode(&encoded),
             "validation": {
                 "expected_issuers": ["https://auth.example.com"],
                 "reference_time": FIXED_IAT + 3600,
@@ -732,7 +785,8 @@ fn generate_validation_vectors() -> JsonValue {
         vectors.push(json!({
             "id": "invalid_wrong_audience",
             "description": "Token not intended for this audience",
-            "token": encoded,
+            "cose_hex": hex::encode(&encoded),
+            "cose_b64": URL_SAFE_NO_PAD.encode(&encoded),
             "validation": {
                 "expected_issuers": ["https://auth.example.com"],
                 "expected_audiences": ["https://relay.example.com"],
@@ -752,18 +806,14 @@ fn generate_validation_vectors() -> JsonValue {
         token.core.exp = Some(FIXED_EXP);
 
         let encoded = encode_token(&token, &alg).unwrap();
-        // Tamper with the signature by flipping a byte
-        let parts: Vec<&str> = encoded.split('.').collect();
-        let mut sig_bytes = URL_SAFE_NO_PAD.decode(parts[2]).unwrap();
-        sig_bytes[0] ^= 0xff;
-        let tampered_sig = URL_SAFE_NO_PAD.encode(&sig_bytes);
-        let tampered_token = format!("{}.{}.{}", parts[0], parts[1], tampered_sig);
+        let tampered = tamper_cose_signature(&encoded);
 
         vectors.push(json!({
             "id": "invalid_tampered_signature",
-            "description": "Token with corrupted signature (first byte flipped)",
-            "token": tampered_token,
-            "original_token": encoded,
+            "description": "COSE_Mac0 token with corrupted tag (first byte flipped)",
+            "cose_hex": hex::encode(&tampered),
+            "cose_b64": URL_SAFE_NO_PAD.encode(&tampered),
+            "original_cose_hex": hex::encode(&encoded),
             "validation": {
                 "key_hex": HMAC_KEY_HEX,
                 "expected_result": "error",
@@ -784,7 +834,8 @@ fn generate_validation_vectors() -> JsonValue {
         vectors.push(json!({
             "id": "invalid_wrong_key",
             "description": "Token verified with incorrect key",
-            "token": encoded,
+            "cose_hex": hex::encode(&encoded),
+            "cose_b64": URL_SAFE_NO_PAD.encode(&encoded),
             "validation": {
                 "correct_key_hex": HMAC_KEY_HEX,
                 "wrong_key_hex": wrong_key_hex,
@@ -803,13 +854,14 @@ fn generate_validation_vectors() -> JsonValue {
         let encoded = encode_token(&token, &alg).unwrap();
         vectors.push(json!({
             "id": "invalid_algorithm_mismatch",
-            "description": "Token header says HMAC-SHA256 but verifier expects ES256",
-            "token": encoded,
+            "description": "COSE_Mac0 token but verifier expects COSE_Sign1/ES256",
+            "cose_hex": hex::encode(&encoded),
+            "cose_b64": URL_SAFE_NO_PAD.encode(&encoded),
             "validation": {
                 "token_algorithm_id": ALG_HMAC256_256,
                 "verifier_algorithm_id": ALG_ES256,
                 "expected_result": "error",
-                "expected_error": "AlgorithmMismatch",
+                "expected_error": "InvalidTokenFormat",
             },
         }));
     }
@@ -844,13 +896,14 @@ fn generate_dpop_vectors() -> JsonValue {
 
         let alg = HmacSha256Algorithm::new(&hmac_key());
         let encoded = encode_token(&token, &alg).unwrap();
-        let parts: Vec<&str> = encoded.split('.').collect();
+        let c = extract_cose_components(&encoded);
 
         vectors.push(json!({
             "id": "dpop_jwk_binding",
             "description": "Token with DPoP key binding (JWK thumbprint in cnf claim)",
-            "token": encoded,
-            "payload_cbor_hex": hex::encode(URL_SAFE_NO_PAD.decode(parts[1]).unwrap()),
+            "cose_hex": hex::encode(&encoded),
+            "cose_b64": URL_SAFE_NO_PAD.encode(&encoded),
+            "payload_cbor_hex": hex::encode(&c.payload),
             "dpop": {
                 "cnf_jkt_hex": hex::encode(&jkt_bytes),
                 "window_seconds": 60,
@@ -876,13 +929,14 @@ fn generate_dpop_vectors() -> JsonValue {
 
         let alg = HmacSha256Algorithm::new(&hmac_key());
         let encoded = encode_token(&token, &alg).unwrap();
-        let parts: Vec<&str> = encoded.split('.').collect();
+        let c = extract_cose_components(&encoded);
 
         vectors.push(json!({
             "id": "dpop_no_jti",
             "description": "DPoP binding with longer window, JTI processing disabled",
-            "token": encoded,
-            "payload_cbor_hex": hex::encode(URL_SAFE_NO_PAD.decode(parts[1]).unwrap()),
+            "cose_hex": hex::encode(&encoded),
+            "cose_b64": URL_SAFE_NO_PAD.encode(&encoded),
+            "payload_cbor_hex": hex::encode(&c.payload),
             "dpop": {
                 "cnf_jkt_hex": hex::encode(&jkt_bytes),
                 "cnf_jkt_source": "SHA-256 of 'test-public-key-material'",
@@ -916,13 +970,14 @@ fn generate_dpop_vectors() -> JsonValue {
 
         let alg = es256_algorithm();
         let encoded = encode_token(&token, &alg).unwrap();
-        let parts: Vec<&str> = encoded.split('.').collect();
+        let c = extract_cose_components(&encoded);
 
         vectors.push(json!({
             "id": "dpop_es256_real_binding",
             "description": "ES256 token with real JWK thumbprint binding to the signing key",
-            "token": encoded,
-            "payload_cbor_hex": hex::encode(URL_SAFE_NO_PAD.decode(parts[1]).unwrap()),
+            "cose_hex": hex::encode(&encoded),
+            "cose_b64": URL_SAFE_NO_PAD.encode(&encoded),
+            "payload_cbor_hex": hex::encode(&c.payload),
             "algorithm": "ES256",
             "public_key_x_hex": hex::encode(point.x().unwrap()),
             "public_key_y_hex": hex::encode(point.y().unwrap()),

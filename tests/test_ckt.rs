@@ -13,8 +13,7 @@ fn test_ckt_on_confirmation_claim() {
 
 #[test]
 fn test_ckt_only_on_token() {
-    let token = CatToken::new()
-        .with_cose_key_thumbprint(b"cose-thumbprint".to_vec());
+    let token = CatToken::new().with_cose_key_thumbprint(b"cose-thumbprint".to_vec());
 
     let cnf = token.dpop.cnf.unwrap();
     assert!(cnf.jkt.is_empty());

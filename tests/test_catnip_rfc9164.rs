@@ -6,8 +6,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 #[test]
 fn test_ipv4_address_uses_tag_52() {
-    let token = CatToken::new()
-        .with_ip_address("192.168.1.100");
+    let token = CatToken::new().with_ip_address("192.168.1.100");
 
     let cwt = Cwt::new(ALG_ES256, token);
     let payload = cwt.encode_payload().unwrap();
@@ -43,9 +42,9 @@ fn test_ipv4_address_uses_tag_52() {
 
 #[test]
 fn test_ipv6_address_uses_tag_54() {
-    let token = CatToken::new().with_network_identifiers(vec![
-        NetworkIdentifier::IpAddress(IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1))),
-    ]);
+    let token = CatToken::new().with_network_identifiers(vec![NetworkIdentifier::IpAddress(
+        IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1)),
+    )]);
 
     let cwt = Cwt::new(ALG_ES256, token);
     let payload = cwt.encode_payload().unwrap();
@@ -166,10 +165,24 @@ fn test_full_catnip_roundtrip() {
     let nips = decoded.cat.catnip.unwrap();
     assert_eq!(nips.len(), 6);
 
-    assert!(matches!(&nips[0], NetworkIdentifier::IpAddress(IpAddr::V4(v4)) if *v4 == Ipv4Addr::new(192, 168, 1, 1)));
-    assert!(matches!(&nips[1], NetworkIdentifier::IpAddress(IpAddr::V6(_))));
-    assert!(matches!(&nips[2], NetworkIdentifier::IpPrefix(IpAddr::V4(_), 8)));
-    assert!(matches!(&nips[3], NetworkIdentifier::IpPrefix(IpAddr::V6(_), 32)));
+    assert!(
+        matches!(&nips[0], NetworkIdentifier::IpAddress(IpAddr::V4(v4)) if *v4 == Ipv4Addr::new(192, 168, 1, 1))
+    );
+    assert!(matches!(
+        &nips[1],
+        NetworkIdentifier::IpAddress(IpAddr::V6(_))
+    ));
+    assert!(matches!(
+        &nips[2],
+        NetworkIdentifier::IpPrefix(IpAddr::V4(_), 8)
+    ));
+    assert!(matches!(
+        &nips[3],
+        NetworkIdentifier::IpPrefix(IpAddr::V6(_), 32)
+    ));
     assert!(matches!(&nips[4], NetworkIdentifier::Asn(64512)));
-    assert!(matches!(&nips[5], NetworkIdentifier::AsnRange(65000, 65100)));
+    assert!(matches!(
+        &nips[5],
+        NetworkIdentifier::AsnRange(65000, 65100)
+    ));
 }

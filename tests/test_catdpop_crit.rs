@@ -14,8 +14,7 @@ fn test_crit_known_keys_accepted() {
 
 #[test]
 fn test_crit_unknown_key_rejected() {
-    let settings = CatDpopSettings::new()
-        .with_critical(vec![0, 1, 99]);
+    let settings = CatDpopSettings::new().with_critical(vec![0, 1, 99]);
 
     assert!(settings.validate_crit().is_err());
 }
@@ -55,8 +54,7 @@ fn test_crit_roundtrip_encode_decode() {
 
 #[test]
 fn test_crit_with_negative_one_key() {
-    let settings = CatDpopSettings::new()
-        .with_critical(vec![-1, 0]);
+    let settings = CatDpopSettings::new().with_critical(vec![-1, 0]);
 
     assert!(settings.validate_crit().is_ok());
 }

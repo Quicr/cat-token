@@ -69,10 +69,10 @@ fn test_single_audience_convenience() {
     ));
 }
 
-// --- decode_token_bytes ---
+// --- decode_token from bytes ---
 
 #[test]
-fn test_decode_token_bytes_valid() {
+fn test_decode_token_valid_cose() {
     let key = Es256Algorithm::new_with_key_pair().unwrap();
     let token = CatTokenBuilder::new()
         .issuer("test-issuer")
@@ -82,27 +82,42 @@ fn test_decode_token_bytes_valid() {
         .build();
 
     let encoded = encode_token(&token, &key).unwrap();
-    let decoded = decode_token_bytes(encoded.as_bytes(), &key).unwrap();
+    let decoded = decode_token(&encoded, &key).unwrap();
 
     assert_eq!(decoded.informational.sub.as_deref(), Some("user-1"));
 }
 
 #[test]
-fn test_decode_token_bytes_invalid_utf8() {
+fn test_decode_token_invalid_cbor() {
     let key = Es256Algorithm::new_with_key_pair().unwrap();
     let invalid_bytes: &[u8] = &[0xFF, 0xFE, 0xFD];
 
-    let result = decode_token_bytes(invalid_bytes, &key);
-    assert!(matches!(result, Err(CatError::InvalidTokenFormat)));
+    let result = decode_token(invalid_bytes, &key);
+    assert!(result.is_err());
 }
 
 #[test]
-fn test_decode_token_bytes_malformed() {
+fn test_decode_token_malformed() {
     let key = Es256Algorithm::new_with_key_pair().unwrap();
-    let malformed = b"not.a.valid.token.at.all";
+    let malformed = b"not-valid-cose-bytes";
 
-    let result = decode_token_bytes(malformed, &key);
+    let result = decode_token(malformed, &key);
     assert!(result.is_err());
+}
+
+// --- decode_token_base64 ---
+
+#[test]
+fn test_decode_token_base64_roundtrip() {
+    let key = Es256Algorithm::new_with_key_pair().unwrap();
+    let token = CatTokenBuilder::new()
+        .issuer("b64-test")
+        .expires_in(3600)
+        .build();
+
+    let encoded_b64 = encode_token_base64(&token, &key).unwrap();
+    let decoded = decode_token_base64(&encoded_b64, &key).unwrap();
+    assert_eq!(decoded.core.iss.as_deref(), Some("b64-test"));
 }
 
 // --- Es256Algorithm::from_public_key_pem / from_public_key_der ---
@@ -337,7 +352,7 @@ fn test_full_roundtrip_new_apis() {
 
     // Encode with signing key, decode with PEM-loaded verifier
     let encoded = encode_token(&token, &key_pair).unwrap();
-    let decoded = decode_token_bytes(encoded.as_bytes(), &verifier).unwrap();
+    let decoded = decode_token(&encoded, &verifier).unwrap();
 
     // Validate standard claims
     let validator = CatTokenValidator::new()

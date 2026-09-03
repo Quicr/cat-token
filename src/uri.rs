@@ -216,10 +216,7 @@ fn normalize_percent_encoding(s: &str) -> String {
 
     while i < bytes.len() {
         if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let (Some(hi), Some(lo)) = (
-                hex_val(bytes[i + 1]),
-                hex_val(bytes[i + 2]),
-            ) {
+            if let (Some(hi), Some(lo)) = (hex_val(bytes[i + 1]), hex_val(bytes[i + 2])) {
                 let decoded = (hi << 4) | lo;
                 if is_unreserved(decoded) {
                     // §6.2.2.2: decode unreserved characters
@@ -270,19 +267,34 @@ mod tests {
     #[test]
     fn test_scheme_lowercase() {
         assert_eq!(normalize_uri("HTTP://example.com/"), "http://example.com/");
-        assert_eq!(normalize_uri("HTTPS://Example.COM/path"), "https://example.com/path");
+        assert_eq!(
+            normalize_uri("HTTPS://Example.COM/path"),
+            "https://example.com/path"
+        );
     }
 
     #[test]
     fn test_host_lowercase() {
-        assert_eq!(normalize_uri("https://EXAMPLE.COM/"), "https://example.com/");
+        assert_eq!(
+            normalize_uri("https://EXAMPLE.COM/"),
+            "https://example.com/"
+        );
     }
 
     #[test]
     fn test_default_port_removal() {
-        assert_eq!(normalize_uri("http://example.com:80/"), "http://example.com/");
-        assert_eq!(normalize_uri("https://example.com:443/"), "https://example.com/");
-        assert_eq!(normalize_uri("https://example.com:8080/"), "https://example.com:8080/");
+        assert_eq!(
+            normalize_uri("http://example.com:80/"),
+            "http://example.com/"
+        );
+        assert_eq!(
+            normalize_uri("https://example.com:443/"),
+            "https://example.com/"
+        );
+        assert_eq!(
+            normalize_uri("https://example.com:8080/"),
+            "https://example.com:8080/"
+        );
     }
 
     #[test]
@@ -292,17 +304,32 @@ mod tests {
 
     #[test]
     fn test_dot_segments() {
-        assert_eq!(normalize_uri("https://example.com/a/b/../c"), "https://example.com/a/c");
-        assert_eq!(normalize_uri("https://example.com/a/./b"), "https://example.com/a/b");
-        assert_eq!(normalize_uri("https://example.com/a/b/c/../../d"), "https://example.com/a/d");
+        assert_eq!(
+            normalize_uri("https://example.com/a/b/../c"),
+            "https://example.com/a/c"
+        );
+        assert_eq!(
+            normalize_uri("https://example.com/a/./b"),
+            "https://example.com/a/b"
+        );
+        assert_eq!(
+            normalize_uri("https://example.com/a/b/c/../../d"),
+            "https://example.com/a/d"
+        );
     }
 
     #[test]
     fn test_percent_encoding_normalization() {
         // Unreserved chars should be decoded
-        assert_eq!(normalize_uri("https://example.com/%61%62%63"), "https://example.com/abc");
+        assert_eq!(
+            normalize_uri("https://example.com/%61%62%63"),
+            "https://example.com/abc"
+        );
         // Reserved chars stay encoded but with uppercase hex
-        assert_eq!(normalize_uri("https://example.com/%2f"), "https://example.com/%2F");
+        assert_eq!(
+            normalize_uri("https://example.com/%2f"),
+            "https://example.com/%2F"
+        );
     }
 
     #[test]

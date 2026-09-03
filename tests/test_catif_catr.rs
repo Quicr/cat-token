@@ -8,7 +8,11 @@ use cat_token::*;
 fn test_catif_single_action() {
     let token = CatToken::new().with_if_action(
         CLAIM_EXP,
-        CatIfAction { status: 401, headers: None, kid: None },
+        CatIfAction {
+            status: 401,
+            headers: None,
+            kid: None,
+        },
     );
 
     let actions = token.request.catif.unwrap();
@@ -22,8 +26,22 @@ fn test_catif_single_action() {
 #[test]
 fn test_catif_multiple_actions() {
     let token = CatToken::new()
-        .with_if_action(CLAIM_EXP, CatIfAction { status: 401, headers: None, kid: None })
-        .with_if_action(CLAIM_AUD, CatIfAction { status: 403, headers: None, kid: None });
+        .with_if_action(
+            CLAIM_EXP,
+            CatIfAction {
+                status: 401,
+                headers: None,
+                kid: None,
+            },
+        )
+        .with_if_action(
+            CLAIM_AUD,
+            CatIfAction {
+                status: 403,
+                headers: None,
+                kid: None,
+            },
+        );
 
     let actions = token.request.catif.unwrap();
     assert_eq!(actions.len(), 2);
@@ -33,12 +51,17 @@ fn test_catif_multiple_actions() {
 
 #[test]
 fn test_catif_with_headers() {
-    let headers = vec![
-        ("WWW-Authenticate".to_string(), "Bearer realm=\"example\"".to_string()),
-    ];
+    let headers = vec![(
+        "WWW-Authenticate".to_string(),
+        "Bearer realm=\"example\"".to_string(),
+    )];
     let token = CatToken::new().with_if_action(
         CLAIM_EXP,
-        CatIfAction { status: 401, headers: Some(headers.clone()), kid: None },
+        CatIfAction {
+            status: 401,
+            headers: Some(headers.clone()),
+            kid: None,
+        },
     );
 
     let action = &token.request.catif.unwrap()[0].1;
@@ -50,7 +73,11 @@ fn test_catif_with_headers() {
 fn test_catif_with_kid() {
     let token = CatToken::new().with_if_action(
         CLAIM_EXP,
-        CatIfAction { status: 401, headers: None, kid: Some("key-123".to_string()) },
+        CatIfAction {
+            status: 401,
+            headers: None,
+            kid: Some("key-123".to_string()),
+        },
     );
 
     let action = &token.request.catif.unwrap()[0].1;
@@ -80,13 +107,25 @@ fn test_catif_roundtrip() {
     let alg = HmacSha256Algorithm::generate_key().unwrap();
     let algorithm = HmacSha256Algorithm::from_secret_key(&alg);
 
-    let headers = vec![
-        ("WWW-Authenticate".to_string(), "Bearer".to_string()),
-    ];
+    let headers = vec![("WWW-Authenticate".to_string(), "Bearer".to_string())];
     let token = CatToken::new()
         .with_issuer("test")
-        .with_if_action(CLAIM_EXP, CatIfAction { status: 401, headers: Some(headers), kid: None })
-        .with_if_action(CLAIM_AUD, CatIfAction { status: 403, headers: None, kid: Some("k1".to_string()) });
+        .with_if_action(
+            CLAIM_EXP,
+            CatIfAction {
+                status: 401,
+                headers: Some(headers),
+                kid: None,
+            },
+        )
+        .with_if_action(
+            CLAIM_AUD,
+            CatIfAction {
+                status: 403,
+                headers: None,
+                kid: Some("k1".to_string()),
+            },
+        );
 
     let encoded = encode_token(&token, &algorithm).unwrap();
     let decoded = decode_token(&encoded, &algorithm).unwrap();
@@ -95,7 +134,10 @@ fn test_catif_roundtrip() {
     assert_eq!(actions.len(), 2);
     assert_eq!(actions[0].0, CLAIM_EXP);
     assert_eq!(actions[0].1.status, 401);
-    assert_eq!(actions[0].1.headers.as_ref().unwrap()[0].0, "WWW-Authenticate");
+    assert_eq!(
+        actions[0].1.headers.as_ref().unwrap()[0].0,
+        "WWW-Authenticate"
+    );
     assert_eq!(actions[1].0, CLAIM_AUD);
     assert_eq!(actions[1].1.status, 403);
     assert_eq!(actions[1].1.kid.as_ref().unwrap(), "k1");
@@ -105,7 +147,14 @@ fn test_catif_roundtrip() {
 fn test_catif_builder() {
     let token = CatTokenBuilder::new()
         .issuer("test")
-        .if_action(CLAIM_EXP, CatIfAction { status: 401, headers: None, kid: None })
+        .if_action(
+            CLAIM_EXP,
+            CatIfAction {
+                status: 401,
+                headers: None,
+                kid: None,
+            },
+        )
         .build();
 
     assert!(token.request.catif.is_some());
@@ -145,9 +194,7 @@ fn test_catr_cookie_renewal() {
 
 #[test]
 fn test_catr_header_renewal() {
-    let token = CatToken::new().with_renewal(
-        CatRenewal::header("X-Auth-Token").with_expadd(1800),
-    );
+    let token = CatToken::new().with_renewal(CatRenewal::header("X-Auth-Token").with_expadd(1800));
 
     let catr = token.request.catr.unwrap();
     assert_eq!(catr.renewal_type, CatRenewalType::Header);
@@ -181,14 +228,12 @@ fn test_catr_roundtrip() {
     let alg = HmacSha256Algorithm::generate_key().unwrap();
     let algorithm = HmacSha256Algorithm::from_secret_key(&alg);
 
-    let token = CatToken::new()
-        .with_issuer("test")
-        .with_renewal(
-            CatRenewal::cookie("token")
-                .with_expadd(3600)
-                .with_deadline(1700000000)
-                .with_params(vec![("Secure".to_string(), "true".to_string())]),
-        );
+    let token = CatToken::new().with_issuer("test").with_renewal(
+        CatRenewal::cookie("token")
+            .with_expadd(3600)
+            .with_deadline(1700000000)
+            .with_params(vec![("Secure".to_string(), "true".to_string())]),
+    );
 
     let encoded = encode_token(&token, &algorithm).unwrap();
     let decoded = decode_token(&encoded, &algorithm).unwrap();
@@ -249,7 +294,14 @@ fn test_catif_and_catr_together_roundtrip() {
 
     let token = CatToken::new()
         .with_issuer("test")
-        .with_if_action(CLAIM_EXP, CatIfAction { status: 401, headers: None, kid: None })
+        .with_if_action(
+            CLAIM_EXP,
+            CatIfAction {
+                status: 401,
+                headers: None,
+                kid: None,
+            },
+        )
         .with_renewal(CatRenewal::automatic().with_expadd(3600));
 
     let encoded = encode_token(&token, &algorithm).unwrap();
@@ -258,5 +310,8 @@ fn test_catif_and_catr_together_roundtrip() {
     assert!(decoded.request.catif.is_some());
     assert!(decoded.request.catr.is_some());
     assert_eq!(decoded.request.catif.unwrap()[0].1.status, 401);
-    assert_eq!(decoded.request.catr.unwrap().renewal_type, CatRenewalType::Automatic);
+    assert_eq!(
+        decoded.request.catr.unwrap().renewal_type,
+        CatRenewalType::Automatic
+    );
 }

@@ -98,12 +98,10 @@ fn test_cose_mac0_context_string_for_hmac() {
         .expect("signing input must be valid CBOR");
 
     match value {
-        ciborium::Value::Array(arr) => {
-            match &arr[0] {
-                ciborium::Value::Text(s) => assert_eq!(s, "MAC0"),
-                _ => panic!("Element 0 must be text"),
-            }
-        }
+        ciborium::Value::Array(arr) => match &arr[0] {
+            ciborium::Value::Text(s) => assert_eq!(s, "MAC0"),
+            _ => panic!("Element 0 must be text"),
+        },
         _ => panic!("MAC input must be a CBOR array"),
     }
 }
@@ -133,13 +131,11 @@ fn test_tampered_token_rejected_with_cose_structure() {
 
     let encoded = encode_token(&token, &alg).unwrap();
 
-    // Tamper with the payload (change a character in the base64 payload)
-    let parts: Vec<&str> = encoded.split('.').collect();
-    let tampered = format!("{}{}{}{}{}",
-        parts[0], ".",
-        "AAAA", // replaced payload
-        ".", parts[2]
-    );
+    // Tamper with the COSE_Mac0 by flipping a byte in the payload
+    let mut tampered = encoded.clone();
+    if tampered.len() > 20 {
+        tampered[20] ^= 0xff;
+    }
 
     let result = decode_token(&tampered, &alg);
     assert!(result.is_err());
@@ -152,9 +148,7 @@ fn test_wrong_key_rejected_with_cose_structure() {
     let alg1 = HmacSha256Algorithm::from_secret_key(&key1);
     let alg2 = HmacSha256Algorithm::from_secret_key(&key2);
 
-    let token = CatTokenBuilder::new()
-        .issuer("https://example.com")
-        .build();
+    let token = CatTokenBuilder::new().issuer("https://example.com").build();
 
     let encoded = encode_token(&token, &alg1).unwrap();
     let result = decode_token(&encoded, &alg2);

@@ -7,10 +7,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 #[test]
 fn test_network_identifier_types() {
     let ip = NetworkIdentifier::IpAddress(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)));
-    let ip_prefix = NetworkIdentifier::IpPrefix(
-        IpAddr::V4(Ipv4Addr::new(192, 168, 0, 0)),
-        24,
-    );
+    let ip_prefix = NetworkIdentifier::IpPrefix(IpAddr::V4(Ipv4Addr::new(192, 168, 0, 0)), 24);
     let asn = NetworkIdentifier::Asn(64512);
     let asn_range = NetworkIdentifier::AsnRange(64512, 65534);
 
@@ -89,8 +86,14 @@ fn test_token_builder_network_methods() {
         NetworkIdentifier::IpAddress(addr) if *addr == IpAddr::V4(Ipv4Addr::new(203, 0, 113, 1)))));
     assert!(nips.iter().any(|nip| matches!(nip,
         NetworkIdentifier::IpPrefix(addr, 24) if *addr == IpAddr::V4(Ipv4Addr::new(198, 51, 100, 0)))));
-    assert!(nips.iter().any(|nip| matches!(nip, NetworkIdentifier::Asn(64496))));
-    assert!(nips.iter().any(|nip| matches!(nip, NetworkIdentifier::AsnRange(65000, 65010))));
+    assert!(
+        nips.iter()
+            .any(|nip| matches!(nip, NetworkIdentifier::Asn(64496)))
+    );
+    assert!(
+        nips.iter()
+            .any(|nip| matches!(nip, NetworkIdentifier::AsnRange(65000, 65010)))
+    );
 }
 
 #[test]
@@ -148,8 +151,14 @@ fn test_ipv6_encoding_decoding() {
 
     let decoded_nips = decoded.cat.catnip.unwrap();
     assert_eq!(decoded_nips.len(), 2);
-    assert!(matches!(&decoded_nips[0], NetworkIdentifier::IpAddress(IpAddr::V6(_))));
-    assert!(matches!(&decoded_nips[1], NetworkIdentifier::IpPrefix(IpAddr::V6(_), 32)));
+    assert!(matches!(
+        &decoded_nips[0],
+        NetworkIdentifier::IpAddress(IpAddr::V6(_))
+    ));
+    assert!(matches!(
+        &decoded_nips[1],
+        NetworkIdentifier::IpPrefix(IpAddr::V6(_), 32)
+    ));
 }
 
 #[test]

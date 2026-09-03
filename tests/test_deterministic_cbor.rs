@@ -29,7 +29,10 @@ fn test_sorted_keys_accepted() {
     let result = Cwt::decode_payload(&cbor);
     assert!(result.is_ok(), "Sorted keys should be accepted");
     let token = result.unwrap();
-    assert_eq!(token.core.iss, Some("https://issuer.example.com".to_string()));
+    assert_eq!(
+        token.core.iss,
+        Some("https://issuer.example.com".to_string())
+    );
 }
 
 #[test]
@@ -82,10 +85,7 @@ fn test_unsorted_keys_rejected() {
     assert!(result.is_err());
     match result {
         Err(CatError::InvalidCbor(msg)) => {
-            assert!(
-                msg.contains("deterministic order"),
-                "Error: {msg}"
-            );
+            assert!(msg.contains("deterministic order"), "Error: {msg}");
         }
         other => panic!("Expected InvalidCbor with ordering message, got: {other:?}"),
     }
@@ -109,11 +109,7 @@ fn test_empty_map_accepted() {
 #[test]
 fn test_many_sorted_keys_accepted() {
     // Keys 1, 2, 3, 4, 5, 6 in order — valid
-    let cbor = build_cbor_map(&[
-        (1, "issuer"),
-        (2, "subject"),
-        (3, "audience"),
-    ]);
+    let cbor = build_cbor_map(&[(1, "issuer"), (2, "subject"), (3, "audience")]);
     let result = Cwt::decode_payload(&cbor);
     assert!(result.is_ok());
 }

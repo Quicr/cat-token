@@ -40,12 +40,10 @@ fn test_core_claims() {
 
 #[test]
 fn test_cat_claims() {
-    let uri_rules = vec![
-        UriMatchRule {
-            component: URI_COMPONENT_HOST,
-            matches: vec![MatchValue::Exact("api.example.com".to_string())],
-        },
-    ];
+    let uri_rules = vec![UriMatchRule {
+        component: URI_COMPONENT_HOST,
+        matches: vec![MatchValue::Exact("api.example.com".to_string())],
+    }];
     let token = CatToken::new()
         .with_version(1)
         .with_uri_match_rules(uri_rules.clone())
@@ -55,7 +53,10 @@ fn test_cat_claims() {
 
     assert_eq!(token.cat.catv, Some(1));
     assert_eq!(token.cat.catu, Some(uri_rules));
-    assert_eq!(token.cat.catreplay, Some(cat_token::ReplayProtection::Prohibited));
+    assert_eq!(
+        token.cat.catreplay,
+        Some(cat_token::ReplayProtection::Prohibited)
+    );
 
     assert!(token.cat.catgeocoord.is_some());
     let coords = token.cat.catgeocoord.unwrap();
@@ -158,7 +159,14 @@ fn test_token_builder() {
         .version(1)
         .subject("user456")
         .confirmation(jkt.clone())
-        .if_action(CLAIM_EXP, CatIfAction { status: 403, headers: None, kid: None })
+        .if_action(
+            CLAIM_EXP,
+            CatIfAction {
+                status: 403,
+                headers: None,
+                kid: None,
+            },
+        )
         .build();
 
     assert_eq!(token.core.iss, Some("https://auth.example.com".to_string()));

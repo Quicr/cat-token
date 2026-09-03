@@ -8,7 +8,8 @@
 
 use cat_token::{
     CatTokenBuilder, CatTokenValidator, Es256Algorithm, MatchValue, NetworkIdentifier,
-    UriMatchRule, URI_COMPONENT_EXTENSION, URI_COMPONENT_PATH, decode_token, encode_token,
+    URI_COMPONENT_EXTENSION, URI_COMPONENT_PATH, UriMatchRule, decode_token, encode_token,
+    encode_token_base64,
 };
 use chrono::{Duration, Utc};
 
@@ -41,9 +42,10 @@ fn main() {
         .build();
 
     let encoded = encode_token(&cdn_token, &key).unwrap();
+    let encoded_b64 = encode_token_base64(&cdn_token, &key).unwrap();
     println!(
-        "   Encoded: {}... ({} bytes)",
-        &encoded[..40],
+        "   Encoded (b64): {}... ({} COSE bytes)",
+        &encoded_b64[..40],
         encoded.len()
     );
 
@@ -59,22 +61,20 @@ fn main() {
             NetworkIdentifier::IpPrefix("192.168.0.0".parse().unwrap(), 16),
             NetworkIdentifier::Asn(64512),
         ])
-        .uri_match_rules(vec![
-            UriMatchRule {
-                component: URI_COMPONENT_PATH,
-                matches: vec![
-                    MatchValue::Prefix("/api/v1/".to_string()),
-                    MatchValue::Exact("/health".to_string()),
-                ],
-            },
-        ])
+        .uri_match_rules(vec![UriMatchRule {
+            component: URI_COMPONENT_PATH,
+            matches: vec![
+                MatchValue::Prefix("/api/v1/".to_string()),
+                MatchValue::Exact("/health".to_string()),
+            ],
+        }])
         .build();
 
-    let encoded = encode_token(&api_token, &key).unwrap();
+    let encoded_b64 = encode_token_base64(&api_token, &key).unwrap();
     println!(
-        "   Encoded: {}... ({} bytes)",
-        &encoded[..40],
-        encoded.len()
+        "   Encoded (b64): {}... ({} chars)",
+        &encoded_b64[..40],
+        encoded_b64.len()
     );
 
     // Example 3: Geo-restricted token
@@ -89,9 +89,10 @@ fn main() {
         .build();
 
     let encoded = encode_token(&geo_token, &key).unwrap();
+    let encoded_b64 = encode_token_base64(&geo_token, &key).unwrap();
     println!(
-        "   Encoded: {}... ({} bytes)",
-        &encoded[..40],
+        "   Encoded (b64): {}... ({} COSE bytes)",
+        &encoded_b64[..40],
         encoded.len()
     );
 

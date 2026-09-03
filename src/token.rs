@@ -1,12 +1,13 @@
 // SPDX-FileCopyrightText: Copyright (c) 2022 Quicr
 // SPDX-License-Identifier: BSD-2-Clause
 
-use crate::{
-    CatError, CatToken, CryptographicAlgorithm, Cwt, CwtHeader, NetworkIdentifier,
-};
+use crate::{CatError, CatToken, CryptographicAlgorithm, Cwt, CwtHeader, NetworkIdentifier};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, Utc};
 use std::collections::HashSet;
+
+const COSE_TAG_SIGN1: u64 = 18;
+const COSE_TAG_MAC0: u64 = 17;
 
 pub struct CatTokenValidator {
     expected_issuers: Option<HashSet<String>>,
@@ -159,9 +160,7 @@ impl CatTokenValidator {
                 for mv in &rule.matches {
                     if let crate::claims::MatchValue::Regex(pattern) = mv {
                         if let Some(err) = crate::claims::validate_posix_ere(pattern) {
-                            return Err(CatError::InvalidClaimValue(format!(
-                                "catu regex: {err}"
-                            )));
+                            return Err(CatError::InvalidClaimValue(format!("catu regex: {err}")));
                         }
                     }
                 }
@@ -172,9 +171,7 @@ impl CatTokenValidator {
                 for mv in &rule.matches {
                     if let crate::claims::MatchValue::Regex(pattern) = mv {
                         if let Some(err) = crate::claims::validate_posix_ere(pattern) {
-                            return Err(CatError::InvalidClaimValue(format!(
-                                "cath regex: {err}"
-                            )));
+                            return Err(CatError::InvalidClaimValue(format!("cath regex: {err}")));
                         }
                     }
                 }
@@ -287,9 +284,9 @@ impl CatTokenBuilder {
         id: Vec<u8>,
         expiration: Option<i64>,
     ) -> Self {
-        self.inner =
-            self.inner
-                .with_probability_of_rejection(probability, id, expiration);
+        self.inner = self
+            .inner
+            .with_probability_of_rejection(probability, id, expiration);
         self
     }
 
@@ -427,96 +424,153 @@ impl CatTokenBuilder {
     }
 }
 
-pub fn encode_token(
-    token: &CatToken,
-    algorithm: &dyn CryptographicAlgorithm,
-) -> Result<String, CatError> {
-    let cwt = Cwt::new(algorithm.algorithm_id(), token.clone());
-
+fn encode_protected_header(algorithm: &dyn CryptographicAlgorithm) -> Result<Vec<u8>, CatError> {
+    let cwt = Cwt::new(algorithm.algorithm_id(), CatToken::new());
     let header = CwtHeader {
         alg: algorithm.algorithm_id(),
         kid: cwt.header.kid.clone(),
         typ: cwt.header.typ.clone(),
     };
 
-    let header_cbor = {
-        let mut header_map = std::collections::BTreeMap::new();
-        header_map.insert(1i64, ciborium::Value::Integer(header.alg.into()));
-        if let Some(ref kid) = header.kid {
-            header_map.insert(4i64, ciborium::Value::Text(kid.clone()));
-        }
-        if let Some(ref typ) = header.typ {
-            header_map.insert(16i64, ciborium::Value::Text(typ.clone()));
-        }
+    let mut header_map = std::collections::BTreeMap::new();
+    header_map.insert(1i64, ciborium::Value::Integer(header.alg.into()));
+    if let Some(ref kid) = header.kid {
+        header_map.insert(4i64, ciborium::Value::Text(kid.clone()));
+    }
+    if let Some(ref typ) = header.typ {
+        header_map.insert(16i64, ciborium::Value::Text(typ.clone()));
+    }
 
-        let cbor_map: Vec<(ciborium::Value, ciborium::Value)> = header_map
-            .into_iter()
-            .map(|(k, v)| (ciborium::Value::Integer(k.into()), v))
-            .collect();
+    let cbor_map: Vec<(ciborium::Value, ciborium::Value)> = header_map
+        .into_iter()
+        .map(|(k, v)| (ciborium::Value::Integer(k.into()), v))
+        .collect();
 
-        let mut buffer = Vec::new();
-        ciborium::ser::into_writer(&ciborium::Value::Map(cbor_map), &mut buffer)
-            .map_err(|e| CatError::InvalidCbor(e.to_string()))?;
-        buffer
-    };
+    let mut buffer = Vec::new();
+    ciborium::ser::into_writer(&ciborium::Value::Map(cbor_map), &mut buffer)
+        .map_err(|e| CatError::InvalidCbor(e.to_string()))?;
+    Ok(buffer)
+}
 
+/// Encode a CatToken as COSE_Sign1 (tag 18) or COSE_Mac0 (tag 17) CBOR bytes
+/// per RFC 8392 §7 and RFC 9052.
+pub fn encode_token(
+    token: &CatToken,
+    algorithm: &dyn CryptographicAlgorithm,
+) -> Result<Vec<u8>, CatError> {
+    let cwt = Cwt::new(algorithm.algorithm_id(), token.clone());
+    let header_cbor = encode_protected_header(algorithm)?;
     let payload_cbor = cwt.encode_payload()?;
 
     let signing_input =
         crate::crypto::create_signing_input(&header_cbor, &payload_cbor, algorithm.algorithm_id());
     let signature = algorithm.sign(&signing_input)?;
 
-    let header_b64 = URL_SAFE_NO_PAD.encode(&header_cbor);
-    let payload_b64 = URL_SAFE_NO_PAD.encode(&payload_cbor);
-    let signature_b64 = URL_SAFE_NO_PAD.encode(&signature);
+    let alg_id = algorithm.algorithm_id();
+    let tag = if alg_id == crate::crypto::ALG_HMAC256_256 {
+        COSE_TAG_MAC0
+    } else {
+        COSE_TAG_SIGN1
+    };
 
-    Ok(format!("{}.{}.{}", header_b64, payload_b64, signature_b64))
+    // COSE_Sign1 = [protected, unprotected, payload, signature]
+    // COSE_Mac0  = [protected, unprotected, payload, tag]
+    let cose_array = ciborium::Value::Array(vec![
+        ciborium::Value::Bytes(header_cbor),
+        ciborium::Value::Map(vec![]), // unprotected header (empty)
+        ciborium::Value::Bytes(payload_cbor),
+        ciborium::Value::Bytes(signature),
+    ]);
+
+    let tagged = ciborium::Value::Tag(tag, Box::new(cose_array));
+    let mut buffer = Vec::new();
+    ciborium::ser::into_writer(&tagged, &mut buffer)
+        .map_err(|e| CatError::InvalidCbor(e.to_string()))?;
+
+    Ok(buffer)
 }
 
-pub fn decode_token_bytes(
-    token_bytes: &[u8],
+/// Encode a CatToken and return it as a base64url string for text transport.
+pub fn encode_token_base64(
+    token: &CatToken,
     algorithm: &dyn CryptographicAlgorithm,
-) -> Result<CatToken, CatError> {
-    let token_str = std::str::from_utf8(token_bytes).map_err(|_| CatError::InvalidTokenFormat)?;
-    decode_token(token_str, algorithm)
+) -> Result<String, CatError> {
+    let bytes = encode_token(token, algorithm)?;
+    Ok(URL_SAFE_NO_PAD.encode(&bytes))
 }
 
+/// Decode a CatToken from COSE_Sign1 (tag 18) or COSE_Mac0 (tag 17) CBOR bytes.
 pub fn decode_token(
-    token_str: &str,
+    cose_bytes: &[u8],
     algorithm: &dyn CryptographicAlgorithm,
 ) -> Result<CatToken, CatError> {
-    let parts: Vec<&str> = token_str.split('.').collect();
-    if parts.len() != 3 {
+    let value: ciborium::Value =
+        ciborium::de::from_reader(cose_bytes).map_err(|e| CatError::InvalidCbor(e.to_string()))?;
+
+    let (expected_tag, arr) = match value {
+        ciborium::Value::Tag(tag, inner) => {
+            if tag != COSE_TAG_SIGN1 && tag != COSE_TAG_MAC0 {
+                return Err(CatError::InvalidTokenFormat);
+            }
+            match *inner {
+                ciborium::Value::Array(a) if a.len() == 4 => (tag, a),
+                _ => return Err(CatError::InvalidTokenFormat),
+            }
+        }
+        _ => return Err(CatError::InvalidTokenFormat),
+    };
+
+    let header_cbor = match &arr[0] {
+        ciborium::Value::Bytes(b) => b.clone(),
+        _ => return Err(CatError::InvalidTokenFormat),
+    };
+    // arr[1] is the unprotected header — we ignore it
+    let payload_cbor = match &arr[2] {
+        ciborium::Value::Bytes(b) => b.clone(),
+        _ => return Err(CatError::InvalidTokenFormat),
+    };
+    let signature = match &arr[3] {
+        ciborium::Value::Bytes(b) => b.clone(),
+        _ => return Err(CatError::InvalidTokenFormat),
+    };
+
+    // Verify the COSE tag matches the algorithm type
+    let alg_id = algorithm.algorithm_id();
+    let correct_tag = if alg_id == crate::crypto::ALG_HMAC256_256 {
+        COSE_TAG_MAC0
+    } else {
+        COSE_TAG_SIGN1
+    };
+    if expected_tag != correct_tag {
         return Err(CatError::InvalidTokenFormat);
     }
 
-    let header_cbor = URL_SAFE_NO_PAD
-        .decode(parts[0])
-        .map_err(|e| CatError::InvalidBase64(e.to_string()))?;
-    let payload_cbor = URL_SAFE_NO_PAD
-        .decode(parts[1])
-        .map_err(|e| CatError::InvalidBase64(e.to_string()))?;
-    let signature = URL_SAFE_NO_PAD
-        .decode(parts[2])
-        .map_err(|e| CatError::InvalidBase64(e.to_string()))?;
-
-    // Verify algorithm in header matches expected algorithm
     let header_alg = extract_algorithm_from_header(&header_cbor)?;
-    if header_alg != algorithm.algorithm_id() {
+    if header_alg != alg_id {
         return Err(CatError::AlgorithmMismatch {
-            expected: algorithm.algorithm_id(),
+            expected: alg_id,
             found: header_alg,
         });
     }
 
-    let signing_input =
-        crate::crypto::create_signing_input(&header_cbor, &payload_cbor, algorithm.algorithm_id());
+    let signing_input = crate::crypto::create_signing_input(&header_cbor, &payload_cbor, alg_id);
 
     if !algorithm.verify(&signing_input, &signature)? {
         return Err(CatError::SignatureVerificationFailed);
     }
 
     Cwt::decode_payload(&payload_cbor)
+}
+
+/// Decode a CatToken from a base64url-encoded COSE structure.
+pub fn decode_token_base64(
+    token_str: &str,
+    algorithm: &dyn CryptographicAlgorithm,
+) -> Result<CatToken, CatError> {
+    let bytes = URL_SAFE_NO_PAD
+        .decode(token_str)
+        .map_err(|e| CatError::InvalidBase64(e.to_string()))?;
+    decode_token(&bytes, algorithm)
 }
 
 fn extract_algorithm_from_header(header_cbor: &[u8]) -> Result<i64, CatError> {
@@ -532,7 +586,6 @@ fn extract_algorithm_from_header(header_cbor: &[u8]) -> Result<i64, CatError> {
         if let ciborium::Value::Integer(k) = key {
             let k_i64: i64 = k.try_into().map_err(|_| CatError::InvalidTokenFormat)?;
             if k_i64 == 1 {
-                // alg claim key
                 if let ciborium::Value::Integer(alg) = val {
                     return alg.try_into().map_err(|_| CatError::InvalidTokenFormat);
                 }

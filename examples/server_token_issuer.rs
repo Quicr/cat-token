@@ -23,7 +23,7 @@ fn issue_publisher_token(
     user_id: &str,
     namespace: &str,
     client_jwk: Option<&Jwk>, // For DPoP binding
-) -> Result<String, CatError> {
+) -> Result<Vec<u8>, CatError> {
     let now = Utc::now();
 
     let scope = MoqtScopeBuilder::new()
@@ -61,7 +61,7 @@ fn issue_subscriber_token(
     algorithm: &Es256Algorithm,
     user_id: &str,
     namespaces: &[&str], // Multiple namespaces the user can subscribe to
-) -> Result<String, CatError> {
+) -> Result<Vec<u8>, CatError> {
     let now = Utc::now();
 
     // Create a scope for each namespace
@@ -93,7 +93,7 @@ fn issue_admin_token(
     algorithm: &Es256Algorithm,
     admin_id: &str,
     client_jwk: &Jwk, // DPoP required for admin
-) -> Result<String, CatError> {
+) -> Result<Vec<u8>, CatError> {
     let now = Utc::now();
 
     let scope = MoqtScopeBuilder::new()
@@ -138,8 +138,7 @@ fn main() {
     )
     .expect("Failed to issue publisher token");
 
-    println!("   Token length: {} bytes", pub_token.len());
-    println!("   Token (truncated): {}...\n", &pub_token[..50]);
+    println!("   Token length: {} COSE bytes", pub_token.len());
 
     // Scenario 2: Viewer requesting token to watch multiple channels
     println!("2. Issuing subscriber token for user 'viewer456'");
@@ -154,8 +153,7 @@ fn main() {
     )
     .expect("Failed to issue subscriber token");
 
-    println!("   Token length: {} bytes", sub_token.len());
-    println!("   Token (truncated): {}...\n", &sub_token[..50]);
+    println!("   Token length: {} COSE bytes", sub_token.len());
 
     // Scenario 3: Admin with DPoP binding
     println!("3. Issuing admin token for 'admin@example.com' (with DPoP)");
@@ -167,8 +165,7 @@ fn main() {
     let admin_token = issue_admin_token(&algorithm, "admin@example.com", &admin_jwk)
         .expect("Failed to issue admin token");
 
-    println!("   Token length: {} bytes", admin_token.len());
-    println!("   Token (truncated): {}...\n", &admin_token[..50]);
+    println!("   Token length: {} COSE bytes\n", admin_token.len());
 
     println!("=== Token Issuance Complete ===");
     println!("\nIn production, these tokens would be returned to clients via:");

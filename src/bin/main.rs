@@ -70,7 +70,10 @@ fn generate_hmac_example() -> Result<(), Box<dyn std::error::Error>> {
         "HMAC256 Key: [REDACTED - {} bytes generated]",
         key.as_bytes().len()
     );
-    println!("Sample CAT Token: {}", encoded);
+    println!(
+        "Sample CAT Token (b64): {}",
+        encode_token_base64(&token, &algorithm)?
+    );
 
     let decoded = decode_token(&encoded, &algorithm)?;
     println!("Token verified and decoded successfully!");
@@ -93,7 +96,10 @@ fn generate_es256_example() -> Result<(), Box<dyn std::error::Error>> {
         "ES256 Public Key (JWK): {}",
         serde_json::to_string(&jwk).unwrap_or_else(|_| "Error serializing JWK".to_string())
     );
-    println!("Sample CAT Token: {}", encoded);
+    println!(
+        "Sample CAT Token (b64): {}",
+        encode_token_base64(&token, &algorithm)?
+    );
 
     let decoded = decode_token(&encoded, &algorithm)?;
     println!("Token verified and decoded successfully!");
@@ -116,7 +122,10 @@ fn generate_ps256_example() -> Result<(), Box<dyn std::error::Error>> {
         "PS256 Public Key (JWK): {}",
         serde_json::to_string(&jwk).unwrap_or_else(|_| "Error serializing JWK".to_string())
     );
-    println!("Sample CAT Token: {}", encoded);
+    println!(
+        "Sample CAT Token (b64): {}",
+        encode_token_base64(&token, &algorithm)?
+    );
 
     let decoded = decode_token(&encoded, &algorithm)?;
     println!("Token verified and decoded successfully!");
@@ -199,7 +208,7 @@ fn generate_moqt_token(args: &[String]) -> Result<(), Box<dyn std::error::Error>
         .moqt_scope(setup_scope)
         .build();
 
-    let encoded = encode_token(&token, &algorithm)?;
+    let encoded = encode_token_base64(&token, &algorithm)?;
     println!("{encoded}");
 
     Ok(())

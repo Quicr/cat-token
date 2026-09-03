@@ -630,8 +630,8 @@ pub fn validate_posix_ere(pattern: &str) -> Option<String> {
             let next = bytes[i + 1];
             match next {
                 // ERE only allows escaping special characters
-                b'\\' | b'.' | b'*' | b'+' | b'?' | b'|' | b'(' | b')' | b'[' | b']'
-                | b'{' | b'}' | b'^' | b'$' => {}
+                b'\\' | b'.' | b'*' | b'+' | b'?' | b'|' | b'(' | b')' | b'[' | b']' | b'{'
+                | b'}' | b'^' | b'$' => {}
                 // Perl-style shortcuts are NOT ERE
                 b'd' | b'D' | b'w' | b'W' | b's' | b'S' | b'b' | b'B' => {
                     return Some(format!(
@@ -649,7 +649,10 @@ pub fn validate_posix_ere(pattern: &str) -> Option<String> {
             && i + 1 < bytes.len()
             && bytes[i + 1] == b'?'
         {
-            return Some("Non-greedy quantifiers (*?, +?, ??) are Perl extensions, not valid POSIX ERE".to_string());
+            return Some(
+                "Non-greedy quantifiers (*?, +?, ??) are Perl extensions, not valid POSIX ERE"
+                    .to_string(),
+            );
         }
         // Lookahead/lookbehind: (?= (?! (?<= (?<!
         if bytes[i] == b'(' && i + 1 < bytes.len() && bytes[i + 1] == b'?' {
@@ -1229,7 +1232,12 @@ impl CatToken {
     pub fn with_cose_key_thumbprint(mut self, ckt: Vec<u8>) -> Self {
         match self.dpop.cnf {
             Some(ref mut cnf) => cnf.ckt = Some(ckt),
-            None => self.dpop.cnf = Some(ConfirmationClaim { jkt: Vec::new(), ckt: Some(ckt) }),
+            None => {
+                self.dpop.cnf = Some(ConfirmationClaim {
+                    jkt: Vec::new(),
+                    ckt: Some(ckt),
+                })
+            }
         }
         self
     }

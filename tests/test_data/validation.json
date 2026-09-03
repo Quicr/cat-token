@@ -2,9 +2,10 @@
   "description": "Token validation test cases (expected pass and fail scenarios)",
   "vectors": [
     {
+      "cose_b64": "0YRIogEFEGNDQVSgWEWkAXgYaHR0cHM6Ly9hdXRoLmV4YW1wbGUuY29tA4F4GWh0dHBzOi8vcmVsYXkuZXhhbXBsZS5jb20EGmVVQoAFGmVT8QBYIP30vfENhlwaLMuZjMPeYXjz8QWuqCDlyzStGQVQ4_xi",
+      "cose_hex": "d18448a201051063434154a05845a401781868747470733a2f2f617574682e6578616d706c652e636f6d0381781968747470733a2f2f72656c61792e6578616d706c652e636f6d041a65554280051a6553f1005820fdf4bdf10d865c1a2ccb998cc3de6178f3f105aea820e5cb34ad190550e3fc62",
       "description": "Valid token with correct issuer, audience, and time bounds",
       "id": "valid_basic",
-      "token": "ogEFEGNDQVQ.pAF4GGh0dHBzOi8vYXV0aC5leGFtcGxlLmNvbQOBeBlodHRwczovL3JlbGF5LmV4YW1wbGUuY29tBBplVUKABRplU_EA._fS98Q2GXBosy5mMw95hePPxBa6oIOXLNK0ZBVDj_GI",
       "validation": {
         "expected_audiences": [
           "https://relay.example.com"
@@ -17,9 +18,10 @@
       }
     },
     {
+      "cose_b64": "0YRIogEFEGNDQVSgWCKiAXgYaHR0cHM6Ly9hdXRoLmV4YW1wbGUuY29tBBpfXhAAWCDNInUDQ2qsHo8l8Gj0tzb1HIYIpBheVbVoItgT7Ua6aA",
+      "cose_hex": "d18448a201051063434154a05822a201781868747470733a2f2f617574682e6578616d706c652e636f6d041a5f5e10005820cd227503436aac1e8f25f068f4b736f51c8608a4185e55b56822d813ed46ba68",
       "description": "Token with expiration in the past",
       "id": "invalid_expired",
-      "token": "ogEFEGNDQVQ.ogF4GGh0dHBzOi8vYXV0aC5leGFtcGxlLmNvbQQaX14QAA.zSJ1A0NqrB6PJfBo9Lc29RyGCKQYXlW1aCLYE-1Gumg",
       "validation": {
         "expected_error": "TokenExpired",
         "expected_result": "error",
@@ -27,9 +29,10 @@
       }
     },
     {
+      "cose_b64": "0YRIogEFEGNDQVSgWCijAXgYaHR0cHM6Ly9hdXRoLmV4YW1wbGUuY29tBBplVpQABRplVUKAWCArREpqUH1KiIrMzevyeLr6t_y-L6oheaJGUU9hwhYRbg",
+      "cose_hex": "d18448a201051063434154a05828a301781868747470733a2f2f617574682e6578616d706c652e636f6d041a65569400051a6555428058202b444a6a507d4a888acccdebf278bafab7fcbe2faa2179a246514f61c216116e",
       "description": "Token with not-before in the future",
       "id": "invalid_not_yet_valid",
-      "token": "ogEFEGNDQVQ.owF4GGh0dHBzOi8vYXV0aC5leGFtcGxlLmNvbQQaZVaUAAUaZVVCgA.K0RKalB9SoiKzM3r8ni6-rf8vi-qIXmiRlFPYcIWEW4",
       "validation": {
         "expected_error": "TokenNotYetValid",
         "expected_result": "error",
@@ -37,9 +40,10 @@
       }
     },
     {
+      "cose_b64": "0YRIogEFEGNDQVSgWD-jAXgYaHR0cHM6Ly9ldmlsLmV4YW1wbGUuY29tA4F4GWh0dHBzOi8vcmVsYXkuZXhhbXBsZS5jb20EGmVVQoBYIOmQtbjAMxCnCDlMbHiF-XZlN1SV6QSqkZWTguttCpaC",
+      "cose_hex": "d18448a201051063434154a0583fa301781868747470733a2f2f6576696c2e6578616d706c652e636f6d0381781968747470733a2f2f72656c61792e6578616d706c652e636f6d041a655542805820e990b5b8c03310a708394c6c7885f97665375495e904aa91959382eb6d0a9682",
       "description": "Token from untrusted issuer",
       "id": "invalid_wrong_issuer",
-      "token": "ogEFEGNDQVQ.owF4GGh0dHBzOi8vZXZpbC5leGFtcGxlLmNvbQOBeBlodHRwczovL3JlbGF5LmV4YW1wbGUuY29tBBplVUKA.6ZC1uMAzEKcIOUxseIX5dmU3VJXpBKqRlZOC620KloI",
       "validation": {
         "expected_error": "InvalidIssuer",
         "expected_issuers": [
@@ -50,9 +54,10 @@
       }
     },
     {
+      "cose_b64": "0YRIogEFEGNDQVSgWEWjAXgYaHR0cHM6Ly9hdXRoLmV4YW1wbGUuY29tA4F4H2h0dHBzOi8vb3RoZXItcmVsYXkuZXhhbXBsZS5jb20EGmVVQoBYIOeCJJJNAkaNHBBkOdcSFVXKNNj0D8GdGkLmOriIB2pX",
+      "cose_hex": "d18448a201051063434154a05845a301781868747470733a2f2f617574682e6578616d706c652e636f6d0381781f68747470733a2f2f6f746865722d72656c61792e6578616d706c652e636f6d041a655542805820e78224924d02468d1c106439d7121555ca34d8f40fc19d1a42e63ab888076a57",
       "description": "Token not intended for this audience",
       "id": "invalid_wrong_audience",
-      "token": "ogEFEGNDQVQ.owF4GGh0dHBzOi8vYXV0aC5leGFtcGxlLmNvbQOBeB9odHRwczovL290aGVyLXJlbGF5LmV4YW1wbGUuY29tBBplVUKA.54Ikkk0CRo0cEGQ51xIVVco02PQPwZ0aQuY6uIgHalc",
       "validation": {
         "expected_audiences": [
           "https://relay.example.com"
@@ -66,10 +71,11 @@
       }
     },
     {
-      "description": "Token with corrupted signature (first byte flipped)",
+      "cose_b64": "0YRIogEFEGNDQVSgWD-jAXgYaHR0cHM6Ly9hdXRoLmV4YW1wbGUuY29tA4F4GWh0dHBzOi8vcmVsYXkuZXhhbXBsZS5jb20EGmVVQoBYIOnKFqLU4kdlKK6FjZGwDyV6UH_lcoS_sT19bKHwZeIw",
+      "cose_hex": "d18448a201051063434154a0583fa301781868747470733a2f2f617574682e6578616d706c652e636f6d0381781968747470733a2f2f72656c61792e6578616d706c652e636f6d041a655542805820e9ca16a2d4e2476528ae858d91b00f257a507fe57284bfb13d7d6ca1f065e230",
+      "description": "COSE_Mac0 token with corrupted tag (first byte flipped)",
       "id": "invalid_tampered_signature",
-      "original_token": "ogEFEGNDQVQ.owF4GGh0dHBzOi8vYXV0aC5leGFtcGxlLmNvbQOBeBlodHRwczovL3JlbGF5LmV4YW1wbGUuY29tBBplVUKA.FsoWotTiR2UoroWNkbAPJXpQf-VyhL-xPX1sofBl4jA",
-      "token": "ogEFEGNDQVQ.owF4GGh0dHBzOi8vYXV0aC5leGFtcGxlLmNvbQOBeBlodHRwczovL3JlbGF5LmV4YW1wbGUuY29tBBplVUKA.6coWotTiR2UoroWNkbAPJXpQf-VyhL-xPX1sofBl4jA",
+      "original_cose_hex": "d18448a201051063434154a0583fa301781868747470733a2f2f617574682e6578616d706c652e636f6d0381781968747470733a2f2f72656c61792e6578616d706c652e636f6d041a65554280582016ca16a2d4e2476528ae858d91b00f257a507fe57284bfb13d7d6ca1f065e230",
       "validation": {
         "expected_error": "SignatureVerificationFailed",
         "expected_result": "error",
@@ -77,9 +83,10 @@
       }
     },
     {
+      "cose_b64": "0YRIogEFEGNDQVSgWCKiAXgYaHR0cHM6Ly9hdXRoLmV4YW1wbGUuY29tBBplVUKAWCCqD2TUB2jOEalC6kta2ptR7vx6flZ0I9L0RV3MCbZ-Aw",
+      "cose_hex": "d18448a201051063434154a05822a201781868747470733a2f2f617574682e6578616d706c652e636f6d041a655542805820aa0f64d40768ce11a942ea4b5ada9b51eefc7a7e567423d2f4455dcc09b67e03",
       "description": "Token verified with incorrect key",
       "id": "invalid_wrong_key",
-      "token": "ogEFEGNDQVQ.ogF4GGh0dHBzOi8vYXV0aC5leGFtcGxlLmNvbQQaZVVCgA.qg9k1AdozhGpQupLWtqbUe78en5WdCPS9EVdzAm2fgM",
       "validation": {
         "correct_key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
         "expected_error": "SignatureVerificationFailed",
@@ -88,11 +95,12 @@
       }
     },
     {
-      "description": "Token header says HMAC-SHA256 but verifier expects ES256",
+      "cose_b64": "0YRIogEFEGNDQVSgWCKiAXgYaHR0cHM6Ly9hdXRoLmV4YW1wbGUuY29tBBplVUKAWCCqD2TUB2jOEalC6kta2ptR7vx6flZ0I9L0RV3MCbZ-Aw",
+      "cose_hex": "d18448a201051063434154a05822a201781868747470733a2f2f617574682e6578616d706c652e636f6d041a655542805820aa0f64d40768ce11a942ea4b5ada9b51eefc7a7e567423d2f4455dcc09b67e03",
+      "description": "COSE_Mac0 token but verifier expects COSE_Sign1/ES256",
       "id": "invalid_algorithm_mismatch",
-      "token": "ogEFEGNDQVQ.ogF4GGh0dHBzOi8vYXV0aC5leGFtcGxlLmNvbQQaZVVCgA.qg9k1AdozhGpQupLWtqbUe78en5WdCPS9EVdzAm2fgM",
       "validation": {
-        "expected_error": "AlgorithmMismatch",
+        "expected_error": "InvalidTokenFormat",
         "expected_result": "error",
         "token_algorithm_id": 5,
         "verifier_algorithm_id": -7
