@@ -11,6 +11,29 @@ use std::net::IpAddr;
 const CBOR_TAG_IPV4: u64 = 52;
 const CBOR_TAG_IPV6: u64 = 54;
 
+fn validate_cbor_map_ordering(map: &[(Value, Value)]) -> Result<(), CatError> {
+    let mut prev_key: Option<i64> = None;
+    for (key, _) in map {
+        if let Value::Integer(i) = key {
+            let k: i64 = (*i).try_into().unwrap_or(i64::MAX);
+            if let Some(prev) = prev_key {
+                if k == prev {
+                    return Err(CatError::InvalidCbor(format!(
+                        "Duplicate map key: {k}"
+                    )));
+                }
+                if k < prev {
+                    return Err(CatError::InvalidCbor(
+                        "Map keys not in deterministic order per RFC 8949 §4.2.1".to_string()
+                    ));
+                }
+            }
+            prev_key = Some(k);
+        }
+    }
+    Ok(())
+}
+
 fn validate_float(f: f64, claim_name: &str) -> Result<(), CatError> {
     if f.is_nan() {
         return Err(CatError::InvalidClaimValue(format!(
@@ -685,6 +708,8 @@ impl Cwt {
             Value::Map(map) => map,
             _ => return Err(CatError::InvalidTokenFormat),
         };
+
+        validate_cbor_map_ordering(&claims_map)?;
 
         let mut core = CoreClaims {
             iss: None,
