@@ -33,6 +33,7 @@ fn encode_match_value(m: &MatchValue) -> (Value, Value) {
         MatchValue::Contains(s) => (Value::Integer(MATCH_CONTAINS.into()), Value::Text(s.clone())),
         MatchValue::Regex(s) => (Value::Integer(MATCH_REGEX.into()), Value::Text(s.clone())),
         MatchValue::Sha256(h) => (Value::Integer(MATCH_SHA256.into()), Value::Bytes(h.clone())),
+        MatchValue::Sha512_256(h) => (Value::Integer(MATCH_SHA512_256.into()), Value::Bytes(h.clone())),
     }
 }
 
@@ -64,6 +65,10 @@ fn decode_match_value(key: &Value, val: &Value) -> Result<MatchValue, CatError> 
         }
         MATCH_SHA256 => {
             if let Value::Bytes(b) = val { Ok(MatchValue::Sha256(b.clone())) }
+            else { Err(CatError::InvalidTokenFormat) }
+        }
+        MATCH_SHA512_256 => {
+            if let Value::Bytes(b) = val { Ok(MatchValue::Sha512_256(b.clone())) }
             else { Err(CatError::InvalidTokenFormat) }
         }
         _ => Err(CatError::InvalidClaimValue(format!("Unknown match type: {match_type}"))),

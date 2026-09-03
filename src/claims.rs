@@ -485,6 +485,7 @@ pub const MATCH_SUFFIX: i64 = 2;
 pub const MATCH_CONTAINS: i64 = 3;
 pub const MATCH_REGEX: i64 = 4;
 pub const MATCH_SHA256: i64 = -1;
+pub const MATCH_SHA512_256: i64 = -2;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum MatchValue {
@@ -494,6 +495,7 @@ pub enum MatchValue {
     Contains(String),
     Regex(String),
     Sha256(Vec<u8>),
+    Sha512_256(Vec<u8>),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
