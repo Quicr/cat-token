@@ -248,7 +248,9 @@ fn decode_network_identifier(value: &Value) -> Result<NetworkIdentifier, CatErro
                 if prefix_bytes.len() != expected_byte_count {
                     return Err(CatError::InvalidClaimValue(format!(
                         "catnip: address-with-prefix form not allowed (got {} bytes for /{} prefix, expected {})",
-                        prefix_bytes.len(), prefix_len, expected_byte_count
+                        prefix_bytes.len(),
+                        prefix_len,
+                        expected_byte_count
                     )));
                 }
                 match *tag {
@@ -426,7 +428,10 @@ impl Cwt {
             let zones: Vec<Value> = catgeocoord
                 .iter()
                 .map(|coord| {
-                    let mut zone = vec![encode_number_shortest(coord.lat), encode_number_shortest(coord.lon)];
+                    let mut zone = vec![
+                        encode_number_shortest(coord.lat),
+                        encode_number_shortest(coord.lon),
+                    ];
                     if let Some(radius) = coord.radius {
                         zone.push(Value::Integer((radius as i64).into()));
                     }
@@ -1247,10 +1252,10 @@ impl Cwt {
                 CLAIM_IAT => {
                     reject_unexpected_tag(&value, "iat")?;
                     match value {
-                    Value::Integer(i) => {
-                        informational.iat =
-                            Some(i.try_into().map_err(|_| CatError::InvalidTokenFormat)?);
-                    }
+                        Value::Integer(i) => {
+                            informational.iat =
+                                Some(i.try_into().map_err(|_| CatError::InvalidTokenFormat)?);
+                        }
                         Value::Float(f) => {
                             validate_float(f, "iat")?;
                             informational.iat = Some(f as i64);

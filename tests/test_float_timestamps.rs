@@ -3,10 +3,7 @@
 
 use cat_token::*;
 
-fn build_cose_mac0_with_payload(
-    payload_cbor: &[u8],
-    alg: &HmacSha256Algorithm,
-) -> Vec<u8> {
+fn build_cose_mac0_with_payload(payload_cbor: &[u8], alg: &HmacSha256Algorithm) -> Vec<u8> {
     let mut header_map = std::collections::BTreeMap::new();
     header_map.insert(1i64, ciborium::Value::Integer(5.into()));
     let header_cbor_map: Vec<(ciborium::Value, ciborium::Value)> = header_map
@@ -16,8 +13,7 @@ fn build_cose_mac0_with_payload(
     let mut header_buf = Vec::new();
     ciborium::ser::into_writer(&ciborium::Value::Map(header_cbor_map), &mut header_buf).unwrap();
 
-    let signing_input =
-        crypto::create_signing_input(&header_buf, payload_cbor, ALG_HMAC256_256);
+    let signing_input = crypto::create_signing_input(&header_buf, payload_cbor, ALG_HMAC256_256);
     let signature = alg.sign(&signing_input).unwrap();
 
     let cose_array = ciborium::Value::Array(vec![

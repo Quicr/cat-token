@@ -642,8 +642,7 @@ pub fn validate_iso3166_code(code: &str) -> Result<(), crate::CatError> {
                 "Invalid ISO 3166 subdivision code: {code}"
             )));
         }
-    } else if (code.len() == 2 || code.len() == 3) && code.chars().all(|c| c.is_ascii_uppercase())
-    {
+    } else if (code.len() == 2 || code.len() == 3) && code.chars().all(|c| c.is_ascii_uppercase()) {
         // alpha-2 or alpha-3
     } else {
         return Err(crate::CatError::InvalidClaimValue(format!(

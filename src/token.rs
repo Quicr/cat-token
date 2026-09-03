@@ -261,16 +261,16 @@ pub fn apply_match_value(mv: &crate::claims::MatchValue, input: &str) -> bool {
 
 /// Validate an HTTP header against `cath` rules.
 /// Header name comparison is case-insensitive per CTA-5007-B §4.6.13.
-pub fn validate_header(
-    token: &CatToken,
-    name: &str,
-    value: &str,
-) -> Result<(), CatError> {
+pub fn validate_header(token: &CatToken, name: &str, value: &str) -> Result<(), CatError> {
     if let Some(ref rules) = token.cat.cath {
         for rule in rules {
             if rule.name.eq_ignore_ascii_case(name) {
                 let unfolded = unfold_header_value(value);
-                if !rule.matches.iter().any(|mv| apply_match_value(mv, &unfolded)) {
+                if !rule
+                    .matches
+                    .iter()
+                    .any(|mv| apply_match_value(mv, &unfolded))
+                {
                     return Err(CatError::InvalidClaimValue(format!(
                         "Header '{name}' value does not match any rule"
                     )));
@@ -289,7 +289,11 @@ pub fn unfold_header_value(value: &str) -> String {
     let bytes = value.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
-        if i + 2 < bytes.len() && bytes[i] == b'\r' && bytes[i + 1] == b'\n' && (bytes[i + 2] == b' ' || bytes[i + 2] == b'\t') {
+        if i + 2 < bytes.len()
+            && bytes[i] == b'\r'
+            && bytes[i + 1] == b'\n'
+            && (bytes[i + 2] == b' ' || bytes[i + 2] == b'\t')
+        {
             result.push(' ');
             i += 3;
             while i < bytes.len() && (bytes[i] == b' ' || bytes[i] == b'\t') {
@@ -344,10 +348,7 @@ impl Default for CatPorBlockList {
 /// Enforce the catpor (probability of rejection) claim.
 /// Returns `Err(RejectedByProbability)` if the token should be rejected,
 /// either by random chance or by block list.
-pub fn enforce_catpor(
-    token: &CatToken,
-    block_list: &CatPorBlockList,
-) -> Result<(), CatError> {
+pub fn enforce_catpor(token: &CatToken, block_list: &CatPorBlockList) -> Result<(), CatError> {
     if let Some(ref catpor) = token.cat.catpor {
         if block_list.is_blocked(&catpor.id) {
             return Err(CatError::RejectedByProbability);
@@ -357,7 +358,8 @@ pub fn enforce_catpor(
             use ring::rand::{SecureRandom, SystemRandom};
             let rng = SystemRandom::new();
             let mut buf = [0u8; 8];
-            rng.fill(&mut buf).map_err(|_| CatError::CryptoError("RNG failed".to_string()))?;
+            rng.fill(&mut buf)
+                .map_err(|_| CatError::CryptoError("RNG failed".to_string()))?;
             let val = u64::from_le_bytes(buf);
             (val as f64) / (u64::MAX as f64)
         };

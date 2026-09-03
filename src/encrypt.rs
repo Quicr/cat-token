@@ -45,10 +45,7 @@ fn build_enc_structure(protected: &[u8]) -> Vec<u8> {
 }
 
 fn encode_protected_header(alg_id: i64) -> Vec<u8> {
-    let map = vec![(
-        Value::Integer(1.into()),
-        Value::Integer(alg_id.into()),
-    )];
+    let map = vec![(Value::Integer(1.into()), Value::Integer(alg_id.into()))];
     let mut buf = Vec::new();
     ciborium::ser::into_writer(&Value::Map(map), &mut buf).unwrap();
     buf
@@ -73,20 +70,32 @@ pub fn cose_encrypt0(
 
     let (nonce_bytes, ciphertext) = match algorithm {
         EncryptionAlgorithm::A128Gcm => {
-            let cipher = Aes128Gcm::new_from_slice(key)
-                .map_err(|e| CatError::CryptoError(e.to_string()))?;
+            let cipher =
+                Aes128Gcm::new_from_slice(key).map_err(|e| CatError::CryptoError(e.to_string()))?;
             let nonce = Aes128Gcm::generate_nonce(&mut OsRng);
             let ct = cipher
-                .encrypt(&nonce, aes_gcm::aead::Payload { msg: plaintext, aad: &aad })
+                .encrypt(
+                    &nonce,
+                    aes_gcm::aead::Payload {
+                        msg: plaintext,
+                        aad: &aad,
+                    },
+                )
                 .map_err(|e| CatError::CryptoError(e.to_string()))?;
             (nonce.to_vec(), ct)
         }
         EncryptionAlgorithm::A256Gcm => {
-            let cipher = Aes256Gcm::new_from_slice(key)
-                .map_err(|e| CatError::CryptoError(e.to_string()))?;
+            let cipher =
+                Aes256Gcm::new_from_slice(key).map_err(|e| CatError::CryptoError(e.to_string()))?;
             let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
             let ct = cipher
-                .encrypt(&nonce, aes_gcm::aead::Payload { msg: plaintext, aad: &aad })
+                .encrypt(
+                    &nonce,
+                    aes_gcm::aead::Payload {
+                        msg: plaintext,
+                        aad: &aad,
+                    },
+                )
                 .map_err(|e| CatError::CryptoError(e.to_string()))?;
             (nonce.to_vec(), ct)
         }
@@ -135,7 +144,8 @@ pub fn cose_decrypt0(cose_bytes: &[u8], key: &[u8]) -> Result<Vec<u8>, CatError>
             let mut nonce = None;
             for (k, v) in map {
                 if let Value::Integer(ki) = k {
-                    let key_val: i64 = (*ki).try_into().map_err(|_| CatError::InvalidTokenFormat)?;
+                    let key_val: i64 =
+                        (*ki).try_into().map_err(|_| CatError::InvalidTokenFormat)?;
                     if key_val == 5 {
                         if let Value::Bytes(b) = v {
                             nonce = Some(b.clone());
@@ -160,14 +170,10 @@ pub fn cose_decrypt0(cose_bytes: &[u8], key: &[u8]) -> Result<Vec<u8>, CatError>
             let mut alg = None;
             for (k, v) in map {
                 if let Value::Integer(ki) = k {
-                    let key_val: i64 =
-                        ki.try_into().map_err(|_| CatError::InvalidTokenFormat)?;
+                    let key_val: i64 = ki.try_into().map_err(|_| CatError::InvalidTokenFormat)?;
                     if key_val == 1 {
                         if let Value::Integer(ai) = v {
-                            alg = Some(
-                                ai.try_into()
-                                    .map_err(|_| CatError::InvalidTokenFormat)?,
-                            );
+                            alg = Some(ai.try_into().map_err(|_| CatError::InvalidTokenFormat)?);
                         }
                     }
                 }
@@ -181,19 +187,31 @@ pub fn cose_decrypt0(cose_bytes: &[u8], key: &[u8]) -> Result<Vec<u8>, CatError>
 
     match alg_id {
         ALG_A128GCM => {
-            let cipher = Aes128Gcm::new_from_slice(key)
-                .map_err(|e| CatError::CryptoError(e.to_string()))?;
+            let cipher =
+                Aes128Gcm::new_from_slice(key).map_err(|e| CatError::CryptoError(e.to_string()))?;
             let nonce = Nonce::from_slice(&nonce_bytes);
             cipher
-                .decrypt(nonce, aes_gcm::aead::Payload { msg: &ciphertext, aad: &aad })
+                .decrypt(
+                    nonce,
+                    aes_gcm::aead::Payload {
+                        msg: &ciphertext,
+                        aad: &aad,
+                    },
+                )
                 .map_err(|_| CatError::CryptoError("AES-128-GCM decryption failed".to_string()))
         }
         ALG_A256GCM => {
-            let cipher = Aes256Gcm::new_from_slice(key)
-                .map_err(|e| CatError::CryptoError(e.to_string()))?;
+            let cipher =
+                Aes256Gcm::new_from_slice(key).map_err(|e| CatError::CryptoError(e.to_string()))?;
             let nonce = Nonce::from_slice(&nonce_bytes);
             cipher
-                .decrypt(nonce, aes_gcm::aead::Payload { msg: &ciphertext, aad: &aad })
+                .decrypt(
+                    nonce,
+                    aes_gcm::aead::Payload {
+                        msg: &ciphertext,
+                        aad: &aad,
+                    },
+                )
                 .map_err(|_| CatError::CryptoError("AES-256-GCM decryption failed".to_string()))
         }
         _ => Err(CatError::UnsupportedAlgorithm(format!(

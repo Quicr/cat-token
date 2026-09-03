@@ -95,13 +95,8 @@ fn serialize_bare_item(item: &sfv::BareItem) -> String {
         sfv::BareItem::Token(t) => t.clone(),
         sfv::BareItem::ByteSeq(b) => {
             use base64::Engine;
-            format!(
-                ":{}:",
-                base64::engine::general_purpose::STANDARD.encode(b)
-            )
+            format!(":{}:", base64::engine::general_purpose::STANDARD.encode(b))
         }
-        sfv::BareItem::Boolean(b) => {
-            if *b { "?1" } else { "?0" }.to_string()
-        }
+        sfv::BareItem::Boolean(b) => if *b { "?1" } else { "?0" }.to_string(),
     }
 }

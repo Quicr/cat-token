@@ -13,8 +13,7 @@ fn generate_self_signed_cert() -> Vec<u8> {
     use x509_cert::spki::SubjectPublicKeyInfoOwned;
     use x509_cert::time::Validity;
 
-    let signing_key =
-        p256::ecdsa::SigningKey::random(&mut p256::elliptic_curve::rand_core::OsRng);
+    let signing_key = p256::ecdsa::SigningKey::random(&mut p256::elliptic_curve::rand_core::OsRng);
 
     let subject = Name::from_str("CN=Test").unwrap();
     let serial = SerialNumber::from(1u32);

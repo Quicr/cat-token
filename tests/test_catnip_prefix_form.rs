@@ -26,7 +26,7 @@ fn test_address_with_prefix_form_rejected() {
     let nip_array = ciborium::Value::Array(vec![ciborium::Value::Tag(
         52,
         Box::new(ciborium::Value::Map(vec![(
-            ciborium::Value::Integer(8.into()), // /8 prefix
+            ciborium::Value::Integer(8.into()),           // /8 prefix
             ciborium::Value::Bytes(vec![192, 168, 1, 1]), // 4 bytes = address-with-prefix form
         )])),
     )]);
@@ -48,8 +48,7 @@ fn test_address_with_prefix_form_rejected() {
     let mut header_buf = Vec::new();
     ciborium::ser::into_writer(&ciborium::Value::Map(header_cbor_map), &mut header_buf).unwrap();
 
-    let signing_input =
-        crypto::create_signing_input(&header_buf, &payload_buf, ALG_HMAC256_256);
+    let signing_input = crypto::create_signing_input(&header_buf, &payload_buf, ALG_HMAC256_256);
     let signature = alg.sign(&signing_input).unwrap();
 
     let cose_array = ciborium::Value::Array(vec![
@@ -77,7 +76,9 @@ fn test_ipv6_address_with_prefix_form_rejected() {
         54,
         Box::new(ciborium::Value::Map(vec![(
             ciborium::Value::Integer(48.into()),
-            ciborium::Value::Bytes(vec![0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]),
+            ciborium::Value::Bytes(vec![
+                0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+            ]),
         )])),
     )]);
     claims.insert(311i64, nip_array);
@@ -98,8 +99,7 @@ fn test_ipv6_address_with_prefix_form_rejected() {
     let mut header_buf = Vec::new();
     ciborium::ser::into_writer(&ciborium::Value::Map(header_cbor_map), &mut header_buf).unwrap();
 
-    let signing_input =
-        crypto::create_signing_input(&header_buf, &payload_buf, ALG_HMAC256_256);
+    let signing_input = crypto::create_signing_input(&header_buf, &payload_buf, ALG_HMAC256_256);
     let signature = alg.sign(&signing_input).unwrap();
 
     let cose_array = ciborium::Value::Array(vec![

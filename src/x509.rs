@@ -7,13 +7,15 @@ use x509_cert::Certificate;
 
 /// Extract the SubjectPublicKeyInfo (SPKI) DER bytes from a DER-encoded X.509 certificate.
 pub fn extract_spki_from_cert(cert_der: &[u8]) -> Result<Vec<u8>, CatError> {
-    let cert = Certificate::from_der(cert_der)
-        .map_err(|e| CatError::CertificateValidationFailed(format!("Failed to parse certificate: {e}")))?;
+    let cert = Certificate::from_der(cert_der).map_err(|e| {
+        CatError::CertificateValidationFailed(format!("Failed to parse certificate: {e}"))
+    })?;
 
     let spki = &cert.tbs_certificate.subject_public_key_info;
     let mut buf = Vec::new();
-    der::Encode::encode_to_vec(spki, &mut buf)
-        .map_err(|e| CatError::CertificateValidationFailed(format!("Failed to encode SPKI: {e}")))?;
+    der::Encode::encode_to_vec(spki, &mut buf).map_err(|e| {
+        CatError::CertificateValidationFailed(format!("Failed to encode SPKI: {e}"))
+    })?;
     Ok(buf)
 }
 

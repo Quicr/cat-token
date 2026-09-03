@@ -72,7 +72,10 @@ fn test_decode_legacy_label_3() {
 
     // Manually build a payload with cnf using legacy label 3
     let mut claims_map = std::collections::BTreeMap::new();
-    claims_map.insert(1i64, ciborium::Value::Text("https://example.com".to_string()));
+    claims_map.insert(
+        1i64,
+        ciborium::Value::Text("https://example.com".to_string()),
+    );
     let cnf_map = vec![(
         ciborium::Value::Integer(3.into()), // legacy label
         ciborium::Value::Bytes(jkt_bytes.clone()),
