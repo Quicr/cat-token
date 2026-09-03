@@ -33,20 +33,20 @@ fn test_integer_coord_encoded_as_integer() {
                 let key_val: i64 = (*ki).try_into().unwrap();
                 if key_val == 317 {
                     // catgeocoord
-                    if let ciborium::Value::Array(zones) = v {
-                        if let ciborium::Value::Array(zone) = &zones[0] {
-                            assert!(
-                                matches!(zone[0], ciborium::Value::Integer(_)),
-                                "45.0 should be encoded as integer, got {:?}",
-                                zone[0]
-                            );
-                            assert!(
-                                matches!(zone[1], ciborium::Value::Integer(_)),
-                                "90.0 should be encoded as integer, got {:?}",
-                                zone[1]
-                            );
-                            return;
-                        }
+                    if let ciborium::Value::Array(zones) = v
+                        && let ciborium::Value::Array(zone) = &zones[0]
+                    {
+                        assert!(
+                            matches!(zone[0], ciborium::Value::Integer(_)),
+                            "45.0 should be encoded as integer, got {:?}",
+                            zone[0]
+                        );
+                        assert!(
+                            matches!(zone[1], ciborium::Value::Integer(_)),
+                            "90.0 should be encoded as integer, got {:?}",
+                            zone[1]
+                        );
+                        return;
                     }
                 }
             }
@@ -83,16 +83,15 @@ fn test_fractional_coord_encoded_as_float() {
         for (k, v) in &map {
             if let ciborium::Value::Integer(ki) = k {
                 let key_val: i64 = (*ki).try_into().unwrap();
-                if key_val == 317 {
-                    if let ciborium::Value::Array(zones) = v {
-                        if let ciborium::Value::Array(zone) = &zones[0] {
-                            assert!(
-                                matches!(zone[0], ciborium::Value::Float(_)),
-                                "45.5 should be float"
-                            );
-                            return;
-                        }
-                    }
+                if key_val == 317
+                    && let ciborium::Value::Array(zones) = v
+                    && let ciborium::Value::Array(zone) = &zones[0]
+                {
+                    assert!(
+                        matches!(zone[0], ciborium::Value::Float(_)),
+                        "45.5 should be float"
+                    );
+                    return;
                 }
             }
         }

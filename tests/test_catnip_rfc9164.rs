@@ -54,20 +54,20 @@ fn test_ipv6_address_uses_tag_54() {
         for (k, v) in &map {
             if let ciborium::Value::Integer(key_int) = k {
                 let key_val: i64 = (*key_int).try_into().unwrap();
-                if key_val == 311 {
-                    if let ciborium::Value::Array(arr) = v {
-                        if let ciborium::Value::Tag(tag, inner) = &arr[0] {
-                            assert_eq!(*tag, 54, "IPv6 address must use CBOR tag 54");
-                            if let ciborium::Value::Bytes(bytes) = inner.as_ref() {
-                                assert_eq!(bytes.len(), 16, "IPv6 address must be 16 bytes");
-                            } else {
-                                panic!("Inner value must be bstr");
-                            }
+                if key_val == 311
+                    && let ciborium::Value::Array(arr) = v
+                {
+                    if let ciborium::Value::Tag(tag, inner) = &arr[0] {
+                        assert_eq!(*tag, 54, "IPv6 address must use CBOR tag 54");
+                        if let ciborium::Value::Bytes(bytes) = inner.as_ref() {
+                            assert_eq!(bytes.len(), 16, "IPv6 address must be 16 bytes");
                         } else {
-                            panic!("Expected tagged value");
+                            panic!("Inner value must be bstr");
                         }
-                        return;
+                    } else {
+                        panic!("Expected tagged value");
                     }
+                    return;
                 }
             }
         }
@@ -87,27 +87,27 @@ fn test_ipv4_prefix_tagged_map() {
         for (k, v) in &map {
             if let ciborium::Value::Integer(key_int) = k {
                 let key_val: i64 = (*key_int).try_into().unwrap();
-                if key_val == 311 {
-                    if let ciborium::Value::Array(arr) = v {
-                        if let ciborium::Value::Tag(tag, inner) = &arr[0] {
-                            assert_eq!(*tag, 52, "IPv4 prefix must use CBOR tag 52");
-                            if let ciborium::Value::Map(prefix_map) = inner.as_ref() {
-                                assert_eq!(prefix_map.len(), 1);
-                                let (k, v) = &prefix_map[0];
-                                if let ciborium::Value::Integer(prefix_len) = k {
-                                    let pl: i64 = (*prefix_len).try_into().unwrap();
-                                    assert_eq!(pl, 8);
-                                }
-                                if let ciborium::Value::Bytes(prefix_bytes) = v {
-                                    assert_eq!(prefix_bytes.len(), 1, "/8 prefix needs 1 byte");
-                                    assert_eq!(prefix_bytes[0], 10);
-                                }
-                            } else {
-                                panic!("Prefix must be encoded as map");
+                if key_val == 311
+                    && let ciborium::Value::Array(arr) = v
+                {
+                    if let ciborium::Value::Tag(tag, inner) = &arr[0] {
+                        assert_eq!(*tag, 52, "IPv4 prefix must use CBOR tag 52");
+                        if let ciborium::Value::Map(prefix_map) = inner.as_ref() {
+                            assert_eq!(prefix_map.len(), 1);
+                            let (k, v) = &prefix_map[0];
+                            if let ciborium::Value::Integer(prefix_len) = k {
+                                let pl: i64 = (*prefix_len).try_into().unwrap();
+                                assert_eq!(pl, 8);
                             }
+                            if let ciborium::Value::Bytes(prefix_bytes) = v {
+                                assert_eq!(prefix_bytes.len(), 1, "/8 prefix needs 1 byte");
+                                assert_eq!(prefix_bytes[0], 10);
+                            }
+                        } else {
+                            panic!("Prefix must be encoded as map");
                         }
-                        return;
                     }
+                    return;
                 }
             }
         }
@@ -127,15 +127,15 @@ fn test_asn_is_bare_uint() {
         for (k, v) in &map {
             if let ciborium::Value::Integer(key_int) = k {
                 let key_val: i64 = (*key_int).try_into().unwrap();
-                if key_val == 311 {
-                    if let ciborium::Value::Array(arr) = v {
-                        assert!(
-                            matches!(&arr[0], ciborium::Value::Integer(_)),
-                            "ASN must be a bare unsigned integer, got {:?}",
-                            arr[0]
-                        );
-                        return;
-                    }
+                if key_val == 311
+                    && let ciborium::Value::Array(arr) = v
+                {
+                    assert!(
+                        matches!(&arr[0], ciborium::Value::Integer(_)),
+                        "ASN must be a bare unsigned integer, got {:?}",
+                        arr[0]
+                    );
+                    return;
                 }
             }
         }

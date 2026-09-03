@@ -192,7 +192,7 @@ fn bench_utility_functions(c: &mut Criterion) {
     let payload = b"payload_data";
 
     group.bench_function("create_signing_input", |b| {
-        b.iter(|| black_box(create_signing_input(header, payload)))
+        b.iter(|| black_box(create_signing_input(header, payload, ALG_ES256)))
     });
 
     group.bench_function("hash_sha256", |b| {

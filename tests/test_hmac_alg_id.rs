@@ -57,12 +57,12 @@ fn test_hmac_token_header_contains_alg_5() {
         for (k, v) in &map {
             if let ciborium::Value::Integer(key_int) = k {
                 let key_val: i64 = (*key_int).try_into().unwrap();
-                if key_val == 1 {
-                    if let ciborium::Value::Integer(alg_val) = v {
-                        let alg_id: i64 = (*alg_val).try_into().unwrap();
-                        assert_eq!(alg_id, 5, "HMAC header must contain alg=5");
-                        return;
-                    }
+                if key_val == 1
+                    && let ciborium::Value::Integer(alg_val) = v
+                {
+                    let alg_id: i64 = (*alg_val).try_into().unwrap();
+                    assert_eq!(alg_id, 5, "HMAC header must contain alg=5");
+                    return;
                 }
             }
         }
