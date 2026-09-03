@@ -108,10 +108,10 @@ pub struct CatClaims {
     pub catpor: Option<ProbabilityOfRejection>,
     pub catv: Option<u32>,
     pub catnip: Option<Vec<NetworkIdentifier>>,
-    pub catu: Option<u32>,
+    pub catu: Option<Vec<UriMatchRule>>,
     pub catm: Option<Vec<String>>,
     pub catalpn: Option<Vec<String>>,
-    pub cath: Option<Vec<UriPattern>>,
+    pub cath: Option<Vec<HeaderMatchRule>>,
     pub catgeoiso3166: Option<Vec<String>>,
     pub catgeocoord: Option<GeoCoordinate>,
     pub geohash: Option<String>,
@@ -446,6 +446,45 @@ pub enum UriPattern {
     Suffix(String),
     Regex(String),
     Hash(String),
+}
+
+pub const URI_COMPONENT_SCHEME: i64 = 0;
+pub const URI_COMPONENT_HOST: i64 = 1;
+pub const URI_COMPONENT_PORT: i64 = 2;
+pub const URI_COMPONENT_PATH: i64 = 3;
+pub const URI_COMPONENT_QUERY: i64 = 4;
+pub const URI_COMPONENT_PARENT_PATH: i64 = 5;
+pub const URI_COMPONENT_FILENAME: i64 = 6;
+pub const URI_COMPONENT_STEM: i64 = 7;
+pub const URI_COMPONENT_EXTENSION: i64 = 8;
+
+pub const MATCH_EXACT: i64 = 0;
+pub const MATCH_PREFIX: i64 = 1;
+pub const MATCH_SUFFIX: i64 = 2;
+pub const MATCH_CONTAINS: i64 = 3;
+pub const MATCH_REGEX: i64 = 4;
+pub const MATCH_SHA256: i64 = -1;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum MatchValue {
+    Exact(String),
+    Prefix(String),
+    Suffix(String),
+    Contains(String),
+    Regex(String),
+    Sha256(Vec<u8>),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UriMatchRule {
+    pub component: i64,
+    pub matches: Vec<MatchValue>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HeaderMatchRule {
+    pub name: String,
+    pub matches: Vec<MatchValue>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -907,8 +946,8 @@ impl CatToken {
         self
     }
 
-    pub fn with_usage_limit(mut self, limit: u32) -> Self {
-        self.cat.catu = Some(limit);
+    pub fn with_uri_match_rules(mut self, rules: Vec<UriMatchRule>) -> Self {
+        self.cat.catu = Some(rules);
         self
     }
 
@@ -982,8 +1021,8 @@ impl CatToken {
         self
     }
 
-    pub fn with_uri_patterns(mut self, patterns: Vec<UriPattern>) -> Self {
-        self.cat.cath = Some(patterns);
+    pub fn with_header_match_rules(mut self, rules: Vec<HeaderMatchRule>) -> Self {
+        self.cat.cath = Some(rules);
         self
     }
 

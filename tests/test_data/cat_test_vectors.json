@@ -37,12 +37,14 @@
         },
         {
           "claims": {
-            "catu": 5,
+            "catu": {
+              "host": "example.com"
+            },
             "catv": 1
           },
-          "description": "CAT version (uint 1) and usage limit",
-          "id": "cbor_cat_version_usage",
-          "payload_cbor_hex": "a21901360119013805"
+          "description": "CAT version (uint 1) and URI match rule",
+          "id": "cbor_cat_version_uri",
+          "payload_cbor_hex": "a219013601190138a101a1006b6578616d706c652e636f6d"
         },
         {
           "claims": {
@@ -92,24 +94,27 @@
         },
         {
           "claims": {
-            "cath": [
+            "catu": [
               {
-                "type": "exact",
-                "value": "https://example.com/live/stream1"
+                "component": "host",
+                "match": "exact",
+                "value": "example.com"
               },
               {
-                "type": "prefix",
-                "value": "https://example.com/vod/"
+                "component": "path",
+                "match": "prefix",
+                "value": "/vod/"
               },
               {
-                "type": "suffix",
-                "value": ".m3u8"
+                "component": "extension",
+                "match": "exact",
+                "value": "m3u8"
               }
             ]
           },
-          "description": "URI patterns: exact, prefix, suffix",
-          "id": "cbor_uri_patterns",
-          "payload_cbor_hex": "a119013b83782068747470733a2f2f6578616d706c652e636f6d2f6c6976652f73747265616d31a166707265666978781868747470733a2f2f6578616d706c652e636f6d2f766f642fa166737566666978652e6d337538"
+          "description": "URI match rules: host exact, path prefix, extension exact",
+          "id": "cbor_uri_match_rules",
+          "payload_cbor_hex": "a1190138a301a1006b6578616d706c652e636f6d03a101652f766f642f08a100646d337538"
         },
         {
           "claims": {
@@ -570,11 +575,11 @@
           "header_cbor_hex": "a201051063434154",
           "id": "token_hmac_full",
           "key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
-          "payload_b64": "qgF4Gmh0dHBzOi8vaXNzdWVyLm1vcS5leGFtcGxlAnZ1c2VyOmFsaWNlQGV4YW1wbGUuY29tA4J4Gmh0dHBzOi8vcmVsYXkxLmV4YW1wbGUuY29teBpodHRwczovL3JlbGF5Mi5leGFtcGxlLmNvbQQaZVVCgAUaZVPxAAYaZVPxAAdKdmVjdG9yLTAwMhkBNgEZATeB2DREywBxMhkBOAo",
-          "payload_cbor_hex": "aa01781a68747470733a2f2f6973737565722e6d6f712e6578616d706c650276757365723a616c696365406578616d706c652e636f6d0382781a68747470733a2f2f72656c6179312e6578616d706c652e636f6d781a68747470733a2f2f72656c6179322e6578616d706c652e636f6d041a65554280051a6553f100061a6553f100074a766563746f722d3030321901360119013781d83444cb0071321901380a",
-          "signature_b64": "2Vqr1I3ipJWj4NVk79ZPfRUJZZK7V5Xj7aCaQri2glM",
-          "signature_hex": "d95aabd48de2a495a3e0d564efd64f7d15096592bb5795e3eda09a42b8b68253",
-          "token": "ogEFEGNDQVQ.qgF4Gmh0dHBzOi8vaXNzdWVyLm1vcS5leGFtcGxlAnZ1c2VyOmFsaWNlQGV4YW1wbGUuY29tA4J4Gmh0dHBzOi8vcmVsYXkxLmV4YW1wbGUuY29teBpodHRwczovL3JlbGF5Mi5leGFtcGxlLmNvbQQaZVVCgAUaZVPxAAYaZVPxAAdKdmVjdG9yLTAwMhkBNgEZATeB2DREywBxMhkBOAo.2Vqr1I3ipJWj4NVk79ZPfRUJZZK7V5Xj7aCaQri2glM",
+          "payload_b64": "qgF4Gmh0dHBzOi8vaXNzdWVyLm1vcS5leGFtcGxlAnZ1c2VyOmFsaWNlQGV4YW1wbGUuY29tA4J4Gmh0dHBzOi8vcmVsYXkxLmV4YW1wbGUuY29teBpodHRwczovL3JlbGF5Mi5leGFtcGxlLmNvbQQaZVVCgAUaZVPxAAYaZVPxAAdKdmVjdG9yLTAwMhkBNgEZATeB2DREywBxMhkBOKEDoQFmL2xpdmUv",
+          "payload_cbor_hex": "aa01781a68747470733a2f2f6973737565722e6d6f712e6578616d706c650276757365723a616c696365406578616d706c652e636f6d0382781a68747470733a2f2f72656c6179312e6578616d706c652e636f6d781a68747470733a2f2f72656c6179322e6578616d706c652e636f6d041a65554280051a6553f100061a6553f100074a766563746f722d3030321901360119013781d83444cb007132190138a103a101662f6c6976652f",
+          "signature_b64": "KcGmYSzm1JJz_YwBFrney8KHZi1bpdZ976-vb_DBEng",
+          "signature_hex": "29c1a6612ce6d49273fd8c0116b9decbc287662d5ba5d67defafaf6ff0c11278",
+          "token": "ogEFEGNDQVQ.qgF4Gmh0dHBzOi8vaXNzdWVyLm1vcS5leGFtcGxlAnZ1c2VyOmFsaWNlQGV4YW1wbGUuY29tA4J4Gmh0dHBzOi8vcmVsYXkxLmV4YW1wbGUuY29teBpodHRwczovL3JlbGF5Mi5leGFtcGxlLmNvbQQaZVVCgAUaZVPxAAYaZVPxAAdKdmVjdG9yLTAwMhkBNgEZATeB2DREywBxMhkBOKEDoQFmL2xpdmUv.KcGmYSzm1JJz_YwBFrney8KHZi1bpdZ976-vb_DBEng",
           "valid": true
         },
         {

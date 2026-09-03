@@ -10,12 +10,28 @@ fn test_comprehensive_token_creation() {
     let exp = now + chrono::Duration::hours(1);
     let iat = now - chrono::Duration::minutes(1);
 
-    let uri_patterns = vec![
-        UriPattern::Exact("https://api.example.com".to_string()),
-        UriPattern::Prefix("https://secure.".to_string()),
-        UriPattern::Suffix("/api/v1".to_string()),
-        UriPattern::Regex(r"^https://.*\.test\.com$".to_string()),
-        UriPattern::Hash("abcdef123456".to_string()),
+    let uri_match_rules = vec![
+        UriMatchRule {
+            component: URI_COMPONENT_HOST,
+            matches: vec![
+                MatchValue::Exact("api.example.com".to_string()),
+                MatchValue::Prefix("secure.".to_string()),
+            ],
+        },
+        UriMatchRule {
+            component: URI_COMPONENT_PATH,
+            matches: vec![
+                MatchValue::Suffix("/api/v1".to_string()),
+                MatchValue::Regex(r"^https://.*\.test\.com$".to_string()),
+            ],
+        },
+    ];
+
+    let header_match_rules = vec![
+        HeaderMatchRule {
+            name: "Authorization".to_string(),
+            matches: vec![MatchValue::Prefix("Bearer ".to_string())],
+        },
     ];
 
     let token = CatTokenBuilder::new()
@@ -31,11 +47,11 @@ fn test_comprehensive_token_creation() {
         .cwt_id("token-12345")
         // CAT claims
         .version(1)
-        .usage_limit(500)
+        .uri_match_rules(uri_match_rules.clone())
+        .header_match_rules(header_match_rules.clone())
         .replay_protection(cat_token::ReplayProtection::Prohibited)
         .geo_coordinate(40.7128, -74.0060, Some(100.0)) // New York City
         .geohash("dr5regw")
-        .uri_patterns(uri_patterns.clone())
         // Informational claims
         .subject("user@example.com")
         .issued_at(iat)
@@ -62,10 +78,13 @@ fn test_comprehensive_token_creation() {
     assert_eq!(token.core.cti, Some("token-12345".to_string()));
 
     assert_eq!(token.cat.catv, Some(1));
-    assert_eq!(token.cat.catu, Some(500));
+    assert_eq!(token.cat.catu.as_ref().unwrap().len(), 2);
+    assert_eq!(token.cat.catu.as_ref().unwrap()[0].component, URI_COMPONENT_HOST);
+    assert_eq!(token.cat.catu.as_ref().unwrap()[0].matches.len(), 2);
     assert_eq!(token.cat.catreplay, Some(cat_token::ReplayProtection::Prohibited));
     assert_eq!(token.cat.geohash, Some("dr5regw".to_string()));
-    assert_eq!(token.cat.cath.as_ref().unwrap().len(), 5);
+    assert_eq!(token.cat.cath.as_ref().unwrap().len(), 1);
+    assert_eq!(token.cat.cath.as_ref().unwrap()[0].name, "Authorization");
 
     assert_eq!(
         token.informational.sub,
@@ -231,16 +250,38 @@ fn test_cwt_encoding_decoding() {
 }
 
 #[test]
-fn test_uri_pattern_encoding_decoding() {
-    let patterns = vec![
-        UriPattern::Exact("https://api.example.com".to_string()),
-        UriPattern::Prefix("https://secure.".to_string()),
-        UriPattern::Suffix("/api/data".to_string()),
-        UriPattern::Regex(r"^https://.*\.test\.com$".to_string()),
-        UriPattern::Hash("abcdef123456".to_string()),
+fn test_uri_match_rule_encoding_decoding() {
+    let uri_rules = vec![
+        UriMatchRule {
+            component: URI_COMPONENT_HOST,
+            matches: vec![
+                MatchValue::Exact("api.example.com".to_string()),
+                MatchValue::Prefix("secure.".to_string()),
+            ],
+        },
+        UriMatchRule {
+            component: URI_COMPONENT_PATH,
+            matches: vec![
+                MatchValue::Suffix("/api/data".to_string()),
+                MatchValue::Regex(r"^https://.*\.test\.com$".to_string()),
+            ],
+        },
     ];
 
-    let original_token = CatToken::new().with_uri_patterns(patterns.clone());
+    let header_rules = vec![
+        HeaderMatchRule {
+            name: "Content-Type".to_string(),
+            matches: vec![MatchValue::Exact("application/json".to_string())],
+        },
+        HeaderMatchRule {
+            name: "Authorization".to_string(),
+            matches: vec![MatchValue::Prefix("Bearer ".to_string())],
+        },
+    ];
+
+    let original_token = CatToken::new()
+        .with_uri_match_rules(uri_rules.clone())
+        .with_header_match_rules(header_rules.clone());
 
     let cwt = Cwt::new(-7, original_token.clone());
 
@@ -250,38 +291,25 @@ fn test_uri_pattern_encoding_decoding() {
     // Test decoding
     let decoded_token = Cwt::decode_payload(&encoded_payload).expect("Should decode successfully");
 
-    assert_eq!(
-        decoded_token.cat.cath.as_ref().unwrap().len(),
-        patterns.len()
-    );
+    // Verify URI match rules (catu)
+    let decoded_uri_rules = decoded_token.cat.catu.as_ref().unwrap();
+    assert_eq!(decoded_uri_rules.len(), uri_rules.len());
+    assert_eq!(decoded_uri_rules[0].component, URI_COMPONENT_HOST);
+    assert_eq!(decoded_uri_rules[0].matches.len(), 2);
+    assert!(matches!(&decoded_uri_rules[0].matches[0], MatchValue::Exact(s) if s == "api.example.com"));
+    assert!(matches!(&decoded_uri_rules[0].matches[1], MatchValue::Prefix(s) if s == "secure."));
+    assert_eq!(decoded_uri_rules[1].component, URI_COMPONENT_PATH);
+    assert_eq!(decoded_uri_rules[1].matches.len(), 2);
+    assert!(matches!(&decoded_uri_rules[1].matches[0], MatchValue::Suffix(s) if s == "/api/data"));
+    assert!(matches!(&decoded_uri_rules[1].matches[1], MatchValue::Regex(s) if s == r"^https://.*\.test\.com$"));
 
-    // Verify pattern types and values are preserved
-    let decoded_patterns = decoded_token.cat.cath.unwrap();
-    assert!(
-        decoded_patterns
-            .iter()
-            .any(|p| matches!(p, UriPattern::Exact(s) if s == "https://api.example.com"))
-    );
-    assert!(
-        decoded_patterns
-            .iter()
-            .any(|p| matches!(p, UriPattern::Prefix(s) if s == "https://secure."))
-    );
-    assert!(
-        decoded_patterns
-            .iter()
-            .any(|p| matches!(p, UriPattern::Suffix(s) if s == "/api/data"))
-    );
-    assert!(
-        decoded_patterns
-            .iter()
-            .any(|p| matches!(p, UriPattern::Regex(s) if s == r"^https://.*\.test\.com$"))
-    );
-    assert!(
-        decoded_patterns
-            .iter()
-            .any(|p| matches!(p, UriPattern::Hash(s) if s == "abcdef123456"))
-    );
+    // Verify header match rules (cath)
+    let decoded_header_rules = decoded_token.cat.cath.as_ref().unwrap();
+    assert_eq!(decoded_header_rules.len(), header_rules.len());
+    assert_eq!(decoded_header_rules[0].name, "Content-Type");
+    assert!(matches!(&decoded_header_rules[0].matches[0], MatchValue::Exact(s) if s == "application/json"));
+    assert_eq!(decoded_header_rules[1].name, "Authorization");
+    assert!(matches!(&decoded_header_rules[1].matches[0], MatchValue::Prefix(s) if s == "Bearer "));
 }
 
 #[test]
@@ -368,13 +396,23 @@ fn test_maximal_token() {
         .with_cwt_id("maximal-token-id")
         // All CAT claims
         .with_version(1)
-        .with_usage_limit(1000)
+        .with_uri_match_rules(vec![
+            UriMatchRule {
+                component: URI_COMPONENT_HOST,
+                matches: vec![
+                    MatchValue::Exact("maximal.example.com".to_string()),
+                    MatchValue::Prefix("api.".to_string()),
+                ],
+            },
+        ])
         .with_replay_protection(cat_token::ReplayProtection::Prohibited)
         .with_geo_coordinate(51.5074, -0.1278, Some(25.0)) // London
         .with_geohash("gcpvj0du")
-        .with_uri_patterns(vec![
-            UriPattern::Exact("https://maximal.example.com".to_string()),
-            UriPattern::Prefix("https://api.".to_string()),
+        .with_header_match_rules(vec![
+            HeaderMatchRule {
+                name: "Accept".to_string(),
+                matches: vec![MatchValue::Exact("application/json".to_string())],
+            },
         ])
         // All informational claims
         .with_subject("maximal-user@example.com")

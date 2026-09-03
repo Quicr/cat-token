@@ -73,14 +73,19 @@ fn test_vector_cbor_core_claims() {
 }
 
 #[test]
-fn test_vector_cbor_cat_version_usage() {
+fn test_vector_cbor_cat_version_uri() {
     let vectors = load_vectors();
     let cbor_vectors = &vectors["vectors"]["cbor_encoding"]["vectors"];
     let v = &cbor_vectors[2];
 
-    assert_eq!(v["id"], "cbor_cat_version_usage");
+    assert_eq!(v["id"], "cbor_cat_version_uri");
 
-    let token = CatToken::new().with_version(1).with_usage_limit(5);
+    let token = CatToken::new().with_version(1).with_uri_match_rules(vec![
+        UriMatchRule {
+            component: URI_COMPONENT_HOST,
+            matches: vec![MatchValue::Exact("example.com".to_string())],
+        },
+    ]);
     let cwt = Cwt::new(ALG_HMAC256_256, token);
     let payload = cwt.encode_payload().unwrap();
 
@@ -131,17 +136,26 @@ fn test_vector_cbor_geographic_claims() {
 }
 
 #[test]
-fn test_vector_cbor_uri_patterns() {
+fn test_vector_cbor_uri_match_rules() {
     let vectors = load_vectors();
     let cbor_vectors = &vectors["vectors"]["cbor_encoding"]["vectors"];
     let v = &cbor_vectors[5];
 
-    assert_eq!(v["id"], "cbor_uri_patterns");
+    assert_eq!(v["id"], "cbor_uri_match_rules");
 
-    let token = CatToken::new().with_uri_patterns(vec![
-        UriPattern::Exact("https://example.com/live/stream1".to_string()),
-        UriPattern::Prefix("https://example.com/vod/".to_string()),
-        UriPattern::Suffix(".m3u8".to_string()),
+    let token = CatToken::new().with_uri_match_rules(vec![
+        UriMatchRule {
+            component: URI_COMPONENT_HOST,
+            matches: vec![MatchValue::Exact("example.com".to_string())],
+        },
+        UriMatchRule {
+            component: URI_COMPONENT_PATH,
+            matches: vec![MatchValue::Prefix("/vod/".to_string())],
+        },
+        UriMatchRule {
+            component: URI_COMPONENT_EXTENSION,
+            matches: vec![MatchValue::Exact("m3u8".to_string())],
+        },
     ]);
     let cwt = Cwt::new(ALG_HMAC256_256, token);
     let payload = cwt.encode_payload().unwrap();
@@ -233,7 +247,13 @@ fn test_vector_token_hmac_full() {
     assert_eq!(decoded.core.aud.as_ref().unwrap().len(), 2);
     assert_eq!(decoded.core.cti.as_deref(), Some("vector-002"));
     assert_eq!(decoded.cat.catv, Some(1));
-    assert_eq!(decoded.cat.catu, Some(10));
+    assert_eq!(
+        decoded.cat.catu,
+        Some(vec![UriMatchRule {
+            component: URI_COMPONENT_PATH,
+            matches: vec![MatchValue::Prefix("/live/".to_string())],
+        }])
+    );
     assert_eq!(
         decoded.informational.sub.as_deref(),
         Some("user:alice@example.com")

@@ -25,12 +25,14 @@
     },
     {
       "claims": {
-        "catu": 5,
-        "catv": "CAT-v1"
+        "catu": {
+          "host": "example.com"
+        },
+        "catv": 1
       },
-      "description": "CAT version string and usage limit",
-      "id": "cbor_cat_version_usage",
-      "payload_cbor_hex": "a2190136664341542d763119013805"
+      "description": "CAT version (uint 1) and URI match rule",
+      "id": "cbor_cat_version_uri",
+      "payload_cbor_hex": "a219013601190138a101a1006b6578616d706c652e636f6d"
     },
     {
       "claims": {
@@ -58,7 +60,7 @@
       },
       "description": "Network identifiers: IP, CIDR, ASN, ASN range",
       "id": "cbor_network_identifiers",
-      "payload_cbor_hex": "a1190137846d3139322e3136382e312e313030a16869705f72616e67656a31302e302e302e302f38a16361736e19fc00a16961736e5f72616e67658219fc0019fd00"
+      "payload_cbor_hex": "a119013784d83444c0a80164d834a108410a19fc008219fc0019fd00"
     },
     {
       "claims": {
@@ -76,28 +78,31 @@
       },
       "description": "Geographic claims: coordinates, geohash, ISO 3166, altitude",
       "id": "cbor_geographic_claims",
-      "payload_cbor_hex": "a419011a6639713879796b19013c8262555362434119013da3636c6174fb4042e32fec56d5d0636c6f6efbc05e9ad77318fc50686163637572616379f9564019013e0a"
+      "payload_cbor_hex": "a419011a6639713879796b19013c8262555362434119013da3636c6174fb4042e32fec56d5d0636c6f6efbc05e9ad77318fc50686163637572616379f9564019013e82f94900f94500"
     },
     {
       "claims": {
-        "cath": [
+        "catu": [
           {
-            "type": "exact",
-            "value": "https://example.com/live/stream1"
+            "component": "host",
+            "match": "exact",
+            "value": "example.com"
           },
           {
-            "type": "prefix",
-            "value": "https://example.com/vod/"
+            "component": "path",
+            "match": "prefix",
+            "value": "/vod/"
           },
           {
-            "type": "suffix",
-            "value": ".m3u8"
+            "component": "extension",
+            "match": "exact",
+            "value": "m3u8"
           }
         ]
       },
-      "description": "URI patterns: exact, prefix, suffix",
-      "id": "cbor_uri_patterns",
-      "payload_cbor_hex": "a119013b83782068747470733a2f2f6578616d706c652e636f6d2f6c6976652f73747265616d31a166707265666978781868747470733a2f2f6578616d706c652e636f6d2f766f642fa166737566666978652e6d337538"
+      "description": "URI match rules: host exact, path prefix, extension exact",
+      "id": "cbor_uri_match_rules",
+      "payload_cbor_hex": "a1190138a301a1006b6578616d706c652e636f6d03a101652f766f642f08a100646d337538"
     },
     {
       "claims": {

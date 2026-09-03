@@ -40,15 +40,21 @@ fn test_core_claims() {
 
 #[test]
 fn test_cat_claims() {
+    let uri_rules = vec![
+        UriMatchRule {
+            component: URI_COMPONENT_HOST,
+            matches: vec![MatchValue::Exact("api.example.com".to_string())],
+        },
+    ];
     let token = CatToken::new()
         .with_version(1)
-        .with_usage_limit(100)
+        .with_uri_match_rules(uri_rules.clone())
         .with_replay_protection(cat_token::ReplayProtection::Prohibited)
         .with_geo_coordinate(37.7749, -122.4194, Some(10.0))
         .with_geohash("9q8yy");
 
     assert_eq!(token.cat.catv, Some(1));
-    assert_eq!(token.cat.catu, Some(100));
+    assert_eq!(token.cat.catu, Some(uri_rules));
     assert_eq!(token.cat.catreplay, Some(cat_token::ReplayProtection::Prohibited));
 
     assert!(token.cat.catgeocoord.is_some());
@@ -100,17 +106,35 @@ fn test_request_claims() {
 }
 
 #[test]
-fn test_uri_patterns() {
-    let patterns = vec![
-        UriPattern::Exact("https://api.example.com".to_string()),
-        UriPattern::Prefix("https://".to_string()),
-        UriPattern::Suffix(".json".to_string()),
-        UriPattern::Regex(r"^https://.*\.example\.com$".to_string()),
-        UriPattern::Hash("hash123".to_string()),
+fn test_uri_match_rules() {
+    let rules = vec![
+        UriMatchRule {
+            component: URI_COMPONENT_SCHEME,
+            matches: vec![MatchValue::Exact("https".to_string())],
+        },
+        UriMatchRule {
+            component: URI_COMPONENT_HOST,
+            matches: vec![
+                MatchValue::Exact("api.example.com".to_string()),
+                MatchValue::Suffix(".example.com".to_string()),
+            ],
+        },
+        UriMatchRule {
+            component: URI_COMPONENT_PATH,
+            matches: vec![
+                MatchValue::Prefix("/api/".to_string()),
+                MatchValue::Regex(r"^/v[0-9]+/.*$".to_string()),
+                MatchValue::Contains("resource".to_string()),
+            ],
+        },
+        UriMatchRule {
+            component: URI_COMPONENT_EXTENSION,
+            matches: vec![MatchValue::Exact("json".to_string())],
+        },
     ];
 
-    let token = CatToken::new().with_uri_patterns(patterns.clone());
-    assert_eq!(token.cat.cath, Some(patterns));
+    let token = CatToken::new().with_uri_match_rules(rules.clone());
+    assert_eq!(token.cat.catu, Some(rules));
 }
 
 #[test]

@@ -142,13 +142,18 @@ fn generate_cbor_encoding_vectors() -> JsonValue {
 
     // 1.3: CAT version and usage limit
     {
-        let token = CatToken::new().with_version(1).with_usage_limit(5);
+        let token = CatToken::new().with_version(1).with_uri_match_rules(vec![
+            cat_token::UriMatchRule {
+                component: cat_token::URI_COMPONENT_HOST,
+                matches: vec![cat_token::MatchValue::Exact("example.com".to_string())],
+            },
+        ]);
         let cwt = Cwt::new(ALG_HMAC256_256, token);
         let payload_cbor = cwt.encode_payload().unwrap();
         vectors.push(json!({
-            "id": "cbor_cat_version_usage",
-            "description": "CAT version (uint 1) and usage limit",
-            "claims": {"catv": 1, "catu": 5},
+            "id": "cbor_cat_version_uri",
+            "description": "CAT version (uint 1) and URI match rule",
+            "claims": {"catv": 1, "catu": {"host": "example.com"}},
             "payload_cbor_hex": hex::encode(&payload_cbor),
         }));
     }
@@ -204,23 +209,32 @@ fn generate_cbor_encoding_vectors() -> JsonValue {
         }));
     }
 
-    // 1.6: URI patterns
+    // 1.6: URI match rules (catu)
     {
-        let token = CatToken::new().with_uri_patterns(vec![
-            UriPattern::Exact("https://example.com/live/stream1".to_string()),
-            UriPattern::Prefix("https://example.com/vod/".to_string()),
-            UriPattern::Suffix(".m3u8".to_string()),
+        let token = CatToken::new().with_uri_match_rules(vec![
+            UriMatchRule {
+                component: URI_COMPONENT_HOST,
+                matches: vec![MatchValue::Exact("example.com".to_string())],
+            },
+            UriMatchRule {
+                component: URI_COMPONENT_PATH,
+                matches: vec![MatchValue::Prefix("/vod/".to_string())],
+            },
+            UriMatchRule {
+                component: URI_COMPONENT_EXTENSION,
+                matches: vec![MatchValue::Exact("m3u8".to_string())],
+            },
         ]);
         let cwt = Cwt::new(ALG_HMAC256_256, token);
         let payload_cbor = cwt.encode_payload().unwrap();
         vectors.push(json!({
-            "id": "cbor_uri_patterns",
-            "description": "URI patterns: exact, prefix, suffix",
+            "id": "cbor_uri_match_rules",
+            "description": "URI match rules: host exact, path prefix, extension exact",
             "claims": {
-                "cath": [
-                    {"type": "exact", "value": "https://example.com/live/stream1"},
-                    {"type": "prefix", "value": "https://example.com/vod/"},
-                    {"type": "suffix", "value": ".m3u8"}
+                "catu": [
+                    {"component": "host", "match": "exact", "value": "example.com"},
+                    {"component": "path", "match": "prefix", "value": "/vod/"},
+                    {"component": "extension", "match": "exact", "value": "m3u8"}
                 ]
             },
             "payload_cbor_hex": hex::encode(&payload_cbor),
@@ -295,7 +309,10 @@ fn generate_token_structure_vectors() -> JsonValue {
             ])
             .with_cwt_id("vector-002")
             .with_version(1)
-            .with_usage_limit(10)
+            .with_uri_match_rules(vec![UriMatchRule {
+                component: URI_COMPONENT_PATH,
+                matches: vec![MatchValue::Prefix("/live/".to_string())],
+            }])
             .with_subject("user:alice@example.com")
             .with_ip_address("203.0.113.50");
         let mut token = token;

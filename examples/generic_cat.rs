@@ -7,8 +7,8 @@
 //! This example shows how to create tokens for a generic CDN or API gateway.
 
 use cat_token::{
-    CatTokenBuilder, CatTokenValidator, Es256Algorithm, NetworkIdentifier, UriPattern,
-    decode_token, encode_token,
+    CatTokenBuilder, CatTokenValidator, Es256Algorithm, MatchValue, NetworkIdentifier,
+    UriMatchRule, URI_COMPONENT_EXTENSION, URI_COMPONENT_PATH, decode_token, encode_token,
 };
 use chrono::{Duration, Utc};
 
@@ -25,10 +25,18 @@ fn main() {
         .subject("customer-12345")
         .expires_at(Utc::now() + Duration::hours(24))
         .issued_at(Utc::now())
-        .uri_patterns(vec![
-            UriPattern::Prefix("https://cdn.example.com/customer-12345/".to_string()),
-            UriPattern::Suffix(".m3u8".to_string()),
-            UriPattern::Suffix(".ts".to_string()),
+        .uri_match_rules(vec![
+            UriMatchRule {
+                component: URI_COMPONENT_PATH,
+                matches: vec![MatchValue::Prefix("/customer-12345/".to_string())],
+            },
+            UriMatchRule {
+                component: URI_COMPONENT_EXTENSION,
+                matches: vec![
+                    MatchValue::Exact("m3u8".to_string()),
+                    MatchValue::Exact("ts".to_string()),
+                ],
+            },
         ])
         .build();
 
@@ -51,9 +59,14 @@ fn main() {
             NetworkIdentifier::IpPrefix("192.168.0.0".parse().unwrap(), 16),
             NetworkIdentifier::Asn(64512),
         ])
-        .uri_patterns(vec![
-            UriPattern::Prefix("/api/v1/".to_string()),
-            UriPattern::Exact("/health".to_string()),
+        .uri_match_rules(vec![
+            UriMatchRule {
+                component: URI_COMPONENT_PATH,
+                matches: vec![
+                    MatchValue::Prefix("/api/v1/".to_string()),
+                    MatchValue::Exact("/health".to_string()),
+                ],
+            },
         ])
         .build();
 

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 use crate::{
-    CatError, CatToken, CryptographicAlgorithm, Cwt, CwtHeader, NetworkIdentifier, UriPattern,
+    CatError, CatToken, CryptographicAlgorithm, Cwt, CwtHeader, NetworkIdentifier,
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, Utc};
@@ -235,8 +235,8 @@ impl CatTokenBuilder {
         self
     }
 
-    pub fn usage_limit(mut self, limit: u32) -> Self {
-        self.inner = self.inner.with_usage_limit(limit);
+    pub fn uri_match_rules(mut self, rules: Vec<crate::claims::UriMatchRule>) -> Self {
+        self.inner = self.inner.with_uri_match_rules(rules);
         self
     }
 
@@ -307,8 +307,8 @@ impl CatTokenBuilder {
         self
     }
 
-    pub fn uri_patterns(mut self, patterns: Vec<UriPattern>) -> Self {
-        self.inner = self.inner.with_uri_patterns(patterns);
+    pub fn header_match_rules(mut self, rules: Vec<crate::claims::HeaderMatchRule>) -> Self {
+        self.inner = self.inner.with_header_match_rules(rules);
         self
     }
 

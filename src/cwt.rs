@@ -11,6 +11,51 @@ use std::net::IpAddr;
 const CBOR_TAG_IPV4: u64 = 52;
 const CBOR_TAG_IPV6: u64 = 54;
 
+fn encode_match_value(m: &MatchValue) -> (Value, Value) {
+    match m {
+        MatchValue::Exact(s) => (Value::Integer(MATCH_EXACT.into()), Value::Text(s.clone())),
+        MatchValue::Prefix(s) => (Value::Integer(MATCH_PREFIX.into()), Value::Text(s.clone())),
+        MatchValue::Suffix(s) => (Value::Integer(MATCH_SUFFIX.into()), Value::Text(s.clone())),
+        MatchValue::Contains(s) => (Value::Integer(MATCH_CONTAINS.into()), Value::Text(s.clone())),
+        MatchValue::Regex(s) => (Value::Integer(MATCH_REGEX.into()), Value::Text(s.clone())),
+        MatchValue::Sha256(h) => (Value::Integer(MATCH_SHA256.into()), Value::Bytes(h.clone())),
+    }
+}
+
+fn decode_match_value(key: &Value, val: &Value) -> Result<MatchValue, CatError> {
+    let match_type: i64 = match key {
+        Value::Integer(i) => (*i).try_into().map_err(|_| CatError::InvalidTokenFormat)?,
+        _ => return Err(CatError::InvalidTokenFormat),
+    };
+    match match_type {
+        MATCH_EXACT => {
+            if let Value::Text(s) = val { Ok(MatchValue::Exact(s.clone())) }
+            else { Err(CatError::InvalidTokenFormat) }
+        }
+        MATCH_PREFIX => {
+            if let Value::Text(s) = val { Ok(MatchValue::Prefix(s.clone())) }
+            else { Err(CatError::InvalidTokenFormat) }
+        }
+        MATCH_SUFFIX => {
+            if let Value::Text(s) = val { Ok(MatchValue::Suffix(s.clone())) }
+            else { Err(CatError::InvalidTokenFormat) }
+        }
+        MATCH_CONTAINS => {
+            if let Value::Text(s) = val { Ok(MatchValue::Contains(s.clone())) }
+            else { Err(CatError::InvalidTokenFormat) }
+        }
+        MATCH_REGEX => {
+            if let Value::Text(s) = val { Ok(MatchValue::Regex(s.clone())) }
+            else { Err(CatError::InvalidTokenFormat) }
+        }
+        MATCH_SHA256 => {
+            if let Value::Bytes(b) = val { Ok(MatchValue::Sha256(b.clone())) }
+            else { Err(CatError::InvalidTokenFormat) }
+        }
+        _ => Err(CatError::InvalidClaimValue(format!("Unknown match type: {match_type}"))),
+    }
+}
+
 fn encode_network_identifier(nip: &NetworkIdentifier) -> Value {
     match nip {
         NetworkIdentifier::IpAddress(addr) => match addr {
@@ -203,8 +248,22 @@ impl Cwt {
             claims_map.insert(CLAIM_CATNIP, Value::Array(nip_values));
         }
 
-        if let Some(catu) = self.payload.cat.catu {
-            claims_map.insert(CLAIM_CATU, Value::Integer(catu.into()));
+        if let Some(ref catu) = self.payload.cat.catu {
+            let uri_map: Vec<(Value, Value)> = catu
+                .iter()
+                .map(|rule| {
+                    let match_map: Vec<(Value, Value)> = rule
+                        .matches
+                        .iter()
+                        .map(|m| encode_match_value(m))
+                        .collect();
+                    (
+                        Value::Integer(rule.component.into()),
+                        Value::Map(match_map),
+                    )
+                })
+                .collect();
+            claims_map.insert(CLAIM_CATU, Value::Map(uri_map));
         }
 
         if let Some(ref catm) = self.payload.cat.catm {
@@ -218,29 +277,21 @@ impl Cwt {
         }
 
         if let Some(ref cath) = self.payload.cat.cath {
-            let pattern_values: Vec<Value> = cath
+            let header_map: Vec<(Value, Value)> = cath
                 .iter()
-                .map(|pattern| match pattern {
-                    UriPattern::Exact(s) => Value::Text(s.clone()),
-                    UriPattern::Prefix(s) => Value::Map(vec![(
-                        Value::Text("prefix".to_string()),
-                        Value::Text(s.clone()),
-                    )]),
-                    UriPattern::Suffix(s) => Value::Map(vec![(
-                        Value::Text("suffix".to_string()),
-                        Value::Text(s.clone()),
-                    )]),
-                    UriPattern::Regex(s) => Value::Map(vec![(
-                        Value::Text("regex".to_string()),
-                        Value::Text(s.clone()),
-                    )]),
-                    UriPattern::Hash(s) => Value::Map(vec![(
-                        Value::Text("hash".to_string()),
-                        Value::Text(s.clone()),
-                    )]),
+                .map(|rule| {
+                    let match_map: Vec<(Value, Value)> = rule
+                        .matches
+                        .iter()
+                        .map(|m| encode_match_value(m))
+                        .collect();
+                    (
+                        Value::Text(rule.name.clone()),
+                        Value::Map(match_map),
+                    )
                 })
                 .collect();
-            claims_map.insert(CLAIM_CATH, Value::Array(pattern_values));
+            claims_map.insert(CLAIM_CATH, Value::Map(header_map));
         }
 
         if let Some(ref catgeoiso3166) = self.payload.cat.catgeoiso3166 {
@@ -744,8 +795,24 @@ impl Cwt {
                     }
                 }
                 CLAIM_CATU => {
-                    if let Value::Integer(i) = value {
-                        cat.catu = Some(i.try_into().map_err(|_| CatError::InvalidTokenFormat)?);
+                    if let Value::Map(map) = value {
+                        let mut rules = Vec::new();
+                        for (k, v) in map {
+                            let component: i64 = match k {
+                                Value::Integer(i) => i.try_into().map_err(|_| CatError::InvalidTokenFormat)?,
+                                _ => continue,
+                            };
+                            let match_map = match v {
+                                Value::Map(m) => m,
+                                _ => continue,
+                            };
+                            let mut matches = Vec::new();
+                            for (mk, mv) in &match_map {
+                                matches.push(decode_match_value(mk, mv)?);
+                            }
+                            rules.push(UriMatchRule { component, matches });
+                        }
+                        cat.catu = Some(rules);
                     }
                 }
                 CLAIM_CATM => {
@@ -771,37 +838,24 @@ impl Cwt {
                     }
                 }
                 CLAIM_CATH => {
-                    if let Value::Array(arr) = value {
-                        // Limit URI pattern count
-                        if arr.len() > DEFAULT_MAX_URI_PATTERNS {
-                            return Err(CatError::InvalidClaimValue(format!(
-                                "Too many URI patterns: {} (max {})",
-                                arr.len(),
-                                DEFAULT_MAX_URI_PATTERNS
-                            )));
-                        }
-                        let mut patterns = Vec::new();
-                        for item in arr {
-                            if let Value::Text(s) = item {
-                                validate_string_length(&s, "URI pattern")?;
-                                patterns.push(UriPattern::Exact(s));
-                            } else if let Value::Map(pattern_map) = item
-                                && let Some((key, val)) = pattern_map.into_iter().next()
-                                && let (Value::Text(pattern_type), Value::Text(pattern_value)) =
-                                    (key, val)
-                            {
-                                validate_string_length(&pattern_value, "URI pattern")?;
-                                match pattern_type.as_str() {
-                                    "exact" => patterns.push(UriPattern::Exact(pattern_value)),
-                                    "prefix" => patterns.push(UriPattern::Prefix(pattern_value)),
-                                    "suffix" => patterns.push(UriPattern::Suffix(pattern_value)),
-                                    "regex" => patterns.push(UriPattern::Regex(pattern_value)),
-                                    "hash" => patterns.push(UriPattern::Hash(pattern_value)),
-                                    _ => {}
-                                }
+                    if let Value::Map(map) = value {
+                        let mut rules = Vec::new();
+                        for (k, v) in map {
+                            let name = match k {
+                                Value::Text(s) => s,
+                                _ => continue,
+                            };
+                            let match_map = match v {
+                                Value::Map(m) => m,
+                                _ => continue,
+                            };
+                            let mut matches = Vec::new();
+                            for (mk, mv) in &match_map {
+                                matches.push(decode_match_value(mk, mv)?);
                             }
+                            rules.push(HeaderMatchRule { name, matches });
                         }
-                        cat.cath = Some(patterns);
+                        cat.cath = Some(rules);
                     }
                 }
                 CLAIM_CATGEOISO3166 => {

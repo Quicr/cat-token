@@ -16,7 +16,10 @@ fn test_cat_token_creation() {
         .not_before(now)
         .cwt_id("test-token-id")
         .version(1)
-        .usage_limit(100)
+        .uri_match_rules(vec![UriMatchRule {
+            component: URI_COMPONENT_HOST,
+            matches: vec![MatchValue::Exact("example.com".to_string())],
+        }])
         .replay_protection(cat_token::ReplayProtection::Prohibited)
         .geo_coordinate(37.7749, -122.4194, Some(100.0))
         .geohash("9q8yy")
@@ -29,7 +32,13 @@ fn test_cat_token_creation() {
     );
     assert_eq!(token.core.cti, Some("test-token-id".to_string()));
     assert_eq!(token.cat.catv, Some(1));
-    assert_eq!(token.cat.catu, Some(100));
+    assert_eq!(
+        token.cat.catu,
+        Some(vec![UriMatchRule {
+            component: URI_COMPONENT_HOST,
+            matches: vec![MatchValue::Exact("example.com".to_string())],
+        }])
+    );
     assert_eq!(token.cat.catreplay, Some(cat_token::ReplayProtection::Prohibited));
     assert_eq!(token.cat.geohash, Some("9q8yy".to_string()));
 
@@ -239,7 +248,10 @@ fn test_cwt_payload_encoding_decoding() {
         .not_before(now)
         .cwt_id("test-payload")
         .version(1)
-        .usage_limit(50)
+        .uri_match_rules(vec![UriMatchRule {
+            component: URI_COMPONENT_PATH,
+            matches: vec![MatchValue::Prefix("/api/".to_string())],
+        }])
         .replay_protection(cat_token::ReplayProtection::Prohibited)
         .geo_coordinate(51.5074, -0.1278, None)
         .geohash("gcpvj")
@@ -284,12 +296,27 @@ fn test_all_cat_claims() {
                 NetworkIdentifier::IpPrefix("192.168.1.0".parse().unwrap(), 24),
                 NetworkIdentifier::IpPrefix("10.0.0.0".parse().unwrap(), 8),
             ]),
-            catu: Some(999),
+            catu: Some(vec![
+                UriMatchRule {
+                    component: URI_COMPONENT_HOST,
+                    matches: vec![MatchValue::Exact("api.example.com".to_string())],
+                },
+                UriMatchRule {
+                    component: URI_COMPONENT_PATH,
+                    matches: vec![MatchValue::Prefix("/v1/".to_string())],
+                },
+            ]),
             catm: Some(vec!["GET".to_string(), "POST".to_string()]),
             catalpn: Some(vec!["h2".to_string(), "http/1.1".to_string()]),
             cath: Some(vec![
-                UriPattern::Exact("api.example.com".to_string()),
-                UriPattern::Prefix("*.example.org".to_string()),
+                HeaderMatchRule {
+                    name: "Host".to_string(),
+                    matches: vec![MatchValue::Exact("api.example.com".to_string())],
+                },
+                HeaderMatchRule {
+                    name: "Host".to_string(),
+                    matches: vec![MatchValue::Suffix(".example.org".to_string())],
+                },
             ]),
             catgeoiso3166: Some(vec!["US".to_string(), "CA".to_string()]),
             catgeocoord: Some(GeoCoordinate {
