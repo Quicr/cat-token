@@ -73,4 +73,7 @@ pub enum CatError {
 
     #[error("Method not allowed: {0}")]
     MethodNotAllowed(String),
+
+    #[error("Certificate validation failed: {0}")]
+    CertificateValidationFailed(String),
 }

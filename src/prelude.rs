@@ -21,6 +21,7 @@ pub use crate::dpop::{
 };
 pub use crate::encrypt::{EncryptionAlgorithm, cose_decrypt0, cose_encrypt0};
 pub use crate::error::CatError;
+pub use crate::x509::{extract_spki_from_cert, validate_cattpk, validate_cattpk_chain};
 pub use crate::jwk::Jwk;
 pub use crate::token::{
     CatPorBlockList, CatTokenBuilder, CatTokenValidator, apply_match_value, decode_token,

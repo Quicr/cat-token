@@ -13,6 +13,7 @@ pub mod moqt;
 pub mod prelude;
 pub mod token;
 pub mod uri;
+pub mod x509;
 
 // Conditional trie module selection based on features
 // qp-trie takes precedence if both are enabled
@@ -37,3 +38,4 @@ pub use jwk::*;
 pub use moqt::*;
 pub use token::*;
 pub use uri::*;
+pub use x509::*;
