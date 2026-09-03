@@ -11,6 +11,7 @@ pub mod jwk;
 #[cfg(feature = "moqt")]
 pub mod moqt;
 pub mod prelude;
+pub mod structured_header;
 pub mod token;
 pub mod uri;
 pub mod x509;
@@ -36,6 +37,7 @@ pub use error::*;
 pub use jwk::*;
 #[cfg(feature = "moqt")]
 pub use moqt::*;
+pub use structured_header::*;
 pub use token::*;
 pub use uri::*;
 pub use x509::*;
