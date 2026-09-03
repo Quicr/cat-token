@@ -28,8 +28,8 @@ impl CatTokenValidator {
         Self {
             expected_issuers: None,
             expected_audiences: None,
-            exp_tolerance: 30, // 30 seconds default (conservative for security)
-            nbf_tolerance: 30, // 30 seconds default (conservative for security)
+            exp_tolerance: 0,
+            nbf_tolerance: 0,
         }
     }
 
