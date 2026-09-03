@@ -148,7 +148,12 @@ impl CatTokenValidator {
             }
         }
 
-        // Validate network identifiers if present
+        if let Some(ref codes) = token.cat.catgeoiso3166 {
+            for code in codes {
+                crate::claims::validate_iso3166_code(code)?;
+            }
+        }
+
         if let Some(ref nips) = token.cat.catnip {
             for nip in nips {
                 nip.validate()?;

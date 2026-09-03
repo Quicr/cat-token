@@ -80,6 +80,15 @@ fn validate_float(f: f64, claim_name: &str) -> Result<(), CatError> {
     Ok(())
 }
 
+fn reject_unexpected_tag(value: &Value, claim_name: &str) -> Result<(), CatError> {
+    if let Value::Tag(tag, _) = value {
+        return Err(CatError::InvalidClaimValue(format!(
+            "{claim_name}: unexpected CBOR tag {tag} (claims MUST NOT be tagged per CTA-5007-B §4.5)"
+        )));
+    }
+    Ok(())
+}
+
 fn encode_number_shortest(f: f64) -> Value {
     if f.is_finite() && f == f.trunc() && f.abs() < (i64::MAX as f64) {
         Value::Integer((f as i64).into())
@@ -235,6 +244,13 @@ fn decode_network_identifier(value: &Value) -> Result<NetworkIdentifier, CatErro
                     Value::Bytes(b) => b,
                     _ => return Err(CatError::InvalidTokenFormat),
                 };
+                let expected_byte_count = prefix_byte_count(prefix_len);
+                if prefix_bytes.len() != expected_byte_count {
+                    return Err(CatError::InvalidClaimValue(format!(
+                        "catnip: address-with-prefix form not allowed (got {} bytes for /{} prefix, expected {})",
+                        prefix_bytes.len(), prefix_len, expected_byte_count
+                    )));
+                }
                 match *tag {
                     CBOR_TAG_IPV4 => {
                         let mut octets = [0u8; 4];
@@ -883,12 +899,14 @@ impl Cwt {
 
             match claim_id {
                 CLAIM_ISS => {
+                    reject_unexpected_tag(&value, "iss")?;
                     if let Value::Text(s) = value {
                         validate_string_length(&s, "issuer")?;
                         core.iss = Some(s);
                     }
                 }
                 CLAIM_AUD => {
+                    reject_unexpected_tag(&value, "aud")?;
                     if let Value::Array(arr) = value {
                         let mut audiences = Vec::new();
                         for item in arr {
@@ -900,36 +918,48 @@ impl Cwt {
                         core.aud = Some(audiences);
                     }
                 }
-                CLAIM_EXP => match value {
-                    Value::Integer(i) => {
-                        core.exp = Some(i.try_into().map_err(|_| CatError::InvalidTokenFormat)?);
+                CLAIM_EXP => {
+                    reject_unexpected_tag(&value, "exp")?;
+                    match value {
+                        Value::Integer(i) => {
+                            core.exp =
+                                Some(i.try_into().map_err(|_| CatError::InvalidTokenFormat)?);
+                        }
+                        Value::Float(f) => {
+                            validate_float(f, "exp")?;
+                            core.exp = Some(f as i64);
+                        }
+                        _ => {}
                     }
-                    Value::Float(f) => {
-                        validate_float(f, "exp")?;
-                        core.exp = Some(f as i64);
+                }
+                CLAIM_NBF => {
+                    reject_unexpected_tag(&value, "nbf")?;
+                    match value {
+                        Value::Integer(i) => {
+                            core.nbf =
+                                Some(i.try_into().map_err(|_| CatError::InvalidTokenFormat)?);
+                        }
+                        Value::Float(f) => {
+                            validate_float(f, "nbf")?;
+                            core.nbf = Some(f as i64);
+                        }
+                        _ => {}
                     }
-                    _ => {}
-                },
-                CLAIM_NBF => match value {
-                    Value::Integer(i) => {
-                        core.nbf = Some(i.try_into().map_err(|_| CatError::InvalidTokenFormat)?);
+                }
+                CLAIM_CTI => {
+                    reject_unexpected_tag(&value, "cti")?;
+                    match value {
+                        Value::Bytes(b) => {
+                            core.cti = Some(b);
+                        }
+                        Value::Text(s) => {
+                            core.cti = Some(s.into_bytes());
+                        }
+                        _ => {}
                     }
-                    Value::Float(f) => {
-                        validate_float(f, "nbf")?;
-                        core.nbf = Some(f as i64);
-                    }
-                    _ => {}
-                },
-                CLAIM_CTI => match value {
-                    Value::Bytes(b) => {
-                        core.cti = Some(b);
-                    }
-                    Value::Text(s) => {
-                        core.cti = Some(s.into_bytes());
-                    }
-                    _ => {}
-                },
+                }
                 CLAIM_CATREPLAY => {
+                    reject_unexpected_tag(&value, "catreplay")?;
                     if let Value::Integer(i) = value {
                         let v: u32 = i.try_into().map_err(|_| {
                             CatError::InvalidClaimValue("Invalid catreplay value".to_string())
@@ -938,6 +968,7 @@ impl Cwt {
                     }
                 }
                 CLAIM_CATPOR => {
+                    reject_unexpected_tag(&value, "catpor")?;
                     if let Value::Array(arr) = value {
                         if arr.len() >= 2 {
                             let probability = match &arr[0] {
@@ -983,6 +1014,7 @@ impl Cwt {
                     }
                 }
                 CLAIM_CATV => {
+                    reject_unexpected_tag(&value, "catv")?;
                     if let Value::Integer(i) = value {
                         cat.catv = Some(i.try_into().map_err(|_| {
                             CatError::InvalidClaimValue("Invalid catv value".to_string())
@@ -999,6 +1031,7 @@ impl Cwt {
                     }
                 }
                 CLAIM_CATU => {
+                    reject_unexpected_tag(&value, "catu")?;
                     if let Value::Map(map) = value {
                         let mut rules = Vec::new();
                         for (k, v) in map {
@@ -1022,6 +1055,7 @@ impl Cwt {
                     }
                 }
                 CLAIM_CATM => {
+                    reject_unexpected_tag(&value, "catm")?;
                     if let Value::Array(arr) = value {
                         if arr.len() > 50 {
                             return Err(CatError::InvalidClaimValue(format!(
@@ -1039,6 +1073,7 @@ impl Cwt {
                     }
                 }
                 CLAIM_CATALPN => {
+                    reject_unexpected_tag(&value, "catalpn")?;
                     if let Value::Array(arr) = value {
                         if arr.len() > 50 {
                             return Err(CatError::InvalidClaimValue(format!(
@@ -1058,6 +1093,7 @@ impl Cwt {
                     }
                 }
                 CLAIM_CATH => {
+                    reject_unexpected_tag(&value, "cath")?;
                     if let Value::Map(map) = value {
                         let mut rules = Vec::new();
                         for (k, v) in map {
@@ -1079,6 +1115,7 @@ impl Cwt {
                     }
                 }
                 CLAIM_CATGEOISO3166 => {
+                    reject_unexpected_tag(&value, "catgeoiso3166")?;
                     if let Value::Array(arr) = value {
                         let mut countries = Vec::new();
                         for item in arr {
@@ -1195,45 +1232,54 @@ impl Cwt {
                     }
                 }
                 CLAIM_CATTPK => {
+                    reject_unexpected_tag(&value, "cattpk")?;
                     if let Value::Bytes(b) = value {
                         cat.cattpk = Some(b);
                     }
                 }
                 CLAIM_SUB => {
+                    reject_unexpected_tag(&value, "sub")?;
                     if let Value::Text(s) = value {
                         validate_string_length(&s, "subject")?;
                         informational.sub = Some(s);
                     }
                 }
-                CLAIM_IAT => match value {
+                CLAIM_IAT => {
+                    reject_unexpected_tag(&value, "iat")?;
+                    match value {
                     Value::Integer(i) => {
                         informational.iat =
                             Some(i.try_into().map_err(|_| CatError::InvalidTokenFormat)?);
                     }
-                    Value::Float(f) => {
-                        validate_float(f, "iat")?;
-                        informational.iat = Some(f as i64);
+                        Value::Float(f) => {
+                            validate_float(f, "iat")?;
+                            informational.iat = Some(f as i64);
+                        }
+                        _ => {}
                     }
-                    _ => {}
-                },
-                CLAIM_CATIFDATA => match value {
-                    Value::Text(s) => {
-                        informational.catifdata = Some(vec![s]);
-                    }
-                    Value::Array(arr) => {
-                        let mut items = Vec::new();
-                        for item in arr {
-                            if let Value::Text(s) = item {
-                                items.push(s);
+                }
+                CLAIM_CATIFDATA => {
+                    reject_unexpected_tag(&value, "catifdata")?;
+                    match value {
+                        Value::Text(s) => {
+                            informational.catifdata = Some(vec![s]);
+                        }
+                        Value::Array(arr) => {
+                            let mut items = Vec::new();
+                            for item in arr {
+                                if let Value::Text(s) = item {
+                                    items.push(s);
+                                }
+                            }
+                            if !items.is_empty() {
+                                informational.catifdata = Some(items);
                             }
                         }
-                        if !items.is_empty() {
-                            informational.catifdata = Some(items);
-                        }
+                        _ => {}
                     }
-                    _ => {}
-                },
+                }
                 CLAIM_CNF => {
+                    reject_unexpected_tag(&value, "cnf")?;
                     if let Value::Map(map) = value {
                         let mut jkt = Vec::new();
                         let mut ckt = None;

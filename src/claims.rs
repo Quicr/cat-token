@@ -623,6 +623,36 @@ pub const MATCH_SHA512_256: i64 = -2;
 /// Expressions (IEEE 1003.1-2017 §9.4) as required by CTA-5007-B §4.6.10.
 ///
 /// Returns an error message describing the non-ERE feature found, or None if valid.
+pub fn validate_iso3166_code(code: &str) -> Result<(), crate::CatError> {
+    if code.is_empty() {
+        return Err(crate::CatError::InvalidClaimValue(
+            "Empty ISO 3166 code".to_string(),
+        ));
+    }
+    if let Some(pos) = code.find('-') {
+        let country = &code[..pos];
+        let subdivision = &code[pos + 1..];
+        if country.len() != 2
+            || !country.chars().all(|c| c.is_ascii_uppercase())
+            || subdivision.is_empty()
+            || subdivision.len() > 3
+            || !subdivision.chars().all(|c| c.is_ascii_alphanumeric())
+        {
+            return Err(crate::CatError::InvalidClaimValue(format!(
+                "Invalid ISO 3166 subdivision code: {code}"
+            )));
+        }
+    } else if (code.len() == 2 || code.len() == 3) && code.chars().all(|c| c.is_ascii_uppercase())
+    {
+        // alpha-2 or alpha-3
+    } else {
+        return Err(crate::CatError::InvalidClaimValue(format!(
+            "Invalid ISO 3166 code: {code}"
+        )));
+    }
+    Ok(())
+}
+
 pub fn validate_posix_ere(pattern: &str) -> Option<String> {
     let bytes = pattern.as_bytes();
     let mut i = 0;
