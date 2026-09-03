@@ -287,7 +287,7 @@ impl Cwt {
         }
 
         if let Some(ref catalpn) = self.payload.cat.catalpn {
-            let alpn_values: Vec<Value> = catalpn.iter().map(|a| Value::Text(a.clone())).collect();
+            let alpn_values: Vec<Value> = catalpn.iter().map(|a| Value::Bytes(a.clone())).collect();
             claims_map.insert(CLAIM_CATALPN, Value::Array(alpn_values));
         }
 
@@ -857,8 +857,10 @@ impl Cwt {
                     if let Value::Array(arr) = value {
                         let mut alpns = Vec::new();
                         for item in arr {
-                            if let Value::Text(s) = item {
-                                alpns.push(s);
+                            match item {
+                                Value::Bytes(b) => alpns.push(b),
+                                Value::Text(s) => alpns.push(s.into_bytes()),
+                                _ => {}
                             }
                         }
                         cat.catalpn = Some(alpns);

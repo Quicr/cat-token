@@ -244,7 +244,7 @@ fn generate_cbor_encoding_vectors() -> JsonValue {
     // 1.7: ALPN protocols
     {
         let mut token = CatToken::new();
-        token.cat.catalpn = Some(vec!["moq-00".to_string(), "h3".to_string()]);
+        token.cat.catalpn = Some(vec![b"moq-00".to_vec(), b"h3".to_vec()]);
         let cwt = Cwt::new(ALG_HMAC256_256, token);
         let payload_cbor = cwt.encode_payload().unwrap();
         vectors.push(json!({

@@ -173,7 +173,7 @@ fn test_vector_cbor_alpn() {
     assert_eq!(v["id"], "cbor_alpn");
 
     let mut token = CatToken::new();
-    token.cat.catalpn = Some(vec!["moq-00".to_string(), "h3".to_string()]);
+    token.cat.catalpn = Some(vec![b"moq-00".to_vec(), b"h3".to_vec()]);
     let cwt = Cwt::new(ALG_HMAC256_256, token);
     let payload = cwt.encode_payload().unwrap();
 

@@ -111,7 +111,7 @@ pub struct CatClaims {
     pub catnip: Option<Vec<NetworkIdentifier>>,
     pub catu: Option<Vec<UriMatchRule>>,
     pub catm: Option<Vec<String>>,
-    pub catalpn: Option<Vec<String>>,
+    pub catalpn: Option<Vec<Vec<u8>>>,
     pub cath: Option<Vec<HeaderMatchRule>>,
     pub catgeoiso3166: Option<Vec<String>>,
     pub catgeocoord: Option<Vec<GeoCoordinate>>,

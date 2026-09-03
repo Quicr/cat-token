@@ -113,7 +113,7 @@
       },
       "description": "ALPN protocol identifiers",
       "id": "cbor_alpn",
-      "payload_cbor_hex": "a119013a82666d6f712d3030626833"
+      "payload_cbor_hex": "a119013a82466d6f712d3030426833"
     }
   ]
 }

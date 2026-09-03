@@ -307,7 +307,7 @@ fn test_all_cat_claims() {
                 },
             ]),
             catm: Some(vec!["GET".to_string(), "POST".to_string()]),
-            catalpn: Some(vec!["h2".to_string(), "http/1.1".to_string()]),
+            catalpn: Some(vec![b"h2".to_vec(), b"http/1.1".to_vec()]),
             cath: Some(vec![
                 HeaderMatchRule {
                     name: "Host".to_string(),
