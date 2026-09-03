@@ -327,7 +327,8 @@ impl DpopProof {
     }
 
     pub fn is_valid(&self, settings: &CatDpopSettings) -> bool {
-        self.header.is_valid()
+        settings.validate_crit().is_ok()
+            && self.header.is_valid()
             && self.payload.is_valid()
             && self.payload.is_fresh(settings.effective_window())
             && !self.signature.is_empty()

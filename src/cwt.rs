@@ -358,9 +358,18 @@ impl Cwt {
             claims_map.insert(CLAIM_CNF, Value::Map(cnf_map));
         }
 
-        // catdpop is a map with window (key 0) and honor_jti (key 1)
         if let Some(ref catdpop) = self.payload.dpop.catdpop {
             let mut dpop_map = Vec::new();
+            if let Some(ref crit) = catdpop.crit {
+                let crit_array: Vec<Value> = crit
+                    .iter()
+                    .map(|&k| Value::Integer(k.into()))
+                    .collect();
+                dpop_map.push((
+                    Value::Integer(CATDPOP_CRIT.into()),
+                    Value::Array(crit_array),
+                ));
+            }
             if let Some(window) = catdpop.window {
                 dpop_map.push((
                     Value::Integer(CATDPOP_WINDOW.into()),
@@ -967,15 +976,25 @@ impl Cwt {
                     }
                 }
                 CLAIM_CATDPOP => {
-                    // catdpop is a map with window (key 0) and honor_jti (key 1)
                     if let Value::Map(map) = value {
                         let mut settings = CatDpopSettings::new();
                         for (k, v) in map {
                             if let Value::Integer(key_int) = k {
-                                // Unknown keys (conversion failure) default to -1, which is ignored
-                                let key_val: i64 = key_int.try_into().unwrap_or(-1);
+                                let key_val: i64 = key_int.try_into().unwrap_or(i64::MIN);
                                 match key_val {
-                                    0 => {
+                                    CATDPOP_CRIT => {
+                                        if let Value::Array(arr) = v {
+                                            let mut crit_keys = Vec::new();
+                                            for item in arr {
+                                                if let Value::Integer(i) = item {
+                                                    let val: i64 = i.try_into().unwrap_or(0);
+                                                    crit_keys.push(val);
+                                                }
+                                            }
+                                            settings.crit = Some(crit_keys);
+                                        }
+                                    }
+                                    CATDPOP_WINDOW => {
                                         if let Value::Integer(window) = v {
                                             // Reject invalid window values instead of defaulting
                                             let window_val: i64 =
@@ -992,14 +1011,13 @@ impl Cwt {
                                             settings.window = Some(window_val);
                                         }
                                     }
-                                    1 => {
+                                    CATDPOP_HONOR_JTI => {
                                         if let Value::Integer(jti_val) = v {
-                                            // Invalid boolean defaults to true (honor_jti=true is safer)
                                             let jti_i64: i64 = jti_val.try_into().unwrap_or(1);
                                             settings.honor_jti = Some(jti_i64 != 0);
                                         }
                                     }
-                                    _ => {} // Unknown keys are ignored per forward compatibility
+                                    _ => {}
                                 }
                             }
                         }

@@ -38,6 +38,7 @@ pub const CLAIM_CATDPOP: i64 = 321;
 pub const CNF_JKT: i64 = 3; // JWK Thumbprint
 
 // catdpop sub-claim keys
+pub const CATDPOP_CRIT: i64 = -1;
 pub const CATDPOP_WINDOW: i64 = 0;
 pub const CATDPOP_HONOR_JTI: i64 = 1;
 
@@ -151,6 +152,7 @@ impl ConfirmationClaim {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct CatDpopSettings {
+    pub crit: Option<Vec<i64>>,
     pub window: Option<i64>,
     pub honor_jti: Option<bool>,
 }
@@ -158,6 +160,11 @@ pub struct CatDpopSettings {
 impl CatDpopSettings {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn with_critical(mut self, keys: Vec<i64>) -> Self {
+        self.crit = Some(keys);
+        self
     }
 
     pub fn with_window(mut self, seconds: i64) -> Self {
@@ -168,6 +175,20 @@ impl CatDpopSettings {
     pub fn with_jti_processing(mut self, honor: bool) -> Self {
         self.honor_jti = Some(honor);
         self
+    }
+
+    pub fn validate_crit(&self) -> Result<(), crate::CatError> {
+        if let Some(ref crit) = self.crit {
+            const KNOWN_KEYS: &[i64] = &[CATDPOP_CRIT, CATDPOP_WINDOW, CATDPOP_HONOR_JTI];
+            for &key in crit {
+                if !KNOWN_KEYS.contains(&key) {
+                    return Err(crate::CatError::InvalidClaimValue(format!(
+                        "Unsupported critical DPoP setting key: {key}"
+                    )));
+                }
+            }
+        }
+        Ok(())
     }
 
     pub fn effective_window(&self) -> i64 {
