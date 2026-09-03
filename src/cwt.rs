@@ -11,6 +11,20 @@ use std::net::IpAddr;
 const CBOR_TAG_IPV4: u64 = 52;
 const CBOR_TAG_IPV6: u64 = 54;
 
+fn validate_float(f: f64, claim_name: &str) -> Result<(), CatError> {
+    if f.is_nan() {
+        return Err(CatError::InvalidClaimValue(format!(
+            "{claim_name}: NaN is not permitted per CTA-5007-B §4.5"
+        )));
+    }
+    if f == 0.0 && f.is_sign_negative() {
+        return Err(CatError::InvalidClaimValue(format!(
+            "{claim_name}: negative zero is not permitted per CTA-5007-B §4.5"
+        )));
+    }
+    Ok(())
+}
+
 fn encode_match_value(m: &MatchValue) -> (Value, Value) {
     match m {
         MatchValue::Exact(s) => (Value::Integer(MATCH_EXACT.into()), Value::Text(s.clone())),
@@ -226,6 +240,7 @@ impl Cwt {
         }
 
         if let Some(ref catpor) = self.payload.cat.catpor {
+            validate_float(catpor.probability, "catpor.probability")?;
             let mut arr = vec![
                 Value::Float(catpor.probability),
                 Value::Bytes(catpor.id.clone()),
@@ -303,6 +318,10 @@ impl Cwt {
         }
 
         if let Some(ref catgeocoord) = self.payload.cat.catgeocoord {
+            for coord in catgeocoord {
+                validate_float(coord.lat, "catgeocoord.lat")?;
+                validate_float(coord.lon, "catgeocoord.lon")?;
+            }
             let zones: Vec<Value> = catgeocoord
                 .iter()
                 .map(|coord| {
@@ -321,6 +340,8 @@ impl Cwt {
         }
 
         if let Some(ref catgeoalt) = self.payload.cat.catgeoalt {
+            validate_float(catgeoalt.altitude, "catgeoalt.altitude")?;
+            validate_float(catgeoalt.deviation, "catgeoalt.deviation")?;
             claims_map.insert(
                 CLAIM_CATGEOALT,
                 Value::Array(vec![
@@ -432,6 +453,7 @@ impl Cwt {
 
         #[cfg(feature = "moqt")]
         if let Some(moqt_reval) = self.payload.moqt.moqt_reval {
+            validate_float(moqt_reval, "moqt_reval")?;
             claims_map.insert(CLAIM_MOQT_REVAL, Value::Float(moqt_reval));
         }
 
@@ -773,6 +795,7 @@ impl Cwt {
                             } else {
                                 None
                             };
+                            validate_float(probability, "catpor.probability")?;
                             cat.catpor = Some(crate::claims::ProbabilityOfRejection {
                                 probability,
                                 id,
@@ -905,6 +928,8 @@ impl Cwt {
                                     } else {
                                         None
                                     };
+                                    validate_float(lat, "catgeocoord.lat")?;
+                                    validate_float(lon, "catgeocoord.lon")?;
                                     coords.push(GeoCoordinate { lat, lon, radius });
                                 }
                             }
@@ -938,6 +963,8 @@ impl Cwt {
                                 }
                                 _ => return Err(CatError::InvalidClaimValue("Invalid catgeoalt deviation".to_string())),
                             };
+                            validate_float(altitude, "catgeoalt.altitude")?;
+                            validate_float(deviation, "catgeoalt.deviation")?;
                             cat.catgeoalt = Some(crate::claims::GeoAltitude { altitude, deviation });
                         }
                     }
@@ -1115,6 +1142,7 @@ impl Cwt {
                 #[cfg(feature = "moqt")]
                 CLAIM_MOQT_REVAL => {
                     if let Value::Float(f) = value {
+                        validate_float(f, "moqt_reval")?;
                         moqt.moqt_reval = Some(f);
                     } else if let Value::Integer(i) = value
                         && let Ok(i_i64) = TryInto::<i64>::try_into(i)
