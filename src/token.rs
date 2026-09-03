@@ -97,6 +97,7 @@ impl CatTokenValidator {
 
         self.validate_geographic_restrictions(token)?;
         self.validate_usage_limits(token)?;
+        self.validate_regex_ere(token)?;
         self.validate_composite_claims(token)?;
 
         Ok(())
@@ -149,6 +150,36 @@ impl CatTokenValidator {
     }
 
     fn validate_usage_limits(&self, _token: &CatToken) -> Result<(), CatError> {
+        Ok(())
+    }
+
+    fn validate_regex_ere(&self, token: &CatToken) -> Result<(), CatError> {
+        if let Some(ref rules) = token.cat.catu {
+            for rule in rules {
+                for mv in &rule.matches {
+                    if let crate::claims::MatchValue::Regex(pattern) = mv {
+                        if let Some(err) = crate::claims::validate_posix_ere(pattern) {
+                            return Err(CatError::InvalidClaimValue(format!(
+                                "catu regex: {err}"
+                            )));
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(ref rules) = token.cat.cath {
+            for rule in rules {
+                for mv in &rule.matches {
+                    if let crate::claims::MatchValue::Regex(pattern) = mv {
+                        if let Some(err) = crate::claims::validate_posix_ere(pattern) {
+                            return Err(CatError::InvalidClaimValue(format!(
+                                "cath regex: {err}"
+                            )));
+                        }
+                    }
+                }
+            }
+        }
         Ok(())
     }
 

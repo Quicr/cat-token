@@ -618,6 +618,51 @@ pub const MATCH_REGEX: i64 = 4;
 pub const MATCH_SHA256: i64 = -1;
 pub const MATCH_SHA512_256: i64 = -2;
 
+/// Validate that a regex pattern is compatible with POSIX Extended Regular
+/// Expressions (IEEE 1003.1-2017 §9.4) as required by CTA-5007-B §4.6.10.
+///
+/// Returns an error message describing the non-ERE feature found, or None if valid.
+pub fn validate_posix_ere(pattern: &str) -> Option<String> {
+    let bytes = pattern.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' && i + 1 < bytes.len() {
+            let next = bytes[i + 1];
+            match next {
+                // ERE only allows escaping special characters
+                b'\\' | b'.' | b'*' | b'+' | b'?' | b'|' | b'(' | b')' | b'[' | b']'
+                | b'{' | b'}' | b'^' | b'$' => {}
+                // Perl-style shortcuts are NOT ERE
+                b'd' | b'D' | b'w' | b'W' | b's' | b'S' | b'b' | b'B' => {
+                    return Some(format!(
+                        "\\{} is a Perl extension, not valid POSIX ERE",
+                        next as char
+                    ));
+                }
+                _ => {}
+            }
+            i += 2;
+            continue;
+        }
+        // Non-greedy quantifiers (*?, +?, ??) are Perl extensions
+        if (bytes[i] == b'*' || bytes[i] == b'+' || bytes[i] == b'?')
+            && i + 1 < bytes.len()
+            && bytes[i + 1] == b'?'
+        {
+            return Some("Non-greedy quantifiers (*?, +?, ??) are Perl extensions, not valid POSIX ERE".to_string());
+        }
+        // Lookahead/lookbehind: (?= (?! (?<= (?<!
+        if bytes[i] == b'(' && i + 1 < bytes.len() && bytes[i + 1] == b'?' {
+            return Some(
+                "Lookahead/lookbehind (?...) groups are Perl extensions, not valid POSIX ERE"
+                    .to_string(),
+            );
+        }
+        i += 1;
+    }
+    None
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum MatchValue {
     Exact(String),
