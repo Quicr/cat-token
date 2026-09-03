@@ -114,7 +114,7 @@ pub struct CatClaims {
     pub catalpn: Option<Vec<String>>,
     pub cath: Option<Vec<HeaderMatchRule>>,
     pub catgeoiso3166: Option<Vec<String>>,
-    pub catgeocoord: Option<GeoCoordinate>,
+    pub catgeocoord: Option<Vec<GeoCoordinate>>,
     pub geohash: Option<String>,
     pub catgeoalt: Option<GeoAltitude>,
     pub cattpk: Option<Vec<u8>>,
@@ -457,7 +457,7 @@ impl CompositeClaims {
 pub struct GeoCoordinate {
     pub lat: f64,
     pub lon: f64,
-    pub accuracy: Option<f64>,
+    pub radius: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -996,8 +996,17 @@ impl CatToken {
         self
     }
 
-    pub fn with_geo_coordinate(mut self, lat: f64, lon: f64, accuracy: Option<f64>) -> Self {
-        self.cat.catgeocoord = Some(GeoCoordinate { lat, lon, accuracy });
+    pub fn with_geo_coordinate(mut self, lat: f64, lon: f64, radius: Option<u32>) -> Self {
+        let coord = GeoCoordinate { lat, lon, radius };
+        match self.cat.catgeocoord {
+            Some(ref mut coords) => coords.push(coord),
+            None => self.cat.catgeocoord = Some(vec![coord]),
+        }
+        self
+    }
+
+    pub fn with_geo_coordinates(mut self, coords: Vec<GeoCoordinate>) -> Self {
+        self.cat.catgeocoord = Some(coords);
         self
     }
 

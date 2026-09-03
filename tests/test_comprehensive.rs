@@ -50,7 +50,7 @@ fn test_comprehensive_token_creation() {
         .uri_match_rules(uri_match_rules.clone())
         .header_match_rules(header_match_rules.clone())
         .replay_protection(cat_token::ReplayProtection::Prohibited)
-        .geo_coordinate(40.7128, -74.0060, Some(100.0)) // New York City
+        .geo_coordinate(40.7128, -74.0060, Some(100)) // New York City
         .geohash("dr5regw")
         // Informational claims
         .subject("user@example.com")
@@ -119,7 +119,7 @@ fn test_token_validation_comprehensive() {
         .with_audience(vec!["expected-audience".to_string()])
         .with_expiration(exp)
         .with_not_before(nbf)
-        .with_geo_coordinate(37.7749, -122.4194, Some(50.0)); // San Francisco
+        .with_geo_coordinate(37.7749, -122.4194, Some(50)); // San Francisco
 
     let validator = CatTokenValidator::new()
         .with_expected_issuers(vec!["https://trusted.issuer.com".to_string()])
@@ -178,7 +178,7 @@ fn test_geographic_validation() {
 
     // Valid coordinates
     let valid_token = CatToken::new()
-        .with_geo_coordinate(45.0, 90.0, Some(10.0))
+        .with_geo_coordinate(45.0, 90.0, Some(10))
         .with_geohash("u4pruydq");
 
     assert!(validator.validate(&valid_token).is_ok());
@@ -406,7 +406,7 @@ fn test_maximal_token() {
             },
         ])
         .with_replay_protection(cat_token::ReplayProtection::Prohibited)
-        .with_geo_coordinate(51.5074, -0.1278, Some(25.0)) // London
+        .with_geo_coordinate(51.5074, -0.1278, Some(25)) // London
         .with_geohash("gcpvj0du")
         .with_header_match_rules(vec![
             HeaderMatchRule {

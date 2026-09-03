@@ -303,19 +303,17 @@ impl Cwt {
         }
 
         if let Some(ref catgeocoord) = self.payload.cat.catgeocoord {
-            let mut coord_map = Vec::new();
-            coord_map.push((
-                Value::Text("lat".to_string()),
-                Value::Float(catgeocoord.lat),
-            ));
-            coord_map.push((
-                Value::Text("lon".to_string()),
-                Value::Float(catgeocoord.lon),
-            ));
-            if let Some(accuracy) = catgeocoord.accuracy {
-                coord_map.push((Value::Text("accuracy".to_string()), Value::Float(accuracy)));
-            }
-            claims_map.insert(CLAIM_CATGEOCOORD, Value::Map(coord_map));
+            let zones: Vec<Value> = catgeocoord
+                .iter()
+                .map(|coord| {
+                    let mut zone = vec![Value::Float(coord.lat), Value::Float(coord.lon)];
+                    if let Some(radius) = coord.radius {
+                        zone.push(Value::Integer((radius as i64).into()));
+                    }
+                    Value::Array(zone)
+                })
+                .collect();
+            claims_map.insert(CLAIM_CATGEOCOORD, Value::Array(zones));
         }
 
         if let Some(ref geohash) = self.payload.cat.geohash {
@@ -876,36 +874,43 @@ impl Cwt {
                     }
                 }
                 CLAIM_CATGEOCOORD => {
-                    if let Value::Map(map) = value {
-                        let mut lat = None;
-                        let mut lon = None;
-                        let mut accuracy = None;
-
-                        for (k, v) in map {
-                            if let Value::Text(key_str) = k {
-                                match key_str.as_str() {
-                                    "lat" => {
-                                        if let Value::Float(f) = v {
-                                            lat = Some(f);
+                    if let Value::Array(zones) = value {
+                        let mut coords = Vec::new();
+                        for zone in zones {
+                            if let Value::Array(elements) = zone {
+                                if elements.len() >= 2 {
+                                    let lat = match &elements[0] {
+                                        Value::Float(f) => *f,
+                                        Value::Integer(i) => {
+                                            let v: i64 = (*i).try_into().unwrap_or(0);
+                                            v as f64
                                         }
-                                    }
-                                    "lon" => {
-                                        if let Value::Float(f) = v {
-                                            lon = Some(f);
+                                        _ => continue,
+                                    };
+                                    let lon = match &elements[1] {
+                                        Value::Float(f) => *f,
+                                        Value::Integer(i) => {
+                                            let v: i64 = (*i).try_into().unwrap_or(0);
+                                            v as f64
                                         }
-                                    }
-                                    "accuracy" => {
-                                        if let Value::Float(f) = v {
-                                            accuracy = Some(f);
+                                        _ => continue,
+                                    };
+                                    let radius = if elements.len() > 2 {
+                                        if let Value::Integer(r) = &elements[2] {
+                                            let v: i64 = (*r).try_into().unwrap_or(0);
+                                            Some(v as u32)
+                                        } else {
+                                            None
                                         }
-                                    }
-                                    _ => {}
+                                    } else {
+                                        None
+                                    };
+                                    coords.push(GeoCoordinate { lat, lon, radius });
                                 }
                             }
                         }
-
-                        if let (Some(lat), Some(lon)) = (lat, lon) {
-                            cat.catgeocoord = Some(GeoCoordinate { lat, lon, accuracy });
+                        if !coords.is_empty() {
+                            cat.catgeocoord = Some(coords);
                         }
                     }
                 }

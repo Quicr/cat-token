@@ -217,7 +217,7 @@ fn create_sample_token() -> CatToken {
         .cwt_id(uuid::Uuid::new_v4().as_bytes().to_vec())
         .version(1)
         .replay_protection(cat_token::ReplayProtection::Prohibited)
-        .geo_coordinate(37.7749, -122.4194, Some(100.0))
+        .geo_coordinate(37.7749, -122.4194, Some(100))
         .geohash("9q8yy")
         .build()
 }

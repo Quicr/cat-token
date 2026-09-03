@@ -122,7 +122,7 @@ fn test_vector_cbor_geographic_claims() {
     assert_eq!(v["id"], "cbor_geographic_claims");
 
     let token = CatToken::new()
-        .with_geo_coordinate(37.7749, -122.4194, Some(100.0))
+        .with_geo_coordinate(37.7749, -122.4194, Some(100))
         .with_geohash("9q8yyk");
     let mut token = token;
     token.cat.catgeoiso3166 = Some(vec!["US".to_string(), "CA".to_string()]);

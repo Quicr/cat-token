@@ -78,7 +78,7 @@
       },
       "description": "Geographic claims: coordinates, geohash, ISO 3166, altitude",
       "id": "cbor_geographic_claims",
-      "payload_cbor_hex": "a419011a6639713879796b19013c8262555362434119013da3636c6174fb4042e32fec56d5d0636c6f6efbc05e9ad77318fc50686163637572616379f9564019013e82f94900f94500"
+      "payload_cbor_hex": "a419011a6639713879796b19013c8262555362434119013d8183fb4042e32fec56d5d0fbc05e9ad77318fc50186419013e82f94900f94500"
     },
     {
       "claims": {

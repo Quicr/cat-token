@@ -21,7 +21,7 @@ fn test_cat_token_creation() {
             matches: vec![MatchValue::Exact("example.com".to_string())],
         }])
         .replay_protection(cat_token::ReplayProtection::Prohibited)
-        .geo_coordinate(37.7749, -122.4194, Some(100.0))
+        .geo_coordinate(37.7749, -122.4194, Some(100))
         .geohash("9q8yy")
         .build();
 
@@ -43,9 +43,9 @@ fn test_cat_token_creation() {
     assert_eq!(token.cat.geohash, Some("9q8yy".to_string()));
 
     if let Some(coords) = &token.cat.catgeocoord {
-        assert_eq!(coords.lat, 37.7749);
-        assert_eq!(coords.lon, -122.4194);
-        assert_eq!(coords.accuracy, Some(100.0));
+        assert_eq!(coords[0].lat, 37.7749);
+        assert_eq!(coords[0].lon, -122.4194);
+        assert_eq!(coords[0].radius, Some(100));
     } else {
         panic!("Expected geo coordinates");
     }
@@ -142,7 +142,7 @@ fn test_token_validation_success() {
         .not_before(now)
         .cwt_id_str("valid-token")
         .version(1)
-        .geo_coordinate(40.7128, -74.0060, Some(50.0))
+        .geo_coordinate(40.7128, -74.0060, Some(50))
         .geohash("dr5reg")
         .build();
 
@@ -272,9 +272,9 @@ fn test_cwt_payload_encoding_decoding() {
     if let (Some(orig_coords), Some(decoded_coords)) =
         (&token.cat.catgeocoord, &decoded_token.cat.catgeocoord)
     {
-        assert_eq!(orig_coords.lat, decoded_coords.lat);
-        assert_eq!(orig_coords.lon, decoded_coords.lon);
-        assert_eq!(orig_coords.accuracy, decoded_coords.accuracy);
+        assert_eq!(orig_coords[0].lat, decoded_coords[0].lat);
+        assert_eq!(orig_coords[0].lon, decoded_coords[0].lon);
+        assert_eq!(orig_coords[0].radius, decoded_coords[0].radius);
     }
 }
 
@@ -319,11 +319,11 @@ fn test_all_cat_claims() {
                 },
             ]),
             catgeoiso3166: Some(vec!["US".to_string(), "CA".to_string()]),
-            catgeocoord: Some(GeoCoordinate {
+            catgeocoord: Some(vec![GeoCoordinate {
                 lat: 34.0522,
                 lon: -118.2437,
-                accuracy: Some(25.5),
-            }),
+                radius: Some(25),
+            }]),
             geohash: Some("9q5ct".to_string()),
             catgeoalt: Some(cat_token::GeoAltitude { altitude: 100.0, deviation: 10.0 }),
             cattpk: Some(b"thumbprint-data".to_vec()),
@@ -375,9 +375,9 @@ fn test_all_cat_claims() {
 
     // Verify geo coordinates
     if let (Some(orig), Some(decoded)) = (&token.cat.catgeocoord, &decoded_token.cat.catgeocoord) {
-        assert_eq!(orig.lat, decoded.lat);
-        assert_eq!(orig.lon, decoded.lon);
-        assert_eq!(orig.accuracy, decoded.accuracy);
+        assert_eq!(orig[0].lat, decoded[0].lat);
+        assert_eq!(orig[0].lon, decoded[0].lon);
+        assert_eq!(orig[0].radius, decoded[0].radius);
     }
 }
 
@@ -422,11 +422,11 @@ fn test_geographic_validation() {
 
     // Test invalid coordinates
     let mut token = CatToken::new();
-    token.cat.catgeocoord = Some(GeoCoordinate {
+    token.cat.catgeocoord = Some(vec![GeoCoordinate {
         lat: 91.0, // Invalid latitude
         lon: 0.0,
-        accuracy: None,
-    });
+        radius: None,
+    }]);
 
     let result = validator.validate(&token);
     assert!(matches!(

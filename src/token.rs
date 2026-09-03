@@ -103,12 +103,14 @@ impl CatTokenValidator {
     }
 
     fn validate_geographic_restrictions(&self, token: &CatToken) -> Result<(), CatError> {
-        if let Some(ref coords) = token.cat.catgeocoord
-            && (coords.lat.abs() > 90.0 || coords.lon.abs() > 180.0)
-        {
-            return Err(CatError::GeographicValidationFailed(
-                "Invalid coordinates".to_string(),
-            ));
+        if let Some(ref coords) = token.cat.catgeocoord {
+            for coord in coords {
+                if coord.lat.abs() > 90.0 || coord.lon.abs() > 180.0 {
+                    return Err(CatError::GeographicValidationFailed(
+                        "Invalid coordinates".to_string(),
+                    ));
+                }
+            }
         }
 
         if let Some(ref geohash) = token.cat.geohash {
@@ -262,8 +264,13 @@ impl CatTokenBuilder {
         self
     }
 
-    pub fn geo_coordinate(mut self, lat: f64, lon: f64, accuracy: Option<f64>) -> Self {
-        self.inner = self.inner.with_geo_coordinate(lat, lon, accuracy);
+    pub fn geo_coordinate(mut self, lat: f64, lon: f64, radius: Option<u32>) -> Self {
+        self.inner = self.inner.with_geo_coordinate(lat, lon, radius);
+        self
+    }
+
+    pub fn geo_coordinates(mut self, coords: Vec<crate::claims::GeoCoordinate>) -> Self {
+        self.inner = self.inner.with_geo_coordinates(coords);
         self
     }
 

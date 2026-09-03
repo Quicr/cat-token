@@ -185,7 +185,7 @@ fn generate_cbor_encoding_vectors() -> JsonValue {
     // 1.5: Geographic claims
     {
         let token = CatToken::new()
-            .with_geo_coordinate(37.7749, -122.4194, Some(100.0))
+            .with_geo_coordinate(37.7749, -122.4194, Some(100))
             .with_geohash("9q8yyk");
         let mut token = token;
         token.cat.catgeoiso3166 = Some(vec!["US".to_string(), "CA".to_string()]);

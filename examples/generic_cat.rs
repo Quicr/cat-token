@@ -84,7 +84,7 @@ fn main() {
         .audience(vec!["streaming-service".to_string()])
         .subject("subscriber-789")
         .expires_at(Utc::now() + Duration::hours(4))
-        .geo_coordinate(37.7749, -122.4194, Some(50000.0)) // San Francisco, 50km radius
+        .geo_coordinate(37.7749, -122.4194, Some(50000)) // San Francisco, 50km radius
         .geohash("9q8yy") // SF area geohash
         .build();
 
