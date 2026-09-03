@@ -11,7 +11,7 @@ fn test_core_claims() {
         .with_audience(vec!["audience1".to_string(), "audience2".to_string()])
         .with_expiration(Utc::now() + chrono::Duration::hours(1))
         .with_not_before(Utc::now() - chrono::Duration::minutes(5))
-        .with_cwt_id("unique-token-id".to_string());
+        .with_cwt_id_str("unique-token-id");
 
     assert_eq!(
         token.core.iss,
@@ -35,7 +35,7 @@ fn test_core_claims() {
     );
     assert!(token.core.exp.is_some());
     assert!(token.core.nbf.is_some());
-    assert_eq!(token.core.cti, Some("unique-token-id".to_string()));
+    assert_eq!(token.core.cti, Some(b"unique-token-id".to_vec()));
 }
 
 #[test]

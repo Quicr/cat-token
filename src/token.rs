@@ -225,8 +225,13 @@ impl CatTokenBuilder {
         self
     }
 
-    pub fn cwt_id(mut self, cti: impl Into<String>) -> Self {
+    pub fn cwt_id(mut self, cti: impl Into<Vec<u8>>) -> Self {
         self.inner = self.inner.with_cwt_id(cti);
+        self
+    }
+
+    pub fn cwt_id_str(mut self, cti: impl AsRef<str>) -> Self {
+        self.inner = self.inner.with_cwt_id_str(cti);
         self
     }
 

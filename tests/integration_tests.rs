@@ -14,7 +14,7 @@ fn test_cat_token_creation() {
         .audience(vec!["https://api.example.com".to_string()])
         .expires_at(exp)
         .not_before(now)
-        .cwt_id("test-token-id")
+        .cwt_id_str("test-token-id")
         .version(1)
         .uri_match_rules(vec![UriMatchRule {
             component: URI_COMPONENT_HOST,
@@ -30,7 +30,7 @@ fn test_cat_token_creation() {
         token.core.aud,
         Some(vec!["https://api.example.com".to_string()])
     );
-    assert_eq!(token.core.cti, Some("test-token-id".to_string()));
+    assert_eq!(token.core.cti, Some(b"test-token-id".to_vec()));
     assert_eq!(token.cat.catv, Some(1));
     assert_eq!(
         token.cat.catu,
@@ -63,7 +63,7 @@ fn test_hmac_token_encoding_decoding() {
         .issuer("https://test.com")
         .audience(vec!["https://api.test.com".to_string()])
         .expires_at(exp)
-        .cwt_id("test-hmac-token")
+        .cwt_id_str("test-hmac-token")
         .version(1)
         .build();
 
@@ -89,7 +89,7 @@ fn test_es256_token_encoding_decoding() {
         .issuer("https://test.com")
         .audience(vec!["https://api.test.com".to_string()])
         .expires_at(exp)
-        .cwt_id("test-es256-token")
+        .cwt_id_str("test-es256-token")
         .version(1)
         .build();
 
@@ -115,7 +115,7 @@ fn test_ps256_token_encoding_decoding() {
         .issuer("https://test.com")
         .audience(vec!["https://api.test.com".to_string()])
         .expires_at(exp)
-        .cwt_id("test-ps256-token")
+        .cwt_id_str("test-ps256-token")
         .version(1)
         .build();
 
@@ -140,7 +140,7 @@ fn test_token_validation_success() {
         .audience(vec!["https://my-service.com".to_string()])
         .expires_at(exp)
         .not_before(now)
-        .cwt_id("valid-token")
+        .cwt_id_str("valid-token")
         .version(1)
         .geo_coordinate(40.7128, -74.0060, Some(50.0))
         .geohash("dr5reg")
@@ -163,7 +163,7 @@ fn test_token_validation_expired() {
         .issuer("https://trusted-issuer.com")
         .audience(vec!["https://my-service.com".to_string()])
         .expires_at(exp)
-        .cwt_id("expired-token")
+        .cwt_id_str("expired-token")
         .build();
 
     let validator = CatTokenValidator::new()
@@ -185,7 +185,7 @@ fn test_token_validation_not_yet_valid() {
         .audience(vec!["https://my-service.com".to_string()])
         .expires_at(exp)
         .not_before(nbf)
-        .cwt_id("future-token")
+        .cwt_id_str("future-token")
         .build();
 
     let validator = CatTokenValidator::new()
@@ -205,7 +205,7 @@ fn test_token_validation_invalid_issuer() {
         .issuer("https://untrusted-issuer.com")
         .audience(vec!["https://my-service.com".to_string()])
         .expires_at(exp)
-        .cwt_id("invalid-issuer-token")
+        .cwt_id_str("invalid-issuer-token")
         .build();
 
     let validator = CatTokenValidator::new()
@@ -225,7 +225,7 @@ fn test_token_validation_invalid_audience() {
         .issuer("https://trusted-issuer.com")
         .audience(vec!["https://other-service.com".to_string()])
         .expires_at(exp)
-        .cwt_id("invalid-audience-token")
+        .cwt_id_str("invalid-audience-token")
         .build();
 
     let validator = CatTokenValidator::new()
@@ -246,7 +246,7 @@ fn test_cwt_payload_encoding_decoding() {
         .audience(vec!["https://api.example.com".to_string()])
         .expires_at(exp)
         .not_before(now)
-        .cwt_id("test-payload")
+        .cwt_id_str("test-payload")
         .version(1)
         .uri_match_rules(vec![UriMatchRule {
             component: URI_COMPONENT_PATH,
@@ -286,7 +286,7 @@ fn test_all_cat_claims() {
             aud: Some(vec!["aud1".to_string(), "aud2".to_string()]),
             exp: Some(1234567890),
             nbf: Some(1234567800),
-            cti: Some("unique-token-id".to_string()),
+            cti: Some(b"unique-token-id".to_vec()),
         },
         cat: CatClaims {
             catreplay: Some(cat_token::ReplayProtection::Prohibited),
@@ -390,7 +390,7 @@ fn test_invalid_signature_verification() {
 
     let token = CatTokenBuilder::new()
         .issuer("https://test.com")
-        .cwt_id("signature-test")
+        .cwt_id_str("signature-test")
         .build();
 
     let encoded = encode_token(&token, &algorithm1).unwrap();
@@ -466,7 +466,7 @@ fn test_moqt_claims_creation() {
         .issuer("https://moqt-issuer.com")
         .audience(vec!["moqt-relay".to_string()])
         .expires_at(Utc::now() + Duration::hours(1))
-        .cwt_id("moqt-token")
+        .cwt_id_str("moqt-token")
         .moqt_scope(scope)
         .moqt_reval(300.0)
         .build();
@@ -562,7 +562,7 @@ fn test_moqt_token_encoding_decoding() {
         .issuer("https://moqt-test.com")
         .audience(vec!["moqt-relay".to_string()])
         .expires_at(Utc::now() + Duration::hours(1))
-        .cwt_id("moqt-encode-test")
+        .cwt_id_str("moqt-encode-test")
         .moqt_scopes(vec![scope1, scope2])
         .moqt_reval(600.0)
         .build();

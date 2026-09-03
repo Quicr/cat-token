@@ -44,7 +44,7 @@ fn test_comprehensive_token_creation() {
         ])
         .expires_at(exp)
         .not_before(now)
-        .cwt_id("token-12345")
+        .cwt_id_str("token-12345")
         // CAT claims
         .version(1)
         .uri_match_rules(uri_match_rules.clone())
@@ -75,7 +75,7 @@ fn test_comprehensive_token_creation() {
             .unwrap()
             .contains(&"client1".to_string())
     );
-    assert_eq!(token.core.cti, Some("token-12345".to_string()));
+    assert_eq!(token.core.cti, Some(b"token-12345".to_vec()));
 
     assert_eq!(token.cat.catv, Some(1));
     assert_eq!(token.cat.catu.as_ref().unwrap().len(), 2);
@@ -393,7 +393,7 @@ fn test_maximal_token() {
         .with_audience(vec!["aud1".to_string(), "aud2".to_string()])
         .with_expiration(now + chrono::Duration::hours(1))
         .with_not_before(now - chrono::Duration::minutes(5))
-        .with_cwt_id("maximal-token-id")
+        .with_cwt_id_str("maximal-token-id")
         // All CAT claims
         .with_version(1)
         .with_uri_match_rules(vec![

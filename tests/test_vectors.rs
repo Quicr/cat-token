@@ -60,7 +60,7 @@ fn test_vector_cbor_core_claims() {
     let token = CatToken::new()
         .with_issuer("https://auth.example.com")
         .with_audience(vec!["https://relay.example.com".to_string()])
-        .with_cwt_id("test-token-001");
+        .with_cwt_id_str("test-token-001");
     let mut token = token;
     token.core.exp = Some(v["claims"]["exp"].as_i64().unwrap());
     token.core.nbf = Some(v["claims"]["nbf"].as_i64().unwrap());
@@ -245,7 +245,7 @@ fn test_vector_token_hmac_full() {
         Some("https://issuer.moq.example")
     );
     assert_eq!(decoded.core.aud.as_ref().unwrap().len(), 2);
-    assert_eq!(decoded.core.cti.as_deref(), Some("vector-002"));
+    assert_eq!(decoded.core.cti, Some(b"vector-002".to_vec()));
     assert_eq!(decoded.cat.catv, Some(1));
     assert_eq!(
         decoded.cat.catu,

@@ -214,7 +214,7 @@ fn create_sample_token() -> CatToken {
         .audience(vec!["https://api.example.com".to_string()])
         .expires_at(exp)
         .not_before(now)
-        .cwt_id(uuid::Uuid::new_v4().to_string())
+        .cwt_id(uuid::Uuid::new_v4().as_bytes().to_vec())
         .version(1)
         .replay_protection(cat_token::ReplayProtection::Prohibited)
         .geo_coordinate(37.7749, -122.4194, Some(100.0))

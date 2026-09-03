@@ -38,7 +38,7 @@ fn issue_publisher_token(
         .subject(user_id)
         .issued_at(now)
         .expires_at(now + Duration::hours(2))
-        .cwt_id(format!("pub-{}-{}", user_id, now.timestamp()))
+        .cwt_id_str(format!("pub-{}-{}", user_id, now.timestamp()))
         .moqt_scope(scope)
         .moqt_reval(300.0); // 5-minute revalidation
 
@@ -81,7 +81,7 @@ fn issue_subscriber_token(
         .subject(user_id)
         .issued_at(now)
         .expires_at(now + Duration::hours(24)) // Longer validity for viewers
-        .cwt_id(format!("sub-{}-{}", user_id, now.timestamp()))
+        .cwt_id_str(format!("sub-{}-{}", user_id, now.timestamp()))
         .moqt_scopes(scopes)
         .build();
 
@@ -109,7 +109,7 @@ fn issue_admin_token(
         .subject(admin_id)
         .issued_at(now)
         .expires_at(now + Duration::minutes(30)) // Short validity for admin
-        .cwt_id(format!("admin-{}-{}", admin_id, now.timestamp()))
+        .cwt_id_str(format!("admin-{}-{}", admin_id, now.timestamp()))
         .moqt_scope(scope)
         .moqt_reval(60.0) // 1-minute revalidation for admin ops
         .confirmation(cnf.jkt)

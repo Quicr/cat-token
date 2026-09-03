@@ -215,7 +215,7 @@ impl Cwt {
         }
 
         if let Some(ref cti) = self.payload.core.cti {
-            claims_map.insert(CLAIM_CTI, Value::Bytes(cti.as_bytes().to_vec()));
+            claims_map.insert(CLAIM_CTI, Value::Bytes(cti.clone()));
         }
 
         if let Some(catreplay) = self.payload.cat.catreplay {
@@ -727,13 +727,10 @@ impl Cwt {
                 }
                 CLAIM_CTI => match value {
                     Value::Bytes(b) => {
-                        // Reject invalid UTF-8 instead of silently replacing
-                        core.cti = Some(String::from_utf8(b).map_err(|_| {
-                            CatError::InvalidClaimValue("CTI contains invalid UTF-8".to_string())
-                        })?);
+                        core.cti = Some(b);
                     }
                     Value::Text(s) => {
-                        core.cti = Some(s);
+                        core.cti = Some(s.into_bytes());
                     }
                     _ => {}
                 },

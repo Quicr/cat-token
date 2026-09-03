@@ -64,7 +64,7 @@ pub struct CoreClaims {
     pub aud: Option<Vec<String>>,
     pub exp: Option<i64>,
     pub nbf: Option<i64>,
-    pub cti: Option<String>,
+    pub cti: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -936,8 +936,13 @@ impl CatToken {
         self
     }
 
-    pub fn with_cwt_id(mut self, cti: impl Into<String>) -> Self {
+    pub fn with_cwt_id(mut self, cti: impl Into<Vec<u8>>) -> Self {
         self.core.cti = Some(cti.into());
+        self
+    }
+
+    pub fn with_cwt_id_str(mut self, cti: impl AsRef<str>) -> Self {
+        self.core.cti = Some(cti.as_ref().as_bytes().to_vec());
         self
     }
 

@@ -15,7 +15,7 @@ fn create_valid_token(issuer: &str) -> CatToken {
         .with_issuer(issuer)
         .with_audience(vec!["test-audience".to_string()])
         .with_expiration(exp)
-        .with_cwt_id("test-id")
+        .with_cwt_id_str("test-id")
 }
 
 fn create_expired_token() -> CatToken {
@@ -25,7 +25,7 @@ fn create_expired_token() -> CatToken {
         .with_issuer("test-issuer")
         .with_audience(vec!["test-audience".to_string()])
         .with_expiration(exp)
-        .with_cwt_id("expired-id")
+        .with_cwt_id_str("expired-id")
 }
 
 #[cfg(test)]

@@ -169,7 +169,7 @@ fn test_roundtrip_all_algorithms_with_cose() {
         .audience(vec!["aud1".to_string(), "aud2".to_string()])
         .expires_at(now + Duration::hours(1))
         .not_before(now)
-        .cwt_id("roundtrip-test")
+        .cwt_id_str("roundtrip-test")
         .subject("test-user")
         .build();
 

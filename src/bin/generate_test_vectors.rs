@@ -119,7 +119,7 @@ fn generate_cbor_encoding_vectors() -> JsonValue {
         let token = CatToken::new()
             .with_issuer("https://auth.example.com")
             .with_audience(vec!["https://relay.example.com".to_string()])
-            .with_cwt_id("test-token-001");
+            .with_cwt_id_str("test-token-001");
         let mut token = token;
         token.core.exp = Some(FIXED_EXP);
         token.core.nbf = Some(FIXED_NBF);
@@ -307,7 +307,7 @@ fn generate_token_structure_vectors() -> JsonValue {
                 "https://relay1.example.com".to_string(),
                 "https://relay2.example.com".to_string(),
             ])
-            .with_cwt_id("vector-002")
+            .with_cwt_id_str("vector-002")
             .with_version(1)
             .with_uri_match_rules(vec![UriMatchRule {
                 component: URI_COMPONENT_PATH,
