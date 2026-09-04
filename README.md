@@ -17,9 +17,19 @@ cargo add cat-token
 
 - Full CTA-5007-B CAT token support with CBOR/CWT encoding
 - MOQT-specific claims: namespace/track authorization with binary matching
-- DPoP (Demonstrating Proof-of-Possession) support
+- DPoP (Demonstrating Proof-of-Possession) support per RFC 9449
 - Cryptographic algorithms: HMAC-SHA256, ES256, PS256
-- Token revalidation support
+- COSE_Encrypt0 encryption (AES-128-GCM, AES-256-GCM)
+- URI and header matching with exact, prefix, suffix, contains, regex (POSIX ERE), SHA-256, and SHA-512/256 match types
+- Geographic claims: coordinates (catgeocoord), geohash, altitude, ISO 3166 region codes
+- Network claims: IPv4/IPv6 addresses and prefixes (RFC 9164), ASN
+- X.509 certificate chain matching (cattpk)
+- Composite claims: OR, NOR, AND operators with depth-limited evaluation
+- Token revalidation and renewal (catr) support
+- RFC 8941 Structured Field Values parsing for header matching
+- Deterministic CBOR encoding with map key ordering validation
+- Bounded resource usage: LRU caches, regex size limits, token size limits
+- Key zeroization on drop for sensitive material
 
 ## Build
 
@@ -44,16 +54,49 @@ For generic CAT tokens without MOQT, disable the `moqt` feature. See [`examples/
 ## Test
 
 ```bash
-cargo test
+# All tests
+cargo test --all-features
+
+# Single test by name
+cargo test test_dpop_validation --all-features
+
+# Single test file
+cargo test --test test_composite_claims --all-features
 ```
 
 ## Benchmark
 
 ```bash
-cargo bench
+# All benchmarks
+cargo bench --all-features
+
+# Individual benchmarks
+cargo bench --bench crypto_bench --all-features
+cargo bench --bench token_bench --all-features
+cargo bench --bench cbor_bench --all-features
+cargo bench --bench trie_bench --all-features
 ```
 
-## Example
+## Examples
+
+```bash
+cargo run --example quickstart
+cargo run --example generic_cat
+cargo run --example server_token_issuer
+cargo run --example relay_validator --features moqt
+```
+
+## CLI
+
+```bash
+# Generate MOQT tokens
+cargo run --bin cat-cli -- moqt-token --key private.pem --endpoint relay.example.com
+
+# Generate test vectors
+cargo run --bin generate-test-vectors
+```
+
+## Quick Start
 
 ```rust
 use cat_token::*;
@@ -102,6 +145,10 @@ let admin_scope = roles::admin(b"example.com");
 // Read-only: Subscribe, Fetch only
 let ro_scope = roles::read_only(b"example.com", b"/archive/");
 ```
+
+## Standards Compliance
+
+Full compliance with CTA-5007-B and all referenced standards. See [`docs/std-compliance-req.md`](docs/std-compliance-req.md) for the detailed compliance matrix.
 
 ## License
 

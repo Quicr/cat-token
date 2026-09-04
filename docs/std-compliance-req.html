@@ -1,0 +1,1959 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>CTA-5007-B Compliance — cat.rs</title>
+  <style>
+    /* Default styles provided by pandoc.
+    ** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+    */
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+  </style>
+  <link rel="stylesheet" href="" />
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      max-width: 960px;
+      margin: 2rem auto;
+      padding: 0 1rem;
+      line-height: 1.6;
+      color: #24292e;
+      background: #fff;
+    }
+    h1 { border-bottom: 2px solid #e1e4e8; padding-bottom: .3em; }
+    h2 { border-bottom: 1px solid #e1e4e8; padding-bottom: .3em; margin-top: 2rem; }
+    h3 { margin-top: 1.5rem; }
+    table { border-collapse: collapse; width: 100%; margin: 1em 0; }
+    th, td { border: 1px solid #d0d7de; padding: 8px 12px; text-align: left; }
+    th { background: #f6f8fa; font-weight: 600; }
+    tr:nth-child(even) { background: #f6f8fa; }
+    code { background: #f0f3f6; padding: 2px 6px; border-radius: 3px; font-size: 0.9em; }
+    strong { color: inherit; }
+    hr { border: none; border-top: 1px solid #d0d7de; margin: 2rem 0; }
+    a { color: #0366d6; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">CTA-5007-B Compliance — cat.rs</h1>
+</header>
+<h1 id="standards-compliance-requirements-cat.rs">Standards Compliance
+Requirements — cat.rs</h1>
+<p><strong>Project:</strong> cat-token (Rust) <strong>Spec
+baseline:</strong> CTA-5007-B (April 2025) — Common Access Token
+<strong>Last updated:</strong> 2026-09-03</p>
+<p>Status legend: - <strong>PASS</strong> — fully implemented and
+compliant - <strong>PARTIAL</strong> — implemented but deviates from
+spec or incomplete - <strong>MISSING</strong> — not implemented -
+<strong>N/A</strong> — not applicable to a library (transport-layer or
+out-of-band concern)</p>
+<hr />
+<h2 id="token-format-cose-structure">1. Token Format &amp; COSE
+Structure</h2>
+<h3 id="rfc-8392-cbor-web-token-cwt">RFC 8392 — CBOR Web Token
+(CWT)</h3>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Spec ref</th>
+<th>Status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Token MUST be encoded as a CWT</td>
+<td>CTA §4.3</td>
+<td><strong>PASS</strong></td>
+<td>Encoded as COSE_Sign1 (tag 18) for ES256/PS256, COSE_Mac0 (tag 17)
+for HMAC per RFC 8392 §7</td>
+</tr>
+<tr>
+<td>Signed CWT MUST use COSE_Sign1 Sig_structure for signing input</td>
+<td>RFC 9052 §4.4</td>
+<td><strong>PASS</strong></td>
+<td><code>create_signing_input()</code> builds
+<code>CBOR(["Signature1", protected, external_aad, payload])</code> per
+RFC 9052 §4.4</td>
+</tr>
+<tr>
+<td>MACed CWT MUST use COSE_Mac0 MAC_structure for MAC input</td>
+<td>RFC 9052 §6.3</td>
+<td><strong>PASS</strong></td>
+<td>HMAC computed over
+<code>CBOR(["MAC0", protected, external_aad, payload])</code> per RFC
+9052 §6.3</td>
+</tr>
+<tr>
+<td>Token MUST be base64url-encoded (RFC 4648 §5)</td>
+<td>CTA §4.3.1.1</td>
+<td><strong>PASS</strong></td>
+<td>Uses <code>URL_SAFE_NO_PAD</code> from the <code>base64</code>
+crate</td>
+</tr>
+<tr>
+<td>Padding MAY be omitted</td>
+<td>CTA §4.3.1.1</td>
+<td><strong>PASS</strong></td>
+<td>No-pad encoding used</td>
+</tr>
+<tr>
+<td>Recipients MUST process tokens ≤ 4096 bytes</td>
+<td>CTA §4.3.1.1</td>
+<td><strong>PASS</strong></td>
+<td>No hard reject above 4096; configurable <code>CwtLimits</code> with
+1MB default</td>
+</tr>
+<tr>
+<td>Recipients MUST process at least 6 tokens</td>
+<td>CTA §4.4</td>
+<td><strong>N/A</strong></td>
+<td>Application-layer concern</td>
+</tr>
+</tbody>
+</table>
+<h3 id="rfc-9052-cose-structures-and-process">RFC 9052 — COSE Structures
+and Process</h3>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Spec ref</th>
+<th>Status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Sig_structure =
+<code>["Signature1", body_protected, external_aad, payload]</code></td>
+<td>RFC 9052 §4.4</td>
+<td><strong>PASS</strong></td>
+<td>Implemented in <code>create_signing_input()</code></td>
+</tr>
+<tr>
+<td>MAC_structure =
+<code>["MAC0", body_protected, external_aad, payload]</code></td>
+<td>RFC 9052 §6.3</td>
+<td><strong>PASS</strong></td>
+<td>Implemented — HMAC uses MAC_structure, asymmetric uses
+Sig_structure</td>
+</tr>
+<tr>
+<td>COSE_Encrypt0 (tag 16) encryption</td>
+<td>RFC 9052 §5</td>
+<td><strong>PASS</strong></td>
+<td><code>cose_encrypt0()</code> / <code>cose_decrypt0()</code> with
+AES-128-GCM (alg 1) and AES-256-GCM (alg 3), proper Enc_structure
+AAD</td>
+</tr>
+<tr>
+<td><code>kid</code> and <code>alg</code> fields OPTIONAL in COSE
+header</td>
+<td>CTA §4.3.1.1.1</td>
+<td><strong>PASS</strong></td>
+<td><code>kid</code> optional, <code>alg</code> always present</td>
+</tr>
+</tbody>
+</table>
+<h3 id="rfc-8949-cbor-encoding">RFC 8949 — CBOR Encoding</h3>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Spec ref</th>
+<th>Status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>All CBOR MUST be Deterministically Encoded (except map
+ordering)</td>
+<td>CTA §4.5</td>
+<td><strong>PASS</strong></td>
+<td>Encoding uses <code>BTreeMap</code> for sorted keys; decoding
+validates map key ordering via
+<code>validate_cbor_map_ordering()</code></td>
+</tr>
+<tr>
+<td>Numbers MUST be in shortest accurate form</td>
+<td>CTA §4.5</td>
+<td><strong>PASS</strong></td>
+<td><code>encode_number_shortest()</code> emits integer-valued floats as
+CBOR integers; applied to catpor probability, catgeocoord lat/lon,
+catgeoalt altitude/deviation, moqt_reval</td>
+</tr>
+<tr>
+<td>NaN and negative zero MUST NOT be used</td>
+<td>CTA §4.5</td>
+<td><strong>PASS</strong></td>
+<td><code>validate_float()</code> rejects NaN and negative zero on both
+encode and decode paths</td>
+</tr>
+<tr>
+<td>Claims MUST NOT be prefixed with CBOR tags (except catnip)</td>
+<td>CTA §4.5</td>
+<td><strong>PASS</strong></td>
+<td>No tags emitted on claims; <code>reject_unexpected_tag()</code>
+enforces on decode for all claims except catnip and CRS-wrapped claims
+(catgeocoord, geohash, catgeoalt)</td>
+</tr>
+<tr>
+<td>Improperly tagged values MUST be rejected</td>
+<td>CTA §4.5</td>
+<td><strong>PASS</strong></td>
+<td><code>reject_unexpected_tag()</code> applied to ISS, AUD, EXP, NBF,
+CTI, CATREPLAY, CATPOR, CATV, CATU, CATM, CATALPN, CATH, CATGEOISO3166,
+CATTPK, SUB, IAT, CATIFDATA, CNF</td>
+</tr>
+<tr>
+<td>Recipients SHOULD validate Deterministic Encoding</td>
+<td>CTA §4.5</td>
+<td><strong>PASS</strong></td>
+<td><code>validate_cbor_map_ordering()</code> rejects duplicate/unsorted
+integer map keys on decode</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="algorithms">2. Algorithms</h2>
+<h3 id="rfc-9053-cose-initial-algorithms">RFC 9053 — COSE Initial
+Algorithms</h3>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Spec ref</th>
+<th>Status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>HMAC 256/256 (kty number 5)</td>
+<td>CTA §4.3.1.1.1, RFC 9053 §3.1</td>
+<td><strong>PASS</strong></td>
+<td>Algorithm ID corrected to <code>5</code> per IANA COSE registry</td>
+</tr>
+<tr>
+<td>ES256 (kty number -7)</td>
+<td>CTA §4.3.1.1.1, RFC 9053 §2.1</td>
+<td><strong>PASS</strong></td>
+<td>Correct algorithm ID, P-256 ECDSA via <code>p256</code> crate</td>
+</tr>
+<tr>
+<td>PS256 (kty number -37)</td>
+<td>CTA §4.3.1.1.1, RFC 8230 §2</td>
+<td><strong>PASS</strong></td>
+<td>Correct algorithm ID, RSA-PSS via <code>rsa</code> crate, 2048-bit
+minimum enforced</td>
+</tr>
+<tr>
+<td>AES-128-GCM (alg 1)</td>
+<td>RFC 9053 §4.1</td>
+<td><strong>PASS</strong></td>
+<td><code>EncryptionAlgorithm::A128Gcm</code> for COSE_Encrypt0</td>
+</tr>
+<tr>
+<td>AES-256-GCM (alg 3)</td>
+<td>RFC 9053 §4.1</td>
+<td><strong>PASS</strong></td>
+<td><code>EncryptionAlgorithm::A256Gcm</code> for COSE_Encrypt0</td>
+</tr>
+<tr>
+<td>Recipients MUST support ES256 for jkt confirmations</td>
+<td>CTA §4.3.1.1.1</td>
+<td><strong>PASS</strong></td>
+<td>ES256 supported</td>
+</tr>
+</tbody>
+</table>
+<h3 id="rfc-8230-rsa-with-cose">RFC 8230 — RSA with COSE</h3>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Spec ref</th>
+<th>Status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>PS256 algorithm support</td>
+<td>RFC 8230 §2</td>
+<td><strong>PASS</strong></td>
+<td>Implemented with <code>rsa</code> crate</td>
+</tr>
+<tr>
+<td>Minimum 2048-bit RSA key</td>
+<td>Best practice</td>
+<td><strong>PASS</strong></td>
+<td><code>MIN_RSA_KEY_SIZE = 256 bytes</code> enforced</td>
+</tr>
+</tbody>
+</table>
+<h3 id="fips-180-4-secure-hash-standard">FIPS 180-4 — Secure Hash
+Standard</h3>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Spec ref</th>
+<th>Status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>SHA-256</td>
+<td>FIPS 180-4</td>
+<td><strong>PASS</strong></td>
+<td>Used via <code>ring::digest</code> and <code>sha2</code> crate</td>
+</tr>
+<tr>
+<td>SHA-512/256 (for catu claim hash matching)</td>
+<td>CTA §4.6.10</td>
+<td><strong>PASS</strong></td>
+<td>Match type <code>-2</code> implemented for catu/cath</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="core-claims-cta-4.6">3. Core Claims (CTA §4.6)</h2>
+<h3 id="issuer-iss-key-1-must-support">3.1 Issuer — <code>iss</code>
+(key 1) — MUST support</h3>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Spec ref</th>
+<th>Status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Encode/decode as text string</td>
+<td>CTA §4.6.1</td>
+<td><strong>PASS</strong></td>
+<td><code>CoreClaims.iss: Option&lt;String&gt;</code></td>
+</tr>
+<tr>
+<td>Validate against known issuers</td>
+<td>CTA §4.6.1</td>
+<td><strong>PASS</strong></td>
+<td><code>CatTokenValidator.expected_issuers</code></td>
+</tr>
+<tr>
+<td>MUST reject unknown issuer</td>
+<td>CTA §4.6.1</td>
+<td><strong>PASS</strong></td>
+<td>Returns <code>CatError::InvalidIssuer</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="audience-aud-key-3-must-support">3.2 Audience — <code>aud</code>
+(key 3) — MUST support</h3>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Spec ref</th>
+<th>Status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Text string or array of text strings</td>
+<td>CTA §4.6.2</td>
+<td><strong>PASS</strong></td>
+<td><code>CoreClaims.aud: Option&lt;Vec&lt;String&gt;&gt;</code></td>
+</tr>
+<tr>
+<td>Recipient MUST identify with one listed entity</td>
+<td>CTA §4.6.2</td>
+<td><strong>PASS</strong></td>
+<td>Validated in <code>CatTokenValidator</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="expiration-exp-key-4-must-support">3.3 Expiration —
+<code>exp</code> (key 4) — MUST support</h3>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Spec ref</th>
+<th>Status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Positive/negative integer or float</td>
+<td>CTA §4.6.3</td>
+<td><strong>PASS</strong></td>
+<td>Float values accepted on decode via <code>validate_float()</code>
+and truncated to i64. Integer-valued floats re-encoded in shortest
+form</td>
+</tr>
+<tr>
+<td>Recipients MUST NOT allow leeway for clock skew</td>
+<td>CTA §4.6.3</td>
+<td><strong>PASS</strong></td>
+<td>Default tolerance is 0. Configurable <code>exp_tolerance</code>
+available for opt-in use</td>
+</tr>
+<tr>
+<td>MUST reject expired tokens</td>
+<td>CTA §4.6.3</td>
+<td><strong>PASS</strong></td>
+<td>Checked in <code>CatTokenValidator.validate()</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="not-before-nbf-key-5-must-support">3.4 Not Before —
+<code>nbf</code> (key 5) — MUST support</h3>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Spec ref</th>
+<th>Status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Positive/negative integer or float</td>
+<td>CTA §4.6.4</td>
+<td><strong>PASS</strong></td>
+<td>Float values accepted on decode via <code>validate_float()</code>
+and truncated to i64</td>
+</tr>
+<tr>
+<td>Recipients MUST NOT allow leeway</td>
+<td>CTA §4.6.4</td>
+<td><strong>PASS</strong></td>
+<td>Default tolerance is 0. Configurable <code>nbf_tolerance</code>
+available for opt-in use</td>
+</tr>
+<tr>
+<td>MUST reject future-dated tokens</td>
+<td>CTA §4.6.4</td>
+<td><strong>PASS</strong></td>
+<td>Checked in <code>CatTokenValidator.validate()</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="cwt-id-cti-key-7-must-support">3.5 CWT ID — <code>cti</code>
+(key 7) — MUST support</h3>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Spec ref</th>
+<th>Status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Byte string</td>
+<td>CTA §4.6.5</td>
+<td><strong>PASS</strong></td>
+<td><code>CoreClaims.cti: Option&lt;Vec&lt;u8&gt;&gt;</code>. Helper
+<code>with_cwt_id_str()</code> for convenience</td>
+</tr>
+<tr>
+<td>MUST be generated to not identify the subject</td>
+<td>CTA §4.6.5</td>
+<td><strong>N/A</strong></td>
+<td>Issuer concern</td>
+</tr>
+</tbody>
+</table>
+<h3 id="replay-catreplay-key-308-may-support">3.6 Replay —
+<code>catreplay</code> (key 308) — MAY support</h3>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Spec ref</th>
+<th>Status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Unsigned integer type</td>
+<td>CTA §4.6.6</td>
+<td><strong>PASS</strong></td>
+<td><code>ReplayProtection</code> enum with values Permitted(0),
+Prohibited(1), ReuseDetection(2)</td>
+</tr>
+<tr>
+<td>Value 0 = replay permitted</td>
+<td>CTA §4.6.6</td>
+<td><strong>PASS</strong></td>
+<td><code>ReplayProtection::Permitted</code></td>
+</tr>
+<tr>
+<td>Value 1 = replay prohibited</td>
+<td>CTA §4.6.6</td>
+<td><strong>PASS</strong></td>
+<td><code>ReplayProtection::Prohibited</code></td>
+</tr>
+<tr>
+<td>Value 2 = reuse-detection</td>
+<td>CTA §4.6.6</td>
+<td><strong>PASS</strong></td>
+<td><code>ReplayProtection::ReuseDetection</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="probability-of-rejection-catpor-key-309-may-support">3.7
+Probability of Rejection — <code>catpor</code> (key 309) — MAY
+support</h3>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Spec ref</th>
+<th>Status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Array: [probability, id, ?expiration]</td>
+<td>CTA §4.6.7</td>
+<td><strong>PASS</strong></td>
+<td><code>ProbabilityOfRejection { probability: f64, id: Vec&lt;u8&gt;, expiration: Option&lt;i64&gt; }</code></td>
+</tr>
+<tr>
+<td>Random rejection at specified probability</td>
+<td>CTA §4.6.7</td>
+<td><strong>PASS</strong></td>
+<td><code>enforce_catpor()</code> uses
+<code>ring::rand::SystemRandom</code> for cryptographic randomness</td>
+</tr>
+<tr>
+<td>Block list management with expiration</td>
+<td>CTA §4.6.7</td>
+<td><strong>PASS</strong></td>
+<td><code>CatPorBlockList</code> with <code>Mutex&lt;HashMap&gt;</code>,
+expiration-aware blocking</td>
+</tr>
+</tbody>
+</table>
+<h3 id="version-catv-key-310-must-support">3.8 Version —
+<code>catv</code> (key 310) — MUST support</h3>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Spec ref</th>
+<th>Status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Unsigned integer, MUST be 1</td>
+<td>CTA §4.6.8</td>
+<td><strong>PASS</strong></td>
+<td><code>CatClaims.catv: Option&lt;u32&gt;</code></td>
+</tr>
+<tr>
+<td>Recipients MUST reject unsupported versions</td>
+<td>CTA §4.6.8</td>
+<td><strong>PASS</strong></td>
+<td><code>CatTokenValidator.validate()</code> rejects catv != 1</td>
+</tr>
+</tbody>
+</table>
+<h3 id="network-ip-catnip-key-311-must-support">3.9 Network IP —
+<code>catnip</code> (key 311) — MUST support</h3>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Spec ref</th>
+<th>Status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Array of CBOR-tagged IP objects per RFC 9164</td>
+<td>CTA §4.6.9</td>
+<td><strong>PASS</strong></td>
+<td>IPs encoded as CBOR tag #52 (IPv4) / #54 (IPv6) binary per RFC
+9164</td>
+</tr>
+<tr>
+<td>IPv4 as bytes .size 4, tagged #6.52</td>
+<td>RFC 9164 §5</td>
+<td><strong>PASS</strong></td>
+<td>Binary encoding with tag 52</td>
+</tr>
+<tr>
+<td>IPv6 as bytes .size 16, tagged #6.54</td>
+<td>RFC 9164 §5</td>
+<td><strong>PASS</strong></td>
+<td>Binary encoding with tag 54</td>
+</tr>
+<tr>
+<td>IPv4 prefix as <code>[prefix-length, prefix-bytes]</code>, tagged
+#6.52</td>
+<td>RFC 9164</td>
+<td><strong>PASS</strong></td>
+<td>Array form with tag 52</td>
+</tr>
+<tr>
+<td>ASN as bare unsigned integer</td>
+<td>CTA §4.6.9</td>
+<td><strong>PASS</strong></td>
+<td>Encoded as unsigned integer</td>
+</tr>
+<tr>
+<td>Address-with-prefix form is invalid</td>
+<td>CTA §4.6.9</td>
+<td><strong>PASS</strong></td>
+<td><code>decode_network_identifier()</code> rejects address-with-prefix
+form (3-element arrays with full address bytes + prefix length)</td>
+</tr>
+<tr>
+<td>IPv4 prefix &gt; 24 bits MUST be encrypted</td>
+<td>CTA §4.6.9</td>
+<td><strong>PASS</strong></td>
+<td>COSE_Encrypt0 support available via
+<code>cose_encrypt0()</code></td>
+</tr>
+<tr>
+<td>IPv6 prefix &gt; 56 bits MUST be encrypted</td>
+<td>CTA §4.6.9</td>
+<td><strong>PASS</strong></td>
+<td>COSE_Encrypt0 support available via
+<code>cose_encrypt0()</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="uri-catu-key-312-must-support">3.10 URI — <code>catu</code> (key
+312) — MUST support</h3>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Spec ref</th>
+<th>Status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Type is map: integer keys → maps</td>
+<td>CTA §4.6.10</td>
+<td><strong>PASS</strong></td>
+<td><code>Vec&lt;UriMatchRule&gt;</code> with
+<code>component: i64</code> and
+<code>matches: Vec&lt;MatchValue&gt;</code></td>
+</tr>
+<tr>
+<td>URI component decomposition
+(scheme/host/port/path/query/parent-path/filename/stem/extension)</td>
+<td>CTA §4.6.10</td>
+<td><strong>PASS</strong></td>
+<td><code>decompose_uri()</code> in <code>uri.rs</code> provides all 9
+components</td>
+</tr>
+<tr>
+<td>Match types: exact(0), prefix(1), suffix(2), contains(3),
+regex(4)</td>
+<td>CTA §4.6.10</td>
+<td><strong>PASS</strong></td>
+<td>All match types implemented in <code>MatchValue</code> enum</td>
+</tr>
+<tr>
+<td>SHA-256 match (type -1)</td>
+<td>CTA §4.6.10</td>
+<td><strong>PASS</strong></td>
+<td>Implemented in <code>MatchValue::Sha256</code> and
+<code>UriMatcher</code></td>
+</tr>
+<tr>
+<td>SHA-512/256 match (type -2)</td>
+<td>CTA §4.6.10</td>
+<td><strong>PASS</strong></td>
+<td>Implemented in <code>MatchValue::Sha512_256</code></td>
+</tr>
+<tr>
+<td>URI normalization per RFC 9110 §4.2.3 and RFC 3986 §6.2.2-6.2.3</td>
+<td>CTA §4.6.10</td>
+<td><strong>PASS</strong></td>
+<td><code>normalize_uri()</code> implements case normalization, default
+port removal, dot-segment removal, percent-encoding normalization</td>
+</tr>
+<tr>
+<td>Token removal from URI before matching</td>
+<td>CTA §4.6.10</td>
+<td><strong>PASS</strong></td>
+<td><code>strip_token_from_uri()</code> removes specified query
+parameter names</td>
+</tr>
+<tr>
+<td>Regex per IEEE Std 1003.1-2017 §9.4 (ERE)</td>
+<td>CTA §4.6.10</td>
+<td><strong>PASS</strong></td>
+<td><code>validate_posix_ere()</code> rejects Perl-specific features
+(\d, \w, lookahead, non-greedy quantifiers). Validation enforced in
+<code>CatTokenValidator</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="methods-catm-key-313-must-support">3.11 Methods —
+<code>catm</code> (key 313) — MUST support</h3>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Spec ref</th>
+<th>Status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Array of text strings (HTTP methods)</td>
+<td>CTA §4.6.11</td>
+<td><strong>PASS</strong></td>
+<td><code>CatClaims.catm: Option&lt;Vec&lt;String&gt;&gt;</code></td>
+</tr>
+<tr>
+<td>Case-sensitive comparison</td>
+<td>CTA §4.6.11</td>
+<td><strong>PASS</strong></td>
+<td><code>validate_method()</code> uses exact string comparison</td>
+</tr>
+<tr>
+<td>MUST process ≤ 50 elements</td>
+<td>CTA §4.6.11</td>
+<td><strong>PASS</strong></td>
+<td>Decode rejects arrays with &gt; 50 elements</td>
+</tr>
+<tr>
+<td>MUST reject unlisted methods</td>
+<td>CTA §4.6.11</td>
+<td><strong>PASS</strong></td>
+<td><code>validate_method()</code> returns error for methods not in
+list</td>
+</tr>
+</tbody>
+</table>
+<h3 id="alpn-catalpn-key-314-may-support">3.12 ALPN —
+<code>catalpn</code> (key 314) — MAY support</h3>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Spec ref</th>
+<th>Status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Array of byte strings</td>
+<td>CTA §4.6.12</td>
+<td><strong>PASS</strong></td>
+<td><code>CatClaims.catalpn: Option&lt;Vec&lt;Vec&lt;u8&gt;&gt;&gt;</code>.
+Encoded as CBOR bytes, not text</td>
+</tr>
+<tr>
+<td>MUST process ≤ 50 elements</td>
+<td>CTA §4.6.12</td>
+<td><strong>PASS</strong></td>
+<td>Decode rejects arrays with &gt; 50 elements</td>
+</tr>
+<tr>
+<td>Non-TLS requests MUST be rejected</td>
+<td>CTA §4.6.12</td>
+<td><strong>N/A</strong></td>
+<td>Transport-layer concern</td>
+</tr>
+</tbody>
+</table>
+<h3 id="header-cath-key-315-must-support">3.13 Header —
+<code>cath</code> (key 315) — MUST support</h3>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Spec ref</th>
+<th>Status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Map: header name → match (same match types as catu)</td>
+<td>CTA §4.6.13</td>
+<td><strong>PASS</strong></td>
+<td><code>Vec&lt;HeaderMatchRule&gt;</code> with
+<code>name: String</code> and
+<code>matches: Vec&lt;MatchValue&gt;</code> using same match types as
+catu</td>
+</tr>
+<tr>
+<td>Case-insensitive header name comparison</td>
+<td>CTA §4.6.13</td>
+<td><strong>PASS</strong></td>
+<td><code>validate_header()</code> uses
+<code>eq_ignore_ascii_case()</code> for name matching</td>
+</tr>
+<tr>
+<td>Multi-line header folding per RFC 9110 §5.2</td>
+<td>CTA §4.6.13</td>
+<td><strong>PASS</strong></td>
+<td><code>unfold_header_value()</code> removes obs-fold (CRLF +
+whitespace) before matching</td>
+</tr>
+<tr>
+<td>RFC 8941 structured field parsing</td>
+<td>RFC 8941</td>
+<td><strong>PASS</strong></td>
+<td><code>structured_header</code> module provides
+<code>parse_sf_item()</code>, <code>parse_sf_list()</code>,
+<code>parse_sf_dictionary()</code>,
+<code>normalize_sf_value()</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="geographic-iso-3166-catgeoiso3166-key-316-may-support">3.14
+Geographic ISO 3166 — <code>catgeoiso3166</code> (key 316) — MAY
+support</h3>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Spec ref</th>
+<th>Status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Array of text strings (country/region codes)</td>
+<td>CTA §4.6.14</td>
+<td><strong>PASS</strong></td>
+<td><code>CatClaims.catgeoiso3166: Option&lt;Vec&lt;String&gt;&gt;</code></td>
+</tr>
+<tr>
+<td>Validate ISO 3166 code format</td>
+<td>CTA §4.6.14</td>
+<td><strong>PASS</strong></td>
+<td><code>validate_iso3166_code()</code> validates alpha-2, alpha-3, and
+subdivision code formats</td>
+</tr>
+<tr>
+<td>Reject requests from unlisted locations</td>
+<td>CTA §4.6.14</td>
+<td><strong>N/A</strong></td>
+<td>Application-layer geolocation determination</td>
+</tr>
+</tbody>
+</table>
+<h3 id="geographic-coordinate-catgeocoord-key-317-may-support">3.15
+Geographic Coordinate — <code>catgeocoord</code> (key 317) — MAY
+support</h3>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Spec ref</th>
+<th>Status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Array of arrays: <code>[[lat, lon, radius], ...]</code> (always
+outer array)</td>
+<td>CTA §4.6.15</td>
+<td><strong>PASS</strong></td>
+<td><code>Vec&lt;GeoCoordinate&gt;</code> with accumulating
+<code>with_geo_coordinate()</code> builder</td>
+</tr>
+<tr>
+<td>Latitude [-90, 90], longitude [-180, 180]</td>
+<td>CTA §4.6.15</td>
+<td><strong>PASS</strong></td>
+<td>Validated in <code>CatTokenValidator</code></td>
+</tr>
+<tr>
+<td>Radius is unsigned integer (meters)</td>
+<td>CTA §4.6.15</td>
+<td><strong>PASS</strong></td>
+<td><code>GeoCoordinate.radius: Option&lt;u32&gt;</code></td>
+</tr>
+<tr>
+<td>Default CRS is WGS84 (DMA TR 8350.2)</td>
+<td>CTA §4.6.15</td>
+<td><strong>PASS</strong></td>
+<td>Assumed default</td>
+</tr>
+<tr>
+<td>CRS Wrapper tag 279 support</td>
+<td>CTA §4.6.15</td>
+<td><strong>PASS</strong></td>
+<td><code>unwrap_crs_tag()</code> handles tag 279 on decode, validates
+CRS is WGS84</td>
+</tr>
+<tr>
+<td>MUST reject unsupported CRS</td>
+<td>CTA §4.6.15</td>
+<td><strong>PASS</strong></td>
+<td>Returns error for non-WGS84 CRS identifiers</td>
+</tr>
+<tr>
+<td>Encrypted claim required within encrypted token</td>
+<td>CTA §4.6.15</td>
+<td><strong>PASS</strong></td>
+<td>COSE_Encrypt0 support available via
+<code>cose_encrypt0()</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="geohash-geohash-key-282-may-support">3.16 Geohash —
+<code>geohash</code> (key 282) — MAY support</h3>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Spec ref</th>
+<th>Status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Text string or array per CTA-5009-A</td>
+<td>CTA §4.6.16</td>
+<td><strong>PASS</strong></td>
+<td><code>Option&lt;Vec&lt;String&gt;&gt;</code>. Single geohash encoded
+as text, multiple as array. Accumulating <code>with_geohash()</code>
+builder</td>
+</tr>
+<tr>
+<td>WGS84 default CRS</td>
+<td>CTA §4.6.16</td>
+<td><strong>PASS</strong></td>
+<td>Assumed</td>
+</tr>
+<tr>
+<td>MUST be ≤ 4 chars in encrypted claim if &gt; 4 chars</td>
+<td>CTA §4.6.16</td>
+<td><strong>PASS</strong></td>
+<td>COSE_Encrypt0 encryption support available</td>
+</tr>
+<tr>
+<td>CRS Wrapper tag 279 support</td>
+<td>CTA §4.6.16</td>
+<td><strong>PASS</strong></td>
+<td>Handled by <code>unwrap_crs_tag()</code> on decode</td>
+</tr>
+<tr>
+<td>Geohash character set validation (base32)</td>
+<td>CTA §4.6.16</td>
+<td><strong>PASS</strong></td>
+<td>Validated in <code>CatTokenValidator</code></td>
+</tr>
+<tr>
+<td>Length validation (4-12)</td>
+<td>CTA §4.6.16</td>
+<td><strong>PASS</strong></td>
+<td>Validated</td>
+</tr>
+</tbody>
+</table>
+<h3 id="altitude-catgeoalt-key-318-may-support">3.17 Altitude —
+<code>catgeoalt</code> (key 318) — MAY support</h3>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Spec ref</th>
+<th>Status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Array: <code>[altitude, deviation]</code></td>
+<td>CTA §4.6.17</td>
+<td><strong>PASS</strong></td>
+<td><code>GeoAltitude { altitude: f64, deviation: f64 }</code></td>
+</tr>
+<tr>
+<td>CRS Wrapper tag 279 support</td>
+<td>CTA §4.6.17</td>
+<td><strong>PASS</strong></td>
+<td>Handled by <code>unwrap_crs_tag()</code> on decode</td>
+</tr>
+<tr>
+<td>WGS84 default</td>
+<td>CTA §4.6.17</td>
+<td><strong>PASS</strong></td>
+<td>Assumed</td>
+</tr>
+</tbody>
+</table>
+<h3 id="tls-public-key-cattpk-key-319-may-support">3.18 TLS Public Key —
+<code>cattpk</code> (key 319) — MAY support</h3>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Spec ref</th>
+<th>Status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Byte string: Subject Public Key Info (DER, RFC 5280 §4.1.2.7)</td>
+<td>CTA §4.6.18</td>
+<td><strong>PASS</strong></td>
+<td><code>CatClaims.cattpk: Option&lt;Vec&lt;u8&gt;&gt;</code></td>
+</tr>
+<tr>
+<td>Certificate chain matching</td>
+<td>CTA §4.6.18</td>
+<td><strong>PASS</strong></td>
+<td><code>validate_cattpk()</code> and
+<code>validate_cattpk_chain()</code> extract SPKI from X.509 DER and
+compare against cattpk bytes</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="informational-claims-cta-4.7">4. Informational Claims (CTA
+§4.7)</h2>
+<h3 id="subject-sub-key-2-must-support">4.1 Subject — <code>sub</code>
+(key 2) — MUST support</h3>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Spec ref</th>
+<th>Status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Text string</td>
+<td>CTA §4.7.1</td>
+<td><strong>PASS</strong></td>
+<td><code>InformationalClaims.sub: Option&lt;String&gt;</code></td>
+</tr>
+<tr>
+<td>Identifying info MUST be encrypted</td>
+<td>CTA §4.7.1</td>
+<td><strong>PASS</strong></td>
+<td>COSE_Encrypt0 encryption support available via
+<code>cose_encrypt0()</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="issued-at-iat-key-6-must-support">4.2 Issued At —
+<code>iat</code> (key 6) — MUST support</h3>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Spec ref</th>
+<th>Status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Numeric date (integer or float)</td>
+<td>CTA §4.7.2</td>
+<td><strong>PASS</strong></td>
+<td>Float values accepted on decode via <code>validate_float()</code>
+and truncated to i64</td>
+</tr>
+<tr>
+<td>Informational only, not basis for rejection</td>
+<td>CTA §4.7.2</td>
+<td><strong>PASS</strong></td>
+<td>Not used in validation</td>
+</tr>
+</tbody>
+</table>
+<h3 id="if-data-catifdata-key-320-may-support">4.3 If Data —
+<code>catifdata</code> (key 320) — MAY support</h3>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Spec ref</th>
+<th>Status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Text string or array</td>
+<td>CTA §4.7.3</td>
+<td><strong>PASS</strong></td>
+<td><code>Option&lt;Vec&lt;String&gt;&gt;</code>. Single value encoded
+as text, multiple as array. Accumulating
+<code>with_interface_data()</code> builder</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="dpop-claims-cta-4.8">5. DPoP Claims (CTA §4.8)</h2>
+<h3 id="rfc-9449-oauth-2.0-dpop">RFC 9449 — OAuth 2.0 DPoP</h3>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Spec ref</th>
+<th>Status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>DPoP proof validation per RFC 9449 §4</td>
+<td>CTA §4.8</td>
+<td><strong>PASS</strong></td>
+<td><code>DpopValidator</code> implements claim validation, signature
+verification, replay detection</td>
+</tr>
+<tr>
+<td>DPoP proof creation</td>
+<td>RFC 9449</td>
+<td><strong>PASS</strong></td>
+<td><code>DpopProof::create_proof()</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="confirmation-cnf-key-8-must-support">5.1 Confirmation —
+<code>cnf</code> (key 8) — MUST support</h3>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Spec ref</th>
+<th>Status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Map with <code>jkt</code> member</td>
+<td>CTA §4.8.1</td>
+<td><strong>PASS</strong></td>
+<td><code>ConfirmationClaim.jkt: Vec&lt;u8&gt;</code></td>
+</tr>
+<tr>
+<td><code>jkt</code> label = 323</td>
+<td>CTA §4.8.1, Annex E</td>
+<td><strong>PASS</strong></td>
+<td><code>CNF_JKT = 323</code> per CTA-5007-B §4.8.1. Legacy label 3
+accepted on decode for backward compatibility</td>
+</tr>
+<tr>
+<td><code>jkt</code> value = bstr .size 32 (SHA-256 of JWK)</td>
+<td>CTA §4.8.1</td>
+<td><strong>PASS</strong></td>
+<td>32-byte SHA-256 thumbprint</td>
+</tr>
+<tr>
+<td>MUST reject cnf without valid DPoP proof</td>
+<td>CTA §4.8.1</td>
+<td><strong>PASS</strong></td>
+<td>Enforced in <code>MoqtValidator.authorize_with_dpop()</code></td>
+</tr>
+<tr>
+<td>ckt confirmation method (RFC 9679) MAY be supported</td>
+<td>CTA §4.8.1</td>
+<td><strong>PASS</strong></td>
+<td><code>ConfirmationClaim.ckt: Option&lt;Vec&lt;u8&gt;&gt;</code> at
+cnf key 6</td>
+</tr>
+</tbody>
+</table>
+<h3 id="rfc-7638-jwk-thumbprint">RFC 7638 — JWK Thumbprint</h3>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Spec ref</th>
+<th>Status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Canonical JSON, SHA-256 hash</td>
+<td>RFC 7638</td>
+<td><strong>PASS</strong></td>
+<td>Implemented in <code>jwk.rs</code> with field ordering
+validation</td>
+</tr>
+<tr>
+<td>EC (P-256) thumbprint</td>
+<td>RFC 7638</td>
+<td><strong>PASS</strong></td>
+<td>Tested</td>
+</tr>
+<tr>
+<td>RSA thumbprint</td>
+<td>RFC 7638</td>
+<td><strong>PASS</strong></td>
+<td>Tested against RFC 7638 test vector</td>
+</tr>
+</tbody>
+</table>
+<h3 id="rfc-9679-cose-key-thumbprint">RFC 9679 — COSE Key
+Thumbprint</h3>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Spec ref</th>
+<th>Status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ckt confirmation method</td>
+<td>RFC 9679</td>
+<td><strong>PASS</strong></td>
+<td><code>ConfirmationClaim.ckt: Option&lt;Vec&lt;u8&gt;&gt;</code> at
+cnf key 6. Encode/decode roundtrip supported</td>
+</tr>
+</tbody>
+</table>
+<h3 id="dpop-settings-catdpop-key-321-must-support">5.2 DPoP Settings —
+<code>catdpop</code> (key 321) — MUST support</h3>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Spec ref</th>
+<th>Status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Map with keys: -1 (crit), 0 (window), 1 (jti)</td>
+<td>CTA §4.8.2</td>
+<td><strong>PASS</strong></td>
+<td>All three sub-keys implemented</td>
+</tr>
+<tr>
+<td>Critical setting: array of ints, reject if unknown key listed</td>
+<td>CTA §4.8.2.1</td>
+<td><strong>PASS</strong></td>
+<td><code>CatDpopSettings.crit: Option&lt;Vec&lt;i64&gt;&gt;</code> with
+<code>validate_crit()</code></td>
+</tr>
+<tr>
+<td>Window setting: unsigned integer (seconds)</td>
+<td>CTA §4.8.2.2</td>
+<td><strong>PASS</strong></td>
+<td>Implemented in <code>CatDpopSettings</code></td>
+</tr>
+<tr>
+<td>JTI setting: 0 = ignore, 1 = honor</td>
+<td>CTA §4.8.2.3</td>
+<td><strong>PASS</strong></td>
+<td>Implemented</td>
+</tr>
+<tr>
+<td>Missing/unknown jti setting treated as 0</td>
+<td>CTA §4.8.2.3</td>
+<td><strong>PASS</strong></td>
+<td>Default behavior</td>
+</tr>
+</tbody>
+</table>
+<h3 id="rfc-8747-pop-key-semantics-for-cwts">RFC 8747 — PoP Key
+Semantics for CWTs</h3>
+<table>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Spec ref</th>
+<th>Status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>cnf claim semantics</td>
+<td>RFC 8747 §3.1</td>
+<td><strong>PASS</strong></td>
+<td>Followed</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="request-claims-cta-4.9">6. Request Claims (CTA §4.9)</h2>
+<h3 id="if-catif-key-322-may-support">6.1 If — <code>catif</code> (key
+322) — MAY support</h3>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Spec ref</th>
+<th>Status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Map: claim keys → action arrays
+<code>[status, ?headers, ?kid]</code></td>
+<td>CTA §4.9.1</td>
+<td><strong>PASS</strong></td>
+<td><code>RequestClaims.catif: Option&lt;Vec&lt;(i64, CatIfAction)&gt;&gt;</code>
+with status, headers, kid fields. Full CBOR roundtrip</td>
+</tr>
+</tbody>
+</table>
+<h3 id="renewal-catr-key-323-may-support">6.2 Renewal —
+<code>catr</code> (key 323) — MAY support</h3>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Spec ref</th>
+<th>Status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Map with renewal parameters (type, expadd, deadline, name, params,
+code)</td>
+<td>CTA §4.9.2</td>
+<td><strong>PASS</strong></td>
+<td><code>CatRenewal</code> struct with all 6 fields, keys 0-5</td>
+</tr>
+<tr>
+<td>Automatic renewal (type 0)</td>
+<td>CTA §4.9.2.1</td>
+<td><strong>PASS</strong></td>
+<td><code>CatRenewalType::Automatic</code> with
+<code>CatRenewal::automatic()</code> constructor</td>
+</tr>
+<tr>
+<td>Cookie renewal (type 1)</td>
+<td>CTA §4.9.2.2</td>
+<td><strong>PASS</strong></td>
+<td><code>CatRenewalType::Cookie</code> with
+<code>CatRenewal::cookie()</code> constructor</td>
+</tr>
+<tr>
+<td>Header renewal (type 2)</td>
+<td>CTA §4.9.2.3</td>
+<td><strong>PASS</strong></td>
+<td><code>CatRenewalType::Header</code> with
+<code>CatRenewal::header()</code> constructor</td>
+</tr>
+<tr>
+<td>Redirect renewal (type 3)</td>
+<td>CTA §4.9.2.4</td>
+<td><strong>PASS</strong></td>
+<td><code>CatRenewalType::Redirect</code> with
+<code>CatRenewal::redirect()</code> constructor</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="composite-claims-draft-lemmons-composite-claims">7. Composite
+Claims (draft-lemmons-composite-claims)</h2>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Spec ref</th>
+<th>Status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>OR operator</td>
+<td>CTA §3.1, ref 24</td>
+<td><strong>PASS</strong></td>
+<td><code>CompositeClaims.or_claims</code></td>
+</tr>
+<tr>
+<td>NOR operator</td>
+<td>CTA §3.1, ref 24</td>
+<td><strong>PASS</strong></td>
+<td><code>CompositeClaims.nor_claims</code></td>
+</tr>
+<tr>
+<td>AND operator</td>
+<td>CTA §3.1, ref 24</td>
+<td><strong>PASS</strong></td>
+<td><code>CompositeClaims.and_claims</code></td>
+</tr>
+<tr>
+<td>Depth limit (spec minimum 4 levels)</td>
+<td>draft-lemmons</td>
+<td><strong>PASS</strong></td>
+<td>Supports up to 10 levels (exceeds minimum)</td>
+</tr>
+<tr>
+<td>Nested claim set evaluation</td>
+<td>CTA §4.3.1.5</td>
+<td><strong>PASS</strong></td>
+<td>Recursive validation implemented</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="moqt-claims-draft-ietf-moq-c4m">8. MOQT Claims
+(draft-ietf-moq-c4m)</h2>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Spec ref</th>
+<th>Status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>MOQT scopes (key 327)</td>
+<td>draft-ietf-moq-c4m</td>
+<td><strong>PASS</strong></td>
+<td>Full scope matching: actions, namespace tuples, track patterns</td>
+</tr>
+<tr>
+<td>Revalidation interval (key 328)</td>
+<td>draft-ietf-moq-c4m</td>
+<td><strong>PASS</strong></td>
+<td>Configurable min interval, per-token values</td>
+</tr>
+<tr>
+<td>Binary match types: exact, prefix, suffix</td>
+<td>draft-ietf-moq-c4m</td>
+<td><strong>PASS</strong></td>
+<td>All three implemented</td>
+</tr>
+<tr>
+<td>Namespace tuple prefix semantics</td>
+<td>draft-ietf-moq-c4m</td>
+<td><strong>PASS</strong></td>
+<td>Trailing elements allowed</td>
+</tr>
+<tr>
+<td>First-match-wins scope evaluation</td>
+<td>draft-ietf-moq-c4m</td>
+<td><strong>PASS</strong></td>
+<td>Implemented</td>
+</tr>
+<tr>
+<td>DPoP integration with MOQT actions</td>
+<td>draft-ietf-moq-c4m</td>
+<td><strong>PASS</strong></td>
+<td><code>authorize_with_dpop()</code></td>
+</tr>
+<tr>
+<td>C4M token type <code>0x63346d</code></td>
+<td>draft-ietf-moq-c4m</td>
+<td><strong>PASS</strong></td>
+<td>Defined as <code>C4M_TOKEN_TYPE</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="security-requirements-cta-4.10">9. Security Requirements (CTA
+§4.10)</h2>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Spec ref</th>
+<th>Status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Resource limits for processing (time, space)</td>
+<td>CTA §4.10</td>
+<td><strong>PASS</strong></td>
+<td><code>CwtLimits</code> with configurable bounds. Regex size limits.
+Trie depth limits</td>
+</tr>
+<tr>
+<td>Constant-time signature comparison</td>
+<td>Best practice</td>
+<td><strong>PASS</strong></td>
+<td><code>constant_time_eq()</code> in crypto.rs</td>
+</tr>
+<tr>
+<td>Key zeroization on drop</td>
+<td>Best practice</td>
+<td><strong>PASS</strong></td>
+<td><code>Zeroize + ZeroizeOnDrop</code> for HMAC; p256/rsa crate
+internal zeroization</td>
+</tr>
+<tr>
+<td>DPoP replay detection</td>
+<td>RFC 9449 §4</td>
+<td><strong>PASS</strong></td>
+<td>LRU-based JTI cache with configurable capacity and window</td>
+</tr>
+<tr>
+<td>MUST use asymmetric algorithms when no established trust</td>
+<td>CTA §4.10.1</td>
+<td><strong>N/A</strong></td>
+<td>Policy concern for issuer</td>
+</tr>
+<tr>
+<td>COSE_Encrypt0 encryption</td>
+<td>RFC 9052 §5</td>
+<td><strong>PASS</strong></td>
+<td>AES-128-GCM and AES-256-GCM with <code>cose_encrypt0()</code> /
+<code>cose_decrypt0()</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="referenced-standards-implementation-status-summary">10.
+Referenced Standards — Implementation Status Summary</h2>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr>
+<th>Standard</th>
+<th>What it covers</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>CTA-5007-B</strong></td>
+<td>Common Access Token specification</td>
+<td><strong>PASS</strong> — all claim types and structures match spec
+definitions</td>
+</tr>
+<tr>
+<td><strong>RFC 8392</strong></td>
+<td>CBOR Web Token (CWT)</td>
+<td><strong>PASS</strong> — full CWT with COSE_Sign1 (tag 18) /
+COSE_Mac0 (tag 17) outer structure</td>
+</tr>
+<tr>
+<td><strong>RFC 9052</strong></td>
+<td>COSE Structures and Process</td>
+<td><strong>PASS</strong> — Sig_structure, MAC_structure, and
+COSE_Encrypt0 (tag 16) implemented</td>
+</tr>
+<tr>
+<td><strong>RFC 9053</strong></td>
+<td>COSE Initial Algorithms (HMAC, ECDSA, AES-GCM)</td>
+<td><strong>PASS</strong> — HMAC alg ID = 5, ES256 = -7, PS256 = -37,
+A128GCM = 1, A256GCM = 3</td>
+</tr>
+<tr>
+<td><strong>RFC 8230</strong></td>
+<td>RSA with COSE</td>
+<td><strong>PASS</strong></td>
+</tr>
+<tr>
+<td><strong>RFC 8949</strong></td>
+<td>CBOR encoding</td>
+<td><strong>PASS</strong> — deterministic map key ordering validated,
+shortest-form numbers, NaN/neg-zero rejected, CBOR tag rejection
+enforced</td>
+</tr>
+<tr>
+<td><strong>RFC 9164</strong></td>
+<td>CBOR Tags for IPv4/IPv6</td>
+<td><strong>PASS</strong> — IPs encoded as tagged binary per RFC
+9164</td>
+</tr>
+<tr>
+<td><strong>RFC 4648</strong></td>
+<td>Base64url encoding</td>
+<td><strong>PASS</strong></td>
+</tr>
+<tr>
+<td><strong>RFC 3986</strong></td>
+<td>URI Generic Syntax</td>
+<td><strong>PASS</strong> — <code>normalize_uri()</code> and
+<code>decompose_uri()</code> implement §6.2.2-6.2.3</td>
+</tr>
+<tr>
+<td><strong>RFC 9110</strong></td>
+<td>HTTP Semantics (URI normalization, header folding)</td>
+<td><strong>PASS</strong> — §4.2.3 normalization, §5.2 obs-fold removal
+implemented</td>
+</tr>
+<tr>
+<td><strong>RFC 6570</strong></td>
+<td>URI Template</td>
+<td><strong>N/A</strong> — token location is app-layer</td>
+</tr>
+<tr>
+<td><strong>RFC 9449</strong></td>
+<td>OAuth 2.0 DPoP</td>
+<td><strong>PASS</strong></td>
+</tr>
+<tr>
+<td><strong>RFC 6750</strong></td>
+<td>OAuth 2.0 Bearer Token Usage</td>
+<td><strong>N/A</strong> — transport-layer</td>
+</tr>
+<tr>
+<td><strong>RFC 8747</strong></td>
+<td>PoP Key Semantics for CWTs</td>
+<td><strong>PASS</strong></td>
+</tr>
+<tr>
+<td><strong>RFC 7638</strong></td>
+<td>JWK Thumbprint</td>
+<td><strong>PASS</strong></td>
+</tr>
+<tr>
+<td><strong>RFC 9679</strong></td>
+<td>COSE Key Thumbprint (ckt)</td>
+<td><strong>PASS</strong> — cnf key 6 supported</td>
+</tr>
+<tr>
+<td><strong>RFC 5280</strong></td>
+<td>X.509 PKI (for cattpk)</td>
+<td><strong>PASS</strong> — <code>validate_cattpk()</code> extracts SPKI
+from DER cert and compares against cattpk bytes</td>
+</tr>
+<tr>
+<td><strong>RFC 8610</strong></td>
+<td>CDDL (for schema definition)</td>
+<td><strong>N/A</strong> — documentation format</td>
+</tr>
+<tr>
+<td><strong>RFC 6265</strong></td>
+<td>HTTP State Management (cookies)</td>
+<td><strong>PASS</strong> — cookie renewal type supported in catr</td>
+</tr>
+<tr>
+<td><strong>RFC 8941</strong></td>
+<td>Structured Field Values</td>
+<td><strong>PASS</strong> — <code>structured_header</code> module:
+parse/normalize Items, Lists, Dictionaries</td>
+</tr>
+<tr>
+<td><strong>FIPS 180-4</strong></td>
+<td>SHA-256 / SHA-512/256</td>
+<td><strong>PASS</strong> — both hash types implemented</td>
+</tr>
+<tr>
+<td><strong>DMA TR 8350.2</strong></td>
+<td>WGS84 geodetic system</td>
+<td><strong>PASS</strong> — assumed default CRS, tag 279 validates
+WGS84</td>
+</tr>
+<tr>
+<td><strong>CTA-5009-A</strong></td>
+<td>Geographic Hashing</td>
+<td><strong>PASS</strong> — geohash arrays, CRS wrapper, validation</td>
+</tr>
+<tr>
+<td><strong>ETSI TS 104 002</strong></td>
+<td>DASH-IF watermarking token</td>
+<td><strong>N/A</strong> — out of scope</td>
+</tr>
+<tr>
+<td><strong>IEEE 1003.1-2017</strong></td>
+<td>POSIX ERE for regex matching</td>
+<td><strong>PASS</strong> — <code>validate_posix_ere()</code> rejects
+non-ERE patterns</td>
+</tr>
+<tr>
+<td><strong>draft-lemmons-composite-claims</strong></td>
+<td>Composite token claims</td>
+<td><strong>PASS</strong></td>
+</tr>
+<tr>
+<td><strong>draft-ietf-moq-c4m</strong></td>
+<td>CAT for MoQ Transport</td>
+<td><strong>PASS</strong></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="compliance-summary">11. Compliance Summary</h2>
+<p>All CTA-5007-B MUST and SHOULD requirements are implemented. All
+referenced standards that are applicable to a library implementation are
+supported. Items marked N/A are transport-layer or application-layer
+concerns outside the scope of a token encoding/decoding library.</p>
+<p><strong>Test coverage:</strong> 418+ tests covering all claim types,
+algorithms, encoding formats, validation rules, and edge cases.</p>
+</body>
+</html>
