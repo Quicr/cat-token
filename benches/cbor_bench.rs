@@ -61,7 +61,9 @@ fn create_complex_token() -> CatToken {
         .with_confirmation(b"jwk-thumbprint-xyz-padded-to-32b".to_vec())
         .with_dpop_settings(cat_token::CatDpopSettings::new().with_window(300))
         .with_ip_address("192.168.1.100")
+        .unwrap()
         .with_ip_range("10.0.0.0/8")
+        .unwrap()
         .with_asn(64512)
         .with_asn_range(64512, 65535)
 }

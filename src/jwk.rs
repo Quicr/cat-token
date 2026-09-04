@@ -149,6 +149,34 @@ impl Jwk {
         }
     }
 
+    pub fn to_rsa_public_key(&self) -> Result<RsaPublicKey, CatError> {
+        if self.kty != "RSA" {
+            return Err(CatError::InvalidClaimValue("Not an RSA key".to_string()));
+        }
+
+        let n = self
+            .n
+            .as_ref()
+            .ok_or_else(|| CatError::InvalidClaimValue("RSA JWK missing n".to_string()))?;
+        let e = self
+            .e
+            .as_ref()
+            .ok_or_else(|| CatError::InvalidClaimValue("RSA JWK missing e".to_string()))?;
+
+        let n_bytes = URL_SAFE_NO_PAD
+            .decode(n)
+            .map_err(|e| CatError::InvalidBase64(e.to_string()))?;
+        let e_bytes = URL_SAFE_NO_PAD
+            .decode(e)
+            .map_err(|e| CatError::InvalidBase64(e.to_string()))?;
+
+        let n_uint = rsa::BigUint::from_bytes_be(&n_bytes);
+        let e_uint = rsa::BigUint::from_bytes_be(&e_bytes);
+
+        RsaPublicKey::new(n_uint, e_uint)
+            .map_err(|e| CatError::CryptoError(format!("Invalid RSA public key: {}", e)))
+    }
+
     pub fn to_verifying_key(&self) -> Result<VerifyingKey, CatError> {
         if self.kty != "EC" {
             return Err(CatError::InvalidClaimValue("Not an EC key".to_string()));

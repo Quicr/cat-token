@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 use crate::{
-    BinaryMatch, CatDpopSettings, CatError, CatToken, CryptographicAlgorithm, DpopProof,
-    DpopValidator, MoqtAction, MoqtScope, NamespaceMatch, confirmation_matches_jwk,
+    BinaryMatch, CatDpopSettings, CatError, CatToken, DpopProof, DpopValidator, MoqtAction,
+    MoqtScope, NamespaceMatch, confirmation_matches_jwk,
 };
 
 /// IANA-registered token type for C4M (CAT for MoQ) AUTHORIZATION TOKEN parameter.
@@ -181,12 +181,13 @@ impl MoqtValidator {
 
     /// Authorize with full DPoP proof validation including signature verification.
     ///
-    /// This method validates both the claims and the cryptographic signature of the DPoP proof.
+    /// Validates the DPoP proof using the embedded JWK (not a caller-supplied key),
+    /// verifies the proof is bound to the requested MOQT target (namespace/track),
+    /// and only commits the JTI to the replay cache after successful verification.
     pub fn authorize_with_dpop(
         &self,
         token: &CatToken,
         request: &MoqtAuthRequest,
-        algorithm: &dyn CryptographicAlgorithm,
     ) -> Result<MoqtAuthResult, CatError> {
         // First check basic authorization
         let auth_result = self.authorize(token, request);
@@ -202,7 +203,6 @@ impl MoqtValidator {
                 )
             })?;
 
-            // Validate DPoP proof
             let validator = self.dpop_validator.as_ref().ok_or_else(|| {
                 CatError::DpopValidationFailed("DPoP validation not configured".to_string())
             })?;
@@ -212,8 +212,20 @@ impl MoqtValidator {
                 return Err(CatError::InvalidDpopBinding);
             }
 
-            // Validate the proof with full signature verification
-            validator.validate_with_algorithm(proof, request.action, &cnf.jkt, algorithm)?;
+            // Validate the proof using the embedded JWK
+            validator.validate(proof, request.action, &cnf.jkt)?;
+
+            // Verify proof is bound to the requested target (C2 fix)
+            if proof.payload.actx.tns != request.namespace {
+                return Err(CatError::DpopValidationFailed(
+                    "DPoP proof namespace does not match request".to_string(),
+                ));
+            }
+            if proof.payload.actx.tn != request.track {
+                return Err(CatError::DpopValidationFailed(
+                    "DPoP proof track does not match request".to_string(),
+                ));
+            }
         }
 
         Ok(auth_result)

@@ -4,6 +4,8 @@
 // Tests that validate against the deterministic test vectors in tests/test_data/.
 // These same vectors can be used by other CAT/MoQT implementations for interop testing.
 
+#![cfg(feature = "moqt")]
+
 use cat_token::*;
 use p256::ecdsa::{SigningKey, VerifyingKey};
 use serde_json::Value as JsonValue;
@@ -106,7 +108,9 @@ fn test_vector_cbor_network_identifiers() {
 
     let token = CatToken::new()
         .with_ip_address("192.168.1.100")
+        .unwrap()
         .with_ip_range("10.0.0.0/8")
+        .unwrap()
         .with_asn(64512)
         .with_asn_range(64512, 64768);
     let cwt = Cwt::new(ALG_HMAC256_256, token);
@@ -768,5 +772,134 @@ fn test_vector_all_hmac_tokens_reproducible() {
             "HMAC token {} not reproducible after decode/re-encode",
             v["id"]
         );
+    }
+}
+
+// =============================================================================
+// Category 6: Composite Claim Tests
+// =============================================================================
+
+#[test]
+fn test_vector_composite_or_roundtrip() {
+    let vectors = load_vectors();
+    let comp_vectors = &vectors["vectors"]["composite_claims"]["vectors"];
+    let v = &comp_vectors[0];
+    assert_eq!(v["id"], "composite_or_simple");
+
+    let alg = HmacSha256Algorithm::new(&hmac_key());
+    let cose_bytes = cose_bytes_from_vector(v);
+
+    let decoded = decode_token(&cose_bytes, &alg).unwrap();
+    assert!(decoded.composite.or_claim.is_some());
+    let or_claim = decoded.composite.or_claim.as_ref().unwrap();
+    assert_eq!(or_claim.claims.len(), 2);
+
+    let re_encoded = encode_token(&decoded, &alg).unwrap();
+    assert_eq!(hex::encode(&re_encoded), v["cose_hex"].as_str().unwrap());
+}
+
+#[test]
+fn test_vector_composite_and_roundtrip() {
+    let vectors = load_vectors();
+    let comp_vectors = &vectors["vectors"]["composite_claims"]["vectors"];
+    let v = &comp_vectors[1];
+    assert_eq!(v["id"], "composite_and");
+
+    let alg = HmacSha256Algorithm::new(&hmac_key());
+    let cose_bytes = cose_bytes_from_vector(v);
+
+    let decoded = decode_token(&cose_bytes, &alg).unwrap();
+    assert!(decoded.composite.and_claim.is_some());
+    let and_claim = decoded.composite.and_claim.as_ref().unwrap();
+    assert_eq!(and_claim.claims.len(), 2);
+
+    let re_encoded = encode_token(&decoded, &alg).unwrap();
+    assert_eq!(hex::encode(&re_encoded), v["cose_hex"].as_str().unwrap());
+}
+
+#[test]
+fn test_vector_composite_nor_roundtrip() {
+    let vectors = load_vectors();
+    let comp_vectors = &vectors["vectors"]["composite_claims"]["vectors"];
+    let v = &comp_vectors[2];
+    assert_eq!(v["id"], "composite_nor");
+
+    let alg = HmacSha256Algorithm::new(&hmac_key());
+    let cose_bytes = cose_bytes_from_vector(v);
+
+    let decoded = decode_token(&cose_bytes, &alg).unwrap();
+    assert!(decoded.composite.nor_claim.is_some());
+    let nor_claim = decoded.composite.nor_claim.as_ref().unwrap();
+    assert_eq!(nor_claim.claims.len(), 1);
+
+    let re_encoded = encode_token(&decoded, &alg).unwrap();
+    assert_eq!(hex::encode(&re_encoded), v["cose_hex"].as_str().unwrap());
+}
+
+#[test]
+fn test_vector_composite_nested_roundtrip() {
+    let vectors = load_vectors();
+    let comp_vectors = &vectors["vectors"]["composite_claims"]["vectors"];
+    let v = &comp_vectors[3];
+    assert_eq!(v["id"], "composite_nested");
+
+    let alg = HmacSha256Algorithm::new(&hmac_key());
+    let cose_bytes = cose_bytes_from_vector(v);
+
+    let decoded = decode_token(&cose_bytes, &alg).unwrap();
+    assert!(decoded.composite.or_claim.is_some());
+    let or_claim = decoded.composite.or_claim.as_ref().unwrap();
+    assert_eq!(or_claim.claims.len(), 2);
+
+    // First claim set is a token
+    assert!(matches!(
+        or_claim.claims[0],
+        cat_token::claims::ClaimSet::Token(_)
+    ));
+    // Second claim set is a nested AND composite
+    assert!(matches!(
+        or_claim.claims[1],
+        cat_token::claims::ClaimSet::Composite(_)
+    ));
+    if let cat_token::claims::ClaimSet::Composite(ref nested) = or_claim.claims[1] {
+        assert_eq!(nested.op, cat_token::claims::CompositeOperator::And);
+        assert_eq!(nested.claims.len(), 2);
+    }
+
+    let re_encoded = encode_token(&decoded, &alg).unwrap();
+    assert_eq!(hex::encode(&re_encoded), v["cose_hex"].as_str().unwrap());
+}
+
+#[test]
+fn test_vector_composite_payload_cbor_matches() {
+    let vectors = load_vectors();
+    let comp_vectors = &vectors["vectors"]["composite_claims"]["vectors"];
+
+    let alg = HmacSha256Algorithm::new(&hmac_key());
+
+    for v in comp_vectors.as_array().unwrap() {
+        let cose_bytes = cose_bytes_from_vector(v);
+        let expected_payload_hex = v["payload_cbor_hex"].as_str().unwrap();
+
+        let value: ciborium::Value = ciborium::de::from_reader(cose_bytes.as_slice()).unwrap();
+        let arr = match value {
+            ciborium::Value::Tag(_, inner) => match *inner {
+                ciborium::Value::Array(a) => a,
+                _ => panic!("expected array"),
+            },
+            _ => panic!("expected tag"),
+        };
+        let actual_payload_hex = match &arr[2] {
+            ciborium::Value::Bytes(b) => hex::encode(b),
+            _ => panic!("expected bytes"),
+        };
+        assert_eq!(
+            actual_payload_hex, expected_payload_hex,
+            "Payload mismatch for {}",
+            v["id"]
+        );
+
+        // Verify decode succeeds
+        decode_token(&cose_bytes, &alg).unwrap();
     }
 }

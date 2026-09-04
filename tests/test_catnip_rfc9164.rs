@@ -6,7 +6,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 #[test]
 fn test_ipv4_address_uses_tag_52() {
-    let token = CatToken::new().with_ip_address("192.168.1.100");
+    let token = CatToken::new().with_ip_address("192.168.1.100").unwrap();
 
     let cwt = Cwt::new(ALG_ES256, token);
     let payload = cwt.encode_payload().unwrap();
@@ -77,7 +77,7 @@ fn test_ipv6_address_uses_tag_54() {
 
 #[test]
 fn test_ipv4_prefix_tagged_map() {
-    let token = CatToken::new().with_ip_range("10.0.0.0/8");
+    let token = CatToken::new().with_ip_range("10.0.0.0/8").unwrap();
 
     let cwt = Cwt::new(ALG_ES256, token);
     let payload = cwt.encode_payload().unwrap();
@@ -151,9 +151,13 @@ fn test_full_catnip_roundtrip() {
     let token = CatTokenBuilder::new()
         .issuer("https://example.com")
         .ip_address("192.168.1.1")
+        .unwrap()
         .ip_address("2001:db8::1")
+        .unwrap()
         .ip_range("10.0.0.0/8")
+        .unwrap()
         .ip_range("2001:db8::/32")
+        .unwrap()
         .asn(64512)
         .asn_range(65000, 65100)
         .expires_in(3600)

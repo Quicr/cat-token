@@ -24,8 +24,8 @@ fn build_cbor_map(pairs: &[(i64, &str)]) -> Vec<u8> {
 
 #[test]
 fn test_sorted_keys_accepted() {
-    // Keys 1 (iss), 3 (aud) in ascending order — valid
-    let cbor = build_cbor_map(&[(1, "https://issuer.example.com"), (3, "audience")]);
+    // Keys 1 (iss), 2 (sub) in ascending order — valid
+    let cbor = build_cbor_map(&[(1, "https://issuer.example.com"), (2, "subject")]);
     let result = Cwt::decode_payload(&cbor);
     assert!(result.is_ok(), "Sorted keys should be accepted");
     let token = result.unwrap();
@@ -108,8 +108,8 @@ fn test_empty_map_accepted() {
 
 #[test]
 fn test_many_sorted_keys_accepted() {
-    // Keys 1, 2, 3, 4, 5, 6 in order — valid
-    let cbor = build_cbor_map(&[(1, "issuer"), (2, "subject"), (3, "audience")]);
+    // Keys 1 (iss), 2 (sub) in order — valid (uses only text-typed claims)
+    let cbor = build_cbor_map(&[(1, "issuer"), (2, "subject")]);
     let result = Cwt::decode_payload(&cbor);
     assert!(result.is_ok());
 }

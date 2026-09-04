@@ -52,14 +52,17 @@ path = "src/lib.rs"
 [[bin]]
 name = "cat-cli"
 path = "src/bin/main.rs"
+required-features = ["moqt"]
 
 [[bin]]
 name = "generate-test-vectors"
 path = "src/bin/generate_test_vectors.rs"
+required-features = ["moqt"]
 
 [[bench]]
 name = "token_bench"
 harness = false
+required-features = ["moqt"]
 
 [[bench]]
 name = "crypto_bench"
@@ -72,6 +75,21 @@ harness = false
 [[bench]]
 name = "trie_bench"
 harness = false
+
+[[example]]
+name = "quickstart"
+required-features = ["moqt"]
+
+[[example]]
+name = "relay_validator"
+required-features = ["moqt"]
+
+[[example]]
+name = "server_token_issuer"
+required-features = ["moqt"]
+
+[[example]]
+name = "generic_cat"
 
 [features]
 default = ["builtin-trie", "moqt"]

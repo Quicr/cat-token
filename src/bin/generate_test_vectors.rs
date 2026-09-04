@@ -115,6 +115,12 @@ fn main() {
     // Category 5: DPoP binding vectors
     all_vectors.insert("dpop_binding".to_string(), generate_dpop_vectors());
 
+    // Category 6: Composite claim vectors
+    all_vectors.insert(
+        "composite_claims".to_string(),
+        generate_composite_claim_vectors(),
+    );
+
     // Write combined file
     let combined = json!({
         "description": "CAT/MoQT test vectors for cross-implementation validation",
@@ -213,7 +219,9 @@ fn generate_cbor_encoding_vectors() -> JsonValue {
     {
         let token = CatToken::new()
             .with_ip_address("192.168.1.100")
+            .unwrap()
             .with_ip_range("10.0.0.0/8")
+            .unwrap()
             .with_asn(64512)
             .with_asn_range(64512, 64768);
         let cwt = Cwt::new(ALG_HMAC256_256, token);
@@ -363,7 +371,8 @@ fn generate_token_structure_vectors() -> JsonValue {
                 matches: vec![MatchValue::Prefix("/live/".to_string())],
             }])
             .with_subject("user:alice@example.com")
-            .with_ip_address("203.0.113.50");
+            .with_ip_address("203.0.113.50")
+            .unwrap();
         let mut token = token;
         token.core.exp = Some(FIXED_EXP);
         token.core.nbf = Some(FIXED_NBF);
@@ -992,6 +1001,171 @@ fn generate_dpop_vectors() -> JsonValue {
 
     json!({
         "description": "DPoP (Demonstrating Proof-of-Possession) binding vectors",
+        "vectors": vectors,
+    })
+}
+
+/// Category 6: Composite claim encoding vectors
+fn generate_composite_claim_vectors() -> JsonValue {
+    let mut vectors = Vec::new();
+    let alg = HmacSha256Algorithm::new(&hmac_key());
+
+    // 6.1: Simple OR composite — two alternative claim sets
+    {
+        let mut token_a = CatToken::new()
+            .with_issuer("https://auth.example.com")
+            .with_version(1);
+        token_a.core.exp = Some(FIXED_EXP);
+
+        let mut token_b = CatToken::new()
+            .with_issuer("https://auth-backup.example.com")
+            .with_version(1);
+        token_b.core.exp = Some(FIXED_EXP + 3600);
+
+        let mut or_claim = claims::CompositeClaim::new(claims::CompositeOperator::Or);
+        or_claim.add_token(token_a);
+        or_claim.add_token(token_b);
+
+        let mut token = CatToken::new().with_issuer("https://auth.example.com");
+        token.core.exp = Some(FIXED_EXP);
+        token.composite.or_claim = Some(or_claim);
+
+        let encoded = encode_token(&token, &alg).unwrap();
+        let c = extract_cose_components(&encoded);
+
+        vectors.push(json!({
+            "id": "composite_or_simple",
+            "description": "OR composite: at least one of two alternative claim sets must be acceptable",
+            "cose_hex": hex::encode(&encoded),
+            "payload_cbor_hex": hex::encode(&c.payload),
+            "composite": {
+                "operator": "OR",
+                "claim_key": 324,
+                "claim_sets": [
+                    {"iss": "https://auth.example.com", "catv": 1, "exp": FIXED_EXP},
+                    {"iss": "https://auth-backup.example.com", "catv": 1, "exp": FIXED_EXP + 3600},
+                ],
+            },
+        }));
+    }
+
+    // 6.2: AND composite — both claim sets must be acceptable
+    {
+        let mut token_a = CatToken::new().with_version(1);
+        token_a.core.exp = Some(FIXED_EXP);
+
+        let mut token_b = CatToken::new().with_ip_address("10.0.0.0").unwrap();
+        token_b.core.exp = Some(FIXED_EXP);
+
+        let mut and_claim = claims::CompositeClaim::new(claims::CompositeOperator::And);
+        and_claim.add_token(token_a);
+        and_claim.add_token(token_b);
+
+        let mut token = CatToken::new().with_issuer("https://auth.example.com");
+        token.core.exp = Some(FIXED_EXP);
+        token.composite.and_claim = Some(and_claim);
+
+        let encoded = encode_token(&token, &alg).unwrap();
+        let c = extract_cose_components(&encoded);
+
+        vectors.push(json!({
+            "id": "composite_and",
+            "description": "AND composite: both claim sets must be acceptable",
+            "cose_hex": hex::encode(&encoded),
+            "payload_cbor_hex": hex::encode(&c.payload),
+            "composite": {
+                "operator": "AND",
+                "claim_key": 326,
+                "claim_sets": [
+                    {"catv": 1, "exp": FIXED_EXP},
+                    {"catnip": [{"type": "ip_address", "value": "10.0.0.0"}], "exp": FIXED_EXP},
+                ],
+            },
+        }));
+    }
+
+    // 6.3: NOR composite — none of the claim sets can be acceptable
+    {
+        let mut blocked = CatToken::new().with_issuer("https://revoked.example.com");
+        blocked.core.exp = Some(FIXED_EXP);
+
+        let mut nor_claim = claims::CompositeClaim::new(claims::CompositeOperator::Nor);
+        nor_claim.add_token(blocked);
+
+        let mut token = CatToken::new().with_issuer("https://auth.example.com");
+        token.core.exp = Some(FIXED_EXP);
+        token.composite.nor_claim = Some(nor_claim);
+
+        let encoded = encode_token(&token, &alg).unwrap();
+        let c = extract_cose_components(&encoded);
+
+        vectors.push(json!({
+            "id": "composite_nor",
+            "description": "NOR composite: none of the listed claim sets can be acceptable",
+            "cose_hex": hex::encode(&encoded),
+            "payload_cbor_hex": hex::encode(&c.payload),
+            "composite": {
+                "operator": "NOR",
+                "claim_key": 325,
+                "claim_sets": [
+                    {"iss": "https://revoked.example.com", "exp": FIXED_EXP},
+                ],
+            },
+        }));
+    }
+
+    // 6.4: Nested composite — OR containing a nested AND
+    {
+        let mut token_standalone = CatToken::new().with_issuer("https://primary.example.com");
+        token_standalone.core.exp = Some(FIXED_EXP);
+
+        let mut and_a = CatToken::new().with_issuer("https://secondary.example.com");
+        and_a.core.exp = Some(FIXED_EXP);
+        let mut and_b = CatToken::new().with_version(1);
+        and_b.core.exp = Some(FIXED_EXP);
+
+        let mut nested_and = claims::CompositeClaim::new(claims::CompositeOperator::And);
+        nested_and.add_token(and_a);
+        nested_and.add_token(and_b);
+
+        let mut or_claim = claims::CompositeClaim::new(claims::CompositeOperator::Or);
+        or_claim.add_token(token_standalone);
+        or_claim.add_composite(nested_and);
+
+        let mut token = CatToken::new().with_issuer("https://auth.example.com");
+        token.core.exp = Some(FIXED_EXP);
+        token.composite.or_claim = Some(or_claim);
+
+        let encoded = encode_token(&token, &alg).unwrap();
+        let c = extract_cose_components(&encoded);
+
+        vectors.push(json!({
+            "id": "composite_nested",
+            "description": "Nested composite: OR containing a standalone claim set and a nested AND",
+            "cose_hex": hex::encode(&encoded),
+            "payload_cbor_hex": hex::encode(&c.payload),
+            "composite": {
+                "operator": "OR",
+                "claim_key": 324,
+                "claim_sets": [
+                    {"iss": "https://primary.example.com", "exp": FIXED_EXP},
+                    {
+                        "nested": {
+                            "operator": "AND",
+                            "claim_key": 326,
+                            "claim_sets": [
+                                {"iss": "https://secondary.example.com", "exp": FIXED_EXP},
+                                {"catv": 1, "exp": FIXED_EXP},
+                            ],
+                        },
+                    },
+                ],
+            },
+        }));
+    }
+
+    json!({
+        "description": "Composite claim encoding (draft-lemmons-cose-composite-claims-01)",
         "vectors": vectors,
     })
 }

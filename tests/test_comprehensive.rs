@@ -139,9 +139,9 @@ fn test_token_validation_comprehensive() {
     let validator = CatTokenValidator::new()
         .with_expected_issuers(vec!["https://trusted.issuer.com".to_string()])
         .with_expected_audiences(vec!["expected-audience".to_string()])
-        .with_clock_skew_tolerance(120);
+        .with_clock_skew_tolerance(120)
+        .allow_unencrypted_privacy_claims();
 
-    // Should pass validation
     assert!(validator.validate(&token).is_ok());
 }
 
@@ -189,7 +189,7 @@ fn test_token_validation_failures() {
 
 #[test]
 fn test_geographic_validation() {
-    let validator = CatTokenValidator::new();
+    let validator = CatTokenValidator::new().allow_unencrypted_privacy_claims();
 
     // Valid coordinates
     let valid_token = CatToken::new()

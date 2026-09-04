@@ -34,27 +34,28 @@ pub const CLAIM_CATIFDATA: i64 = 320;
 pub const CLAIM_CNF: i64 = 8;
 pub const CLAIM_CATDPOP: i64 = 321;
 
-// DPoP sub-claim keys (within cnf map)
 pub const CNF_JKT: i64 = 323; // JWK Thumbprint (CTA-5007-B §4.8.1, Annex E.3)
-pub const CNF_JKT_LEGACY: i64 = 3; // Legacy JWK Thumbprint key for backward compatibility
-pub const CNF_CKT: i64 = 6; // COSE Key Thumbprint (RFC 9679)
+pub(crate) const CNF_JKT_LEGACY: i64 = 3;
+pub(crate) const CNF_CKT: i64 = 6; // COSE Key Thumbprint (RFC 9679)
 
 // catdpop sub-claim keys
-pub const CATDPOP_CRIT: i64 = -1;
-pub const CATDPOP_WINDOW: i64 = 0;
-pub const CATDPOP_HONOR_JTI: i64 = 1;
+pub(crate) const CATDPOP_CRIT: i64 = -1;
+pub(crate) const CATDPOP_WINDOW: i64 = 0;
+pub(crate) const CATDPOP_HONOR_JTI: i64 = 1;
 
 // Request Claims
 pub const CLAIM_CATIF: i64 = 322;
 pub const CLAIM_CATR: i64 = 323;
 
 // catr sub-map keys (CTA-5007-B §4.9.2)
-pub const CATR_TYPE: i64 = 0;
-pub const CATR_EXPADD: i64 = 1;
-pub const CATR_DEADLINE: i64 = 2;
-pub const CATR_NAME: i64 = 3;
-pub const CATR_PARAMS: i64 = 4;
-pub const CATR_CODE: i64 = 5;
+pub(crate) const CATR_TYPE: i64 = 0;
+pub(crate) const CATR_EXPADD: i64 = 1;
+pub(crate) const CATR_DEADLINE: i64 = 2;
+pub(crate) const CATR_COOKIE_NAME: i64 = 3;
+pub(crate) const CATR_HEADER_NAME: i64 = 4;
+pub(crate) const CATR_ADDITIONAL_COOKIE_PARAMS: i64 = 5;
+pub(crate) const CATR_ADDITIONAL_HEADER_PARAMS: i64 = 6;
+pub(crate) const CATR_STATUS_CODE: i64 = 7;
 
 // Composite Claims (RFC draft-lemmons-cose-composite-claims-01)
 pub const CLAIM_OR: i64 = 324;
@@ -66,8 +67,8 @@ pub const CLAIM_MOQT: i64 = 327; // TBD_MOQT in the spec
 pub const CLAIM_MOQT_REVAL: i64 = 328; // TBD_MOQT_REVAL in the spec
 
 // MOQT Binary match types per spec
-pub const MATCH_TYPE_PREFIX: i64 = 1;
-pub const MATCH_TYPE_SUFFIX: i64 = 2;
+pub(crate) const MATCH_TYPE_PREFIX: i64 = 1;
+pub(crate) const MATCH_TYPE_SUFFIX: i64 = 2;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CoreClaims {
@@ -231,7 +232,7 @@ impl CatDpopSettings {
     }
 
     pub fn should_honor_jti(&self) -> bool {
-        self.honor_jti.unwrap_or(true)
+        self.honor_jti.unwrap_or(false)
     }
 }
 
@@ -279,9 +280,11 @@ pub struct CatRenewal {
     pub renewal_type: CatRenewalType,
     pub expadd: Option<i64>,
     pub deadline: Option<i64>,
-    pub name: Option<String>,
-    pub params: Option<Vec<(String, String)>>,
-    pub code: Option<u32>,
+    pub cookie_name: Option<String>,
+    pub header_name: Option<String>,
+    pub cookie_params: Option<Vec<(String, String)>>,
+    pub header_params: Option<Vec<(String, String)>>,
+    pub status_code: Option<u32>,
 }
 
 impl CatRenewal {
@@ -290,9 +293,11 @@ impl CatRenewal {
             renewal_type: CatRenewalType::Automatic,
             expadd: None,
             deadline: None,
-            name: None,
-            params: None,
-            code: None,
+            cookie_name: None,
+            header_name: None,
+            cookie_params: None,
+            header_params: None,
+            status_code: None,
         }
     }
 
@@ -301,9 +306,11 @@ impl CatRenewal {
             renewal_type: CatRenewalType::Cookie,
             expadd: None,
             deadline: None,
-            name: Some(name.into()),
-            params: None,
-            code: None,
+            cookie_name: Some(name.into()),
+            header_name: None,
+            cookie_params: None,
+            header_params: None,
+            status_code: None,
         }
     }
 
@@ -312,9 +319,11 @@ impl CatRenewal {
             renewal_type: CatRenewalType::Header,
             expadd: None,
             deadline: None,
-            name: Some(name.into()),
-            params: None,
-            code: None,
+            cookie_name: None,
+            header_name: Some(name.into()),
+            cookie_params: None,
+            header_params: None,
+            status_code: None,
         }
     }
 
@@ -323,9 +332,11 @@ impl CatRenewal {
             renewal_type: CatRenewalType::Redirect,
             expadd: None,
             deadline: None,
-            name: None,
-            params: None,
-            code: Some(code),
+            cookie_name: None,
+            header_name: None,
+            cookie_params: None,
+            header_params: None,
+            status_code: Some(code),
         }
     }
 
@@ -339,18 +350,28 @@ impl CatRenewal {
         self
     }
 
-    pub fn with_name(mut self, name: impl Into<String>) -> Self {
-        self.name = Some(name.into());
+    pub fn with_cookie_name(mut self, name: impl Into<String>) -> Self {
+        self.cookie_name = Some(name.into());
         self
     }
 
-    pub fn with_params(mut self, params: Vec<(String, String)>) -> Self {
-        self.params = Some(params);
+    pub fn with_header_name(mut self, name: impl Into<String>) -> Self {
+        self.header_name = Some(name.into());
         self
     }
 
-    pub fn with_code(mut self, code: u32) -> Self {
-        self.code = Some(code);
+    pub fn with_cookie_params(mut self, params: Vec<(String, String)>) -> Self {
+        self.cookie_params = Some(params);
+        self
+    }
+
+    pub fn with_header_params(mut self, params: Vec<(String, String)>) -> Self {
+        self.header_params = Some(params);
+        self
+    }
+
+    pub fn with_status_code(mut self, code: u32) -> Self {
+        self.status_code = Some(code);
         self
     }
 }
@@ -1074,15 +1095,17 @@ impl MoqtScope {
         true
     }
 
-    pub fn matches_namespace(&self, namespace: &[u8]) -> bool {
+    pub fn matches_namespace(&self, namespace: &[Vec<u8>]) -> bool {
         if self.namespace_matches.is_empty() {
             return true;
         }
-        if let Some(first) = self.namespace_matches.first() {
-            first.matches(Some(namespace))
-        } else {
-            true
+        for (i, ns_match) in self.namespace_matches.iter().enumerate() {
+            let tuple_elem = namespace.get(i).map(|v| v.as_slice());
+            if !ns_match.matches(tuple_elem) {
+                return false;
+            }
         }
+        true
     }
 
     pub fn matches_track(&self, track: &[u8]) -> bool {
@@ -1111,6 +1134,7 @@ pub struct CatToken {
     #[cfg(feature = "moqt")]
     pub moqt: MoqtClaims,
     pub custom: HashMap<i64, ciborium::Value>,
+    pub was_encrypted: bool,
 }
 
 impl Default for CatToken {
@@ -1164,6 +1188,7 @@ impl CatToken {
                 moqt_reval: None,
             },
             custom: HashMap::new(),
+            was_encrypted: false,
         }
     }
 
@@ -1330,24 +1355,24 @@ impl CatToken {
         self
     }
 
-    pub fn with_ip_address(mut self, ip: impl Into<String>) -> Self {
-        let nip = NetworkIdentifier::from_ip_str(&ip.into()).expect("invalid IP address");
+    pub fn with_ip_address(mut self, ip: impl Into<String>) -> Result<Self, crate::CatError> {
+        let nip = NetworkIdentifier::from_ip_str(&ip.into())?;
         if let Some(ref mut nips) = self.cat.catnip {
             nips.push(nip);
         } else {
             self.cat.catnip = Some(vec![nip]);
         }
-        self
+        Ok(self)
     }
 
-    pub fn with_ip_range(mut self, range: impl Into<String>) -> Self {
-        let nip = NetworkIdentifier::from_cidr_str(&range.into()).expect("invalid CIDR range");
+    pub fn with_ip_range(mut self, range: impl Into<String>) -> Result<Self, crate::CatError> {
+        let nip = NetworkIdentifier::from_cidr_str(&range.into())?;
         if let Some(ref mut nips) = self.cat.catnip {
             nips.push(nip);
         } else {
             self.cat.catnip = Some(vec![nip]);
         }
-        self
+        Ok(self)
     }
 
     pub fn with_asn(mut self, asn: u32) -> Self {
@@ -1411,7 +1436,12 @@ impl CatToken {
     }
 
     #[cfg(feature = "moqt")]
-    pub fn allows_moqt_action(&self, action: &MoqtAction, namespace: &[u8], track: &[u8]) -> bool {
+    pub fn allows_moqt_action(
+        &self,
+        action: &MoqtAction,
+        namespace: &[Vec<u8>],
+        track: &[u8],
+    ) -> bool {
         if let Some(ref scopes) = self.moqt.moqt {
             scopes.iter().any(|scope| {
                 scope.allows_action(action)
@@ -1422,6 +1452,57 @@ impl CatToken {
             false
         }
     }
+
+    pub fn custom_claim(&self, key: i64) -> Option<&ciborium::Value> {
+        self.custom.get(&key)
+    }
+
+    pub fn set_custom_claim(
+        &mut self,
+        key: i64,
+        value: ciborium::Value,
+    ) -> Result<(), crate::CatError> {
+        if is_reserved_claim_id(key) {
+            return Err(crate::CatError::InvalidClaimValue(format!(
+                "Claim ID {key} is reserved and cannot be set as a custom claim"
+            )));
+        }
+        self.custom.insert(key, value);
+        Ok(())
+    }
+}
+
+fn is_reserved_claim_id(key: i64) -> bool {
+    matches!(
+        key,
+        CLAIM_ISS
+            | CLAIM_SUB
+            | CLAIM_AUD
+            | CLAIM_EXP
+            | CLAIM_NBF
+            | CLAIM_IAT
+            | CLAIM_CTI
+            | CLAIM_CNF
+            | CLAIM_GEOHASH
+            | CLAIM_CATREPLAY
+            | CLAIM_CATPOR
+            | CLAIM_CATV
+            | CLAIM_CATNIP
+            | CLAIM_CATU
+            | CLAIM_CATM
+            | CLAIM_CATALPN
+            | CLAIM_CATH
+            | CLAIM_CATGEOISO3166
+            | CLAIM_CATGEOCOORD
+            | CLAIM_CATGEOALT
+            | CLAIM_CATTPK
+            | CLAIM_CATIFDATA
+            | CLAIM_CATDPOP
+            | CLAIM_CATIF
+            | CLAIM_CATR
+            | CLAIM_MOQT
+            | CLAIM_MOQT_REVAL
+    )
 }
 
 /// Utility functions for creating composite claims

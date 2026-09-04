@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2022 Quicr
 // SPDX-License-Identifier: BSD-2-Clause
 
+#![cfg(feature = "moqt")]
+
 use cat_token::moqt::{C4M_TOKEN_TYPE, MoqtAuthRequest, MoqtScopeBuilder, MoqtValidator};
 use cat_token::*;
 
@@ -357,7 +359,8 @@ fn test_full_roundtrip_new_apis() {
     // Validate standard claims
     let validator = CatTokenValidator::new()
         .with_expected_issuers(vec!["auth-server".to_string()])
-        .with_expected_audiences(vec!["relay-01".to_string()]);
+        .with_expected_audiences(vec!["relay-01".to_string()])
+        .allow_unencrypted_privacy_claims();
     assert!(validator.validate(&decoded).is_ok());
 
     // Authorize operations

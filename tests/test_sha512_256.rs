@@ -66,9 +66,10 @@ fn test_sha256_and_sha512_256_coexist() {
 
     let decoded_rules = decoded.cat.catu.unwrap();
     assert_eq!(decoded_rules[0].matches.len(), 2);
-    assert!(matches!(decoded_rules[0].matches[0], MatchValue::Sha256(_)));
+    // After deterministic encoding, SHA512_256 (key -2) comes before SHA256 (key -1)
     assert!(matches!(
-        decoded_rules[0].matches[1],
+        decoded_rules[0].matches[0],
         MatchValue::Sha512_256(_)
     ));
+    assert!(matches!(decoded_rules[0].matches[1], MatchValue::Sha256(_)));
 }

@@ -7,19 +7,22 @@ use crate::claims::CatDpopSettings;
 use crate::claims::ConfirmationClaim;
 use crate::jwk::Jwk;
 #[cfg(feature = "moqt")]
-use crate::{CryptographicAlgorithm, MoqtAction};
-use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use crate::{CryptographicAlgorithm, Es256Algorithm, MoqtAction, Ps256Algorithm};
+use base64::{
+    Engine as _,
+    engine::general_purpose::{URL_SAFE, URL_SAFE_NO_PAD},
+};
 #[cfg(feature = "moqt")]
 use lru::LruCache;
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "moqt")]
 use std::num::NonZeroUsize;
 #[cfg(feature = "moqt")]
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex};
 #[cfg(feature = "moqt")]
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-pub const DPOP_TYP: &str = "dpop+jwt";
+pub const DPOP_TYP: &str = "dpop-proof+jwt";
 
 /// Supported DPoP algorithms (asymmetric only per RFC 9449 §4.2)
 pub const SUPPORTED_DPOP_ALGORITHMS: &[&str] = &["ES256", "PS256"];
@@ -69,7 +72,7 @@ pub struct AuthorizationContext {
     #[serde(rename = "type")]
     pub ctx_type: String,
     pub action: i32,
-    pub tns: Vec<u8>,
+    pub tns: Vec<Vec<u8>>,
     pub tn: Vec<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resource: Option<String>,
@@ -77,11 +80,11 @@ pub struct AuthorizationContext {
 
 #[cfg(feature = "moqt")]
 impl AuthorizationContext {
-    pub fn new_moqt(action: MoqtAction, namespace: &[u8], track: &[u8]) -> Self {
+    pub fn new_moqt(action: MoqtAction, namespace: Vec<Vec<u8>>, track: &[u8]) -> Self {
         Self {
             ctx_type: "moqt".to_string(),
             action: action as i32,
-            tns: namespace.to_vec(),
+            tns: namespace,
             tn: track.to_vec(),
             resource: None,
         }
@@ -229,7 +232,7 @@ impl DpopProof {
 
     pub fn create_for_moqt(
         action: MoqtAction,
-        namespace: &[u8],
+        namespace: Vec<Vec<u8>>,
         track: &[u8],
         alg: &str,
         jwk: Jwk,
@@ -301,12 +304,15 @@ impl DpopProof {
 
         let header_json = URL_SAFE_NO_PAD
             .decode(parts[0])
+            .or_else(|_| URL_SAFE.decode(parts[0]))
             .map_err(|e| CatError::InvalidBase64(e.to_string()))?;
         let payload_json = URL_SAFE_NO_PAD
             .decode(parts[1])
+            .or_else(|_| URL_SAFE.decode(parts[1]))
             .map_err(|e| CatError::InvalidBase64(e.to_string()))?;
         let signature = URL_SAFE_NO_PAD
             .decode(parts[2])
+            .or_else(|_| URL_SAFE.decode(parts[2]))
             .map_err(|e| CatError::InvalidBase64(e.to_string()))?;
 
         // Additional size check after decoding
@@ -356,7 +362,7 @@ pub struct JtiCacheStats {
 #[derive(Clone)]
 pub struct DpopValidator {
     settings: CatDpopSettings,
-    used_jtis: Arc<RwLock<LruCache<String, i64>>>,
+    used_jtis: Arc<Mutex<LruCache<String, i64>>>,
     jti_expiry_seconds: i64,
     cache_capacity: usize,
 }
@@ -376,7 +382,7 @@ impl DpopValidator {
         Self {
             jti_expiry_seconds: settings.effective_window() * 2,
             settings,
-            used_jtis: Arc::new(RwLock::new(LruCache::new(nz_cache_size))),
+            used_jtis: Arc::new(Mutex::new(LruCache::new(nz_cache_size))),
             cache_capacity: effective_size,
         }
     }
@@ -387,7 +393,7 @@ impl DpopValidator {
     /// consider increasing the cache size or reducing the validation window
     /// to prevent potential replay attacks due to early eviction.
     pub fn jti_cache_stats(&self) -> JtiCacheStats {
-        let size = self.used_jtis.read().map(|cache| cache.len()).unwrap_or(0);
+        let size = self.used_jtis.lock().map(|cache| cache.len()).unwrap_or(0);
         let under_pressure = size >= (self.cache_capacity * 9 / 10);
         JtiCacheStats {
             size,
@@ -396,8 +402,8 @@ impl DpopValidator {
         }
     }
 
-    /// Validate DPoP proof claims (internal helper, does not verify signature).
-    fn validate_claims(
+    /// Validate DPoP proof claims without JTI insertion (pre-signature-verification step).
+    fn validate_claims_pre_sig(
         &self,
         proof: &DpopProof,
         expected_action: MoqtAction,
@@ -433,7 +439,6 @@ impl DpopValidator {
         if let Some(expected_ath) = access_token_hash {
             match &proof.payload.ath {
                 Some(ath) => {
-                    // Use constant-time comparison for access token hash
                     if !crate::crypto::constant_time_eq(ath.as_bytes(), expected_ath.as_bytes()) {
                         return Err(CatError::DpopValidationFailed(
                             "Access token hash mismatch".to_string(),
@@ -448,14 +453,33 @@ impl DpopValidator {
             }
         }
 
+        // Check for replay (read-only) without inserting yet
         if self.settings.should_honor_jti()
             && let Some(ref jti) = proof.payload.jti
         {
+            let composite_key = format!("{}:{}", hex::encode(expected_thumbprint), jti);
+            let jtis = self
+                .used_jtis
+                .lock()
+                .map_err(|_| CatError::CryptoError("Lock poisoned".to_string()))?;
+            if jtis.contains(&composite_key) {
+                return Err(CatError::ReplayAttackDetected);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn insert_jti(&self, proof: &DpopProof, thumbprint: &[u8]) -> Result<(), CatError> {
+        if self.settings.should_honor_jti()
+            && let Some(ref jti) = proof.payload.jti
+        {
+            let composite_key = format!("{}:{}", hex::encode(thumbprint), jti);
             let mut jtis = self
                 .used_jtis
-                .write()
+                .lock()
                 .map_err(|_| CatError::CryptoError("Lock poisoned".to_string()))?;
-            if jtis.contains(jti) {
+            if jtis.contains(&composite_key) {
                 return Err(CatError::ReplayAttackDetected);
             }
             if jtis.len() >= self.cache_capacity {
@@ -464,48 +488,99 @@ impl DpopValidator {
                         .to_string(),
                 ));
             }
-            jtis.put(jti.clone(), proof.payload.iat);
+            jtis.put(composite_key, proof.payload.iat);
+        }
+        Ok(())
+    }
+
+    /// Derive a verifier from the proof's embedded JWK and verify the signature.
+    fn verify_with_embedded_key(&self, proof: &DpopProof) -> Result<(), CatError> {
+        let signing_input = proof.signing_input()?;
+
+        match proof.header.alg.as_str() {
+            "ES256" => {
+                let verifying_key = proof.header.jwk.to_verifying_key()?;
+                let alg = Es256Algorithm::new_verifier(verifying_key);
+                alg.verify(&signing_input, &proof.signature)?;
+            }
+            "PS256" => {
+                let rsa_pub = proof.header.jwk.to_rsa_public_key()?;
+                let alg = Ps256Algorithm::new_verifier(rsa_pub)?;
+                alg.verify(&signing_input, &proof.signature)?;
+            }
+            other => {
+                return Err(CatError::DpopAlgorithmNotSupported(other.to_string()));
+            }
         }
 
         Ok(())
     }
 
-    /// Validate DPoP proof with full signature verification.
+    /// Validate DPoP proof using the embedded JWK for signature verification.
     ///
-    /// Verifies both the claims and the cryptographic signature.
-    pub fn validate_with_algorithm(
+    /// This is the recommended validation method. It derives the verification key
+    /// from the JWK embedded in the proof header, verifies the thumbprint matches
+    /// the expected value, and only inserts the JTI into the replay cache after
+    /// successful signature verification.
+    pub fn validate(
         &self,
         proof: &DpopProof,
         expected_action: MoqtAction,
         expected_thumbprint: &[u8],
-        algorithm: &dyn CryptographicAlgorithm,
     ) -> Result<(), CatError> {
-        self.validate_claims(proof, expected_action, expected_thumbprint, None)?;
+        // 1. Validate claims (without JTI insertion)
+        self.validate_claims_pre_sig(proof, expected_action, expected_thumbprint, None)?;
 
-        let signing_input = proof.signing_input()?;
-        algorithm.verify(&signing_input, &proof.signature)?;
+        // 2. Verify the algorithm is supported
+        if !proof.header.is_supported_algorithm() {
+            return Err(CatError::DpopAlgorithmNotSupported(
+                proof.header.alg.clone(),
+            ));
+        }
+
+        // 3. Verify embedded JWK thumbprint matches expected
+        let computed_thumbprint = proof.header.jwk.thumbprint()?;
+        if !crate::crypto::constant_time_eq(&computed_thumbprint, expected_thumbprint) {
+            return Err(CatError::DpopKeyMismatch);
+        }
+
+        // 4. Verify signature using the embedded JWK
+        self.verify_with_embedded_key(proof)?;
+
+        // 5. Only insert JTI after successful verification
+        self.insert_jti(proof, expected_thumbprint)?;
 
         Ok(())
     }
 
-    /// Validate DPoP proof with full signature verification and access token hash.
-    pub fn validate_with_algorithm_and_ath(
+    /// Validate DPoP proof using the embedded JWK with access token hash verification.
+    pub fn validate_with_ath(
         &self,
         proof: &DpopProof,
         expected_action: MoqtAction,
         expected_thumbprint: &[u8],
-        algorithm: &dyn CryptographicAlgorithm,
         access_token_hash: Option<&str>,
     ) -> Result<(), CatError> {
-        self.validate_claims(
+        self.validate_claims_pre_sig(
             proof,
             expected_action,
             expected_thumbprint,
             access_token_hash,
         )?;
 
-        let signing_input = proof.signing_input()?;
-        algorithm.verify(&signing_input, &proof.signature)?;
+        if !proof.header.is_supported_algorithm() {
+            return Err(CatError::DpopAlgorithmNotSupported(
+                proof.header.alg.clone(),
+            ));
+        }
+
+        let computed_thumbprint = proof.header.jwk.thumbprint()?;
+        if !crate::crypto::constant_time_eq(&computed_thumbprint, expected_thumbprint) {
+            return Err(CatError::DpopKeyMismatch);
+        }
+
+        self.verify_with_embedded_key(proof)?;
+        self.insert_jti(proof, expected_thumbprint)?;
 
         Ok(())
     }
@@ -516,11 +591,10 @@ impl DpopValidator {
             .unwrap_or(Duration::ZERO)
             .as_secs() as i64;
 
-        if let Ok(mut jtis) = self.used_jtis.write() {
-            // LruCache doesn't have retain, so we collect expired keys first
+        if let Ok(mut jtis) = self.used_jtis.lock() {
             let expired: Vec<String> = jtis
                 .iter()
-                .filter(|(_, iat)| now - **iat >= self.jti_expiry_seconds)
+                .filter(|(_, iat): &(&String, &i64)| now - **iat >= self.jti_expiry_seconds)
                 .map(|(k, _)| k.clone())
                 .collect();
             for key in expired {
@@ -580,8 +654,13 @@ mod tests {
         let alg = Es256Algorithm::new_with_key_pair().unwrap();
         let jwk = Jwk::from_es256_verifying_key(alg.verifying_key()).unwrap();
 
-        let mut proof =
-            DpopProof::create_for_moqt(MoqtAction::Subscribe, b"namespace", b"track", "ES256", jwk);
+        let mut proof = DpopProof::create_for_moqt(
+            MoqtAction::Subscribe,
+            vec![b"namespace".to_vec()],
+            b"track",
+            "ES256",
+            jwk,
+        );
 
         proof.sign(&alg).unwrap();
         assert!(!proof.signature.is_empty());
@@ -595,23 +674,28 @@ mod tests {
 
     #[cfg(feature = "moqt")]
     #[test]
-    fn test_dpop_validation() {
+    fn test_dpop_validation_with_embedded_key() {
         let alg = Es256Algorithm::new_with_key_pair().unwrap();
         let jwk = Jwk::from_es256_verifying_key(alg.verifying_key()).unwrap();
         let thumbprint = jwk.thumbprint().unwrap();
 
-        let mut proof =
-            DpopProof::create_for_moqt(MoqtAction::Subscribe, b"namespace", b"track", "ES256", jwk)
-                .with_jti(generate_jti());
+        let mut proof = DpopProof::create_for_moqt(
+            MoqtAction::Subscribe,
+            vec![b"namespace".to_vec()],
+            b"track",
+            "ES256",
+            jwk,
+        )
+        .with_jti(generate_jti());
 
         proof.sign(&alg).unwrap();
 
         let settings = CatDpopSettings::new().with_window(300);
         let validator = DpopValidator::new(settings);
 
-        // Use validate_with_algorithm for full validation including signature verification
+        // Use new validate() which derives the key from the embedded JWK
         validator
-            .validate_with_algorithm(&proof, MoqtAction::Subscribe, &thumbprint, &alg)
+            .validate(&proof, MoqtAction::Subscribe, &thumbprint)
             .unwrap();
     }
 
@@ -632,8 +716,11 @@ mod tests {
     #[cfg(feature = "moqt")]
     #[test]
     fn test_authorization_context() {
-        let actx =
-            AuthorizationContext::new_moqt(MoqtAction::Publish, b"my-namespace", b"my-track");
+        let actx = AuthorizationContext::new_moqt(
+            MoqtAction::Publish,
+            vec![b"my-namespace".to_vec()],
+            b"my-track",
+        );
 
         assert_eq!(actx.ctx_type, "moqt");
         assert_eq!(actx.action, MoqtAction::Publish as i32);

@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2022 Quicr
 // SPDX-License-Identifier: BSD-2-Clause
 
+#![cfg(feature = "moqt")]
+
 use cat_token::moqt::{MoqtAuthRequest, MoqtScopeBuilder, MoqtValidator, roles};
 use cat_token::*;
 use chrono::{Duration, Utc};
@@ -435,7 +437,7 @@ fn test_dpop_validator_concurrent_jti() {
                 let jti = format!("jti-{}-{}", i, j);
                 let mut proof = DpopProof::create_for_moqt(
                     MoqtAction::Publish,
-                    b"namespace",
+                    vec![b"namespace".to_vec()],
                     b"track",
                     "ES256",
                     jwk_clone.clone(),
@@ -443,21 +445,11 @@ fn test_dpop_validator_concurrent_jti() {
                 .with_jti(jti.clone());
                 proof.sign(alg_clone.as_ref()).unwrap();
 
-                let result = validator.validate_with_algorithm(
-                    &proof,
-                    MoqtAction::Publish,
-                    &thumbprint,
-                    alg_clone.as_ref(),
-                );
+                let result = validator.validate(&proof, MoqtAction::Publish, &thumbprint);
                 assert!(result.is_ok(), "First use of JTI {} should succeed", jti);
 
                 // Second use should fail (replay)
-                let result = validator.validate_with_algorithm(
-                    &proof,
-                    MoqtAction::Publish,
-                    &thumbprint,
-                    alg_clone.as_ref(),
-                );
+                let result = validator.validate(&proof, MoqtAction::Publish, &thumbprint);
                 assert!(
                     matches!(result, Err(CatError::ReplayAttackDetected)),
                     "Replay of JTI {} should fail",
@@ -491,7 +483,7 @@ fn test_jti_cache_stats() {
         let jti = format!("jti-stats-{}", i);
         let mut proof = DpopProof::create_for_moqt(
             MoqtAction::Publish,
-            b"namespace",
+            vec![b"namespace".to_vec()],
             b"track",
             "ES256",
             jwk.clone(),
@@ -499,8 +491,7 @@ fn test_jti_cache_stats() {
         .with_jti(jti);
         proof.sign(&alg).unwrap();
 
-        let result =
-            validator.validate_with_algorithm(&proof, MoqtAction::Publish, &thumbprint, &alg);
+        let result = validator.validate(&proof, MoqtAction::Publish, &thumbprint);
         assert!(result.is_ok(), "Validation should succeed for unique JTI");
     }
 

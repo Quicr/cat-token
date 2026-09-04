@@ -45,9 +45,25 @@ fn unwrap_crs_tag(value: Value) -> Result<Value, CatError> {
     }
 }
 
-fn validate_cbor_map_ordering(map: &[(Value, Value)]) -> Result<(), CatError> {
+fn validate_cbor_map_ordering_limited(
+    map: &[(Value, Value)],
+    max_depth: usize,
+) -> Result<(), CatError> {
+    validate_cbor_map_ordering_with_depth(map, 0, max_depth)
+}
+
+fn validate_cbor_map_ordering_with_depth(
+    map: &[(Value, Value)],
+    depth: usize,
+    max_depth: usize,
+) -> Result<(), CatError> {
+    if depth > max_depth {
+        return Err(CatError::InvalidCbor(format!(
+            "CBOR nesting depth exceeds limit of {max_depth}"
+        )));
+    }
     let mut prev_key: Option<i64> = None;
-    for (key, _) in map {
+    for (key, value) in map {
         if let Value::Integer(i) = key {
             let k: i64 = (*i).try_into().unwrap_or(i64::MAX);
             if let Some(prev) = prev_key {
@@ -62,6 +78,34 @@ fn validate_cbor_map_ordering(map: &[(Value, Value)]) -> Result<(), CatError> {
             }
             prev_key = Some(k);
         }
+        validate_nested_maps_with_depth(value, depth + 1, max_depth)?;
+    }
+    Ok(())
+}
+
+fn validate_nested_maps_with_depth(
+    value: &Value,
+    depth: usize,
+    max_depth: usize,
+) -> Result<(), CatError> {
+    if depth > max_depth {
+        return Err(CatError::InvalidCbor(format!(
+            "CBOR nesting depth exceeds limit of {max_depth}"
+        )));
+    }
+    match value {
+        Value::Map(nested_map) => {
+            validate_cbor_map_ordering_with_depth(nested_map, depth, max_depth)?;
+        }
+        Value::Array(arr) => {
+            for item in arr {
+                validate_nested_maps_with_depth(item, depth + 1, max_depth)?;
+            }
+        }
+        Value::Tag(_, inner) => {
+            validate_nested_maps_with_depth(inner, depth + 1, max_depth)?;
+        }
+        _ => {}
     }
     Ok(())
 }
@@ -87,6 +131,70 @@ fn reject_unexpected_tag(value: &Value, claim_name: &str) -> Result<(), CatError
         )));
     }
     Ok(())
+}
+
+fn decode_text_map(value: Value, context: &str) -> Result<Vec<(String, String)>, CatError> {
+    if let Value::Map(pmap) = value {
+        let mut p = Vec::new();
+        for (pk, pv) in pmap {
+            match (pk, pv) {
+                (Value::Text(k), Value::Text(v)) => {
+                    p.push((k, v));
+                }
+                _ => {
+                    return Err(CatError::InvalidClaimValue(format!(
+                        "{context} must be text key-value pairs"
+                    )));
+                }
+            }
+        }
+        Ok(p)
+    } else {
+        Err(CatError::InvalidClaimValue(format!(
+            "{context} must be a map"
+        )))
+    }
+}
+
+fn sort_integer_keyed_map(map: &mut [(Value, Value)]) {
+    map.sort_by(|(a, _), (b, _)| {
+        let a_key = match a {
+            Value::Integer(i) => (*i).try_into().unwrap_or(i64::MAX),
+            _ => i64::MAX,
+        };
+        let b_key = match b {
+            Value::Integer(i) => (*i).try_into().unwrap_or(i64::MAX),
+            _ => i64::MAX,
+        };
+        a_key.cmp(&b_key)
+    });
+}
+
+fn encode_composite_claim(composite: &crate::claims::CompositeClaim) -> Result<Value, CatError> {
+    let mut claim_sets = Vec::new();
+    for cs in &composite.claims {
+        match cs {
+            crate::claims::ClaimSet::Token(token) => {
+                let cwt = Cwt::new(0, (**token).clone());
+                let encoded = cwt.encode_payload()?;
+                let value: Value = ciborium::de::from_reader(encoded.as_slice())
+                    .map_err(|e| CatError::InvalidCbor(e.to_string()))?;
+                claim_sets.push(value);
+            }
+            crate::claims::ClaimSet::Composite(nested) => {
+                let nested_claim_id = match nested.op {
+                    crate::claims::CompositeOperator::Or => CLAIM_OR,
+                    crate::claims::CompositeOperator::Nor => CLAIM_NOR,
+                    crate::claims::CompositeOperator::And => CLAIM_AND,
+                };
+                let nested_value = encode_composite_claim(nested)?;
+                let wrapper =
+                    Value::Map(vec![(Value::Integer(nested_claim_id.into()), nested_value)]);
+                claim_sets.push(wrapper);
+            }
+        }
+    }
+    Ok(Value::Array(claim_sets))
 }
 
 fn encode_number_shortest(f: f64) -> Value {
@@ -376,14 +484,16 @@ impl Cwt {
         }
 
         if let Some(ref catu) = self.payload.cat.catu {
-            let uri_map: Vec<(Value, Value)> = catu
+            let mut uri_map: Vec<(Value, Value)> = catu
                 .iter()
                 .map(|rule| {
-                    let match_map: Vec<(Value, Value)> =
+                    let mut match_map: Vec<(Value, Value)> =
                         rule.matches.iter().map(encode_match_value).collect();
+                    sort_integer_keyed_map(&mut match_map);
                     (Value::Integer(rule.component.into()), Value::Map(match_map))
                 })
                 .collect();
+            sort_integer_keyed_map(&mut uri_map);
             claims_map.insert(CLAIM_CATU, Value::Map(uri_map));
         }
 
@@ -401,8 +511,9 @@ impl Cwt {
             let header_map: Vec<(Value, Value)> = cath
                 .iter()
                 .map(|rule| {
-                    let match_map: Vec<(Value, Value)> =
+                    let mut match_map: Vec<(Value, Value)> =
                         rule.matches.iter().map(encode_match_value).collect();
+                    sort_integer_keyed_map(&mut match_map);
                     (Value::Text(rule.name.clone()), Value::Map(match_map))
                 })
                 .collect();
@@ -484,14 +595,14 @@ impl Cwt {
         // DPoP claims - cnf is a map with jkt (key 3) containing the JWK thumbprint
         if let Some(ref cnf) = self.payload.dpop.cnf {
             let mut cnf_map = Vec::new();
+            if let Some(ref ckt) = cnf.ckt {
+                cnf_map.push((Value::Integer(CNF_CKT.into()), Value::Bytes(ckt.clone())));
+            }
             if !cnf.jkt.is_empty() {
                 cnf_map.push((
                     Value::Integer(CNF_JKT.into()),
                     Value::Bytes(cnf.jkt.clone()),
                 ));
-            }
-            if let Some(ref ckt) = cnf.ckt {
-                cnf_map.push((Value::Integer(CNF_CKT.into()), Value::Bytes(ckt.clone())));
             }
             if !cnf_map.is_empty() {
                 claims_map.insert(CLAIM_CNF, Value::Map(cnf_map));
@@ -528,7 +639,9 @@ impl Cwt {
 
         // Request claims
         if let Some(ref catif) = self.payload.request.catif {
-            let entries: Vec<(Value, Value)> = catif
+            let mut sorted_catif = catif.clone();
+            sorted_catif.sort_by_key(|(k, _)| *k);
+            let entries: Vec<(Value, Value)> = sorted_catif
                 .iter()
                 .map(|(claim_key, action)| {
                     let mut arr = vec![Value::Integer(action.status.into())];
@@ -569,19 +682,41 @@ impl Cwt {
                     Value::Integer(deadline.into()),
                 ));
             }
-            if let Some(ref name) = catr.name {
-                renewal_map.push((Value::Integer(CATR_NAME.into()), Value::Text(name.clone())));
+            if let Some(ref name) = catr.cookie_name {
+                renewal_map.push((
+                    Value::Integer(CATR_COOKIE_NAME.into()),
+                    Value::Text(name.clone()),
+                ));
             }
-            if let Some(ref params) = catr.params {
+            if let Some(ref name) = catr.header_name {
+                renewal_map.push((
+                    Value::Integer(CATR_HEADER_NAME.into()),
+                    Value::Text(name.clone()),
+                ));
+            }
+            if let Some(ref params) = catr.cookie_params {
                 let param_map: Vec<(Value, Value)> = params
                     .iter()
                     .map(|(k, v)| (Value::Text(k.clone()), Value::Text(v.clone())))
                     .collect();
-                renewal_map.push((Value::Integer(CATR_PARAMS.into()), Value::Map(param_map)));
-            }
-            if let Some(code) = catr.code {
                 renewal_map.push((
-                    Value::Integer(CATR_CODE.into()),
+                    Value::Integer(CATR_ADDITIONAL_COOKIE_PARAMS.into()),
+                    Value::Map(param_map),
+                ));
+            }
+            if let Some(ref params) = catr.header_params {
+                let param_map: Vec<(Value, Value)> = params
+                    .iter()
+                    .map(|(k, v)| (Value::Text(k.clone()), Value::Text(v.clone())))
+                    .collect();
+                renewal_map.push((
+                    Value::Integer(CATR_ADDITIONAL_HEADER_PARAMS.into()),
+                    Value::Map(param_map),
+                ));
+            }
+            if let Some(code) = catr.status_code {
+                renewal_map.push((
+                    Value::Integer(CATR_STATUS_CODE.into()),
                     Value::Integer(code.into()),
                 ));
             }
@@ -627,6 +762,16 @@ impl Cwt {
         if let Some(moqt_reval) = self.payload.moqt.moqt_reval {
             validate_float(moqt_reval, "moqt_reval")?;
             claims_map.insert(CLAIM_MOQT_REVAL, encode_number_shortest(moqt_reval));
+        }
+
+        if let Some(ref or_claim) = self.payload.composite.or_claim {
+            claims_map.insert(CLAIM_OR, encode_composite_claim(or_claim)?);
+        }
+        if let Some(ref nor_claim) = self.payload.composite.nor_claim {
+            claims_map.insert(CLAIM_NOR, encode_composite_claim(nor_claim)?);
+        }
+        if let Some(ref and_claim) = self.payload.composite.and_claim {
+            claims_map.insert(CLAIM_AND, encode_composite_claim(and_claim)?);
         }
 
         for (key, value) in &self.payload.custom {
@@ -717,41 +862,32 @@ fn decode_namespace_match(value: &Value) -> Result<crate::claims::NamespaceMatch
     }
 }
 
-/// Default maximum CBOR payload size (1MB)
-pub const DEFAULT_MAX_CBOR_PAYLOAD_SIZE: usize = 1024 * 1024;
-
-/// Default maximum number of MOQT scopes allowed in a token
-pub const DEFAULT_MAX_MOQT_SCOPES: usize = 1000;
-
-/// Default maximum number of custom claims allowed in a token
-pub const DEFAULT_MAX_CUSTOM_CLAIMS: usize = 100;
-
-/// Default maximum length for individual string claims (8KB)
-pub const DEFAULT_MAX_STRING_CLAIM_LENGTH: usize = 8 * 1024;
-
-/// Default maximum number of namespace matches per scope
-pub const DEFAULT_MAX_NAMESPACE_MATCHES_PER_SCOPE: usize = 100;
-
-/// Default maximum number of URI patterns allowed
-pub const DEFAULT_MAX_URI_PATTERNS: usize = 1000;
+pub(crate) const DEFAULT_MAX_CBOR_PAYLOAD_SIZE: usize = 1024 * 1024;
+pub(crate) const DEFAULT_MAX_MOQT_SCOPES: usize = 1000;
+pub(crate) const DEFAULT_MAX_CUSTOM_CLAIMS: usize = 100;
+pub(crate) const DEFAULT_MAX_STRING_CLAIM_LENGTH: usize = 8 * 1024;
+pub(crate) const DEFAULT_MAX_NAMESPACE_MATCHES_PER_SCOPE: usize = 100;
+pub(crate) const DEFAULT_MAX_URI_PATTERNS: usize = 1000;
+pub(crate) const DEFAULT_MAX_NESTING_DEPTH: usize = 8;
+pub(crate) const DEFAULT_MAX_TOTAL_ITEMS: usize = 10_000;
+pub(crate) const DEFAULT_MAX_TOTAL_STRING_BYTES: usize = 512 * 1024;
+pub(crate) const DEFAULT_MAX_REGEX_COUNT: usize = 50;
 
 /// Configuration for CWT validation limits.
 ///
 /// All limits have sensible defaults but can be customized for specific use cases.
 #[derive(Debug, Clone)]
 pub struct CwtLimits {
-    /// Maximum CBOR payload size in bytes
     pub max_cbor_payload_size: usize,
-    /// Maximum number of MOQT scopes per token
     pub max_moqt_scopes: usize,
-    /// Maximum number of custom claims per token
     pub max_custom_claims: usize,
-    /// Maximum length for string claims in bytes
     pub max_string_claim_length: usize,
-    /// Maximum namespace matches per scope
     pub max_namespace_matches_per_scope: usize,
-    /// Maximum URI patterns
     pub max_uri_patterns: usize,
+    pub max_nesting_depth: usize,
+    pub max_total_items: usize,
+    pub max_total_string_bytes: usize,
+    pub max_regex_count: usize,
 }
 
 impl Default for CwtLimits {
@@ -763,6 +899,10 @@ impl Default for CwtLimits {
             max_string_claim_length: DEFAULT_MAX_STRING_CLAIM_LENGTH,
             max_namespace_matches_per_scope: DEFAULT_MAX_NAMESPACE_MATCHES_PER_SCOPE,
             max_uri_patterns: DEFAULT_MAX_URI_PATTERNS,
+            max_nesting_depth: DEFAULT_MAX_NESTING_DEPTH,
+            max_total_items: DEFAULT_MAX_TOTAL_ITEMS,
+            max_total_string_bytes: DEFAULT_MAX_TOTAL_STRING_BYTES,
+            max_regex_count: DEFAULT_MAX_REGEX_COUNT,
         }
     }
 }
@@ -791,9 +931,28 @@ impl CwtLimits {
         self.max_string_claim_length = length;
         self
     }
+
+    pub fn with_max_nesting_depth(mut self, depth: usize) -> Self {
+        self.max_nesting_depth = depth;
+        self
+    }
+
+    pub fn with_max_total_items(mut self, count: usize) -> Self {
+        self.max_total_items = count;
+        self
+    }
+
+    pub fn with_max_total_string_bytes(mut self, bytes: usize) -> Self {
+        self.max_total_string_bytes = bytes;
+        self
+    }
+
+    pub fn with_max_regex_count(mut self, count: usize) -> Self {
+        self.max_regex_count = count;
+        self
+    }
 }
 
-/// Validate string length to prevent memory exhaustion
 fn validate_string_length_with_limit(
     s: &str,
     claim_name: &str,
@@ -810,9 +969,46 @@ fn validate_string_length_with_limit(
     Ok(())
 }
 
-/// Validate string length using default limit
-fn validate_string_length(s: &str, claim_name: &str) -> Result<(), CatError> {
-    validate_string_length_with_limit(s, claim_name, DEFAULT_MAX_STRING_CLAIM_LENGTH)
+#[derive(Default)]
+struct DecodeCounters {
+    total_items: usize,
+    total_string_bytes: usize,
+    regex_count: usize,
+}
+
+impl DecodeCounters {
+    fn count_item(&mut self, limits: &CwtLimits) -> Result<(), CatError> {
+        self.total_items += 1;
+        if self.total_items > limits.max_total_items {
+            return Err(CatError::InvalidCbor(format!(
+                "Too many CBOR items: exceeds limit of {}",
+                limits.max_total_items
+            )));
+        }
+        Ok(())
+    }
+
+    fn count_string(&mut self, len: usize, limits: &CwtLimits) -> Result<(), CatError> {
+        self.total_string_bytes += len;
+        if self.total_string_bytes > limits.max_total_string_bytes {
+            return Err(CatError::InvalidCbor(format!(
+                "Total string bytes exceeds limit of {}",
+                limits.max_total_string_bytes
+            )));
+        }
+        Ok(())
+    }
+
+    fn count_regex(&mut self, limits: &CwtLimits) -> Result<(), CatError> {
+        self.regex_count += 1;
+        if self.regex_count > limits.max_regex_count {
+            return Err(CatError::InvalidCbor(format!(
+                "Too many regex patterns: exceeds limit of {}",
+                limits.max_regex_count
+            )));
+        }
+        Ok(())
+    }
 }
 
 impl Cwt {
@@ -835,15 +1031,24 @@ impl Cwt {
             )));
         }
 
-        let value: Value = ciborium::de::from_reader(cbor_data)
+        let mut cursor = std::io::Cursor::new(cbor_data);
+        let value: Value = ciborium::de::from_reader(&mut cursor)
             .map_err(|e| CatError::InvalidCbor(e.to_string()))?;
+        if (cursor.position() as usize) < cbor_data.len() {
+            return Err(CatError::InvalidCbor(format!(
+                "Trailing bytes after CBOR payload: {} unconsumed bytes",
+                cbor_data.len() - cursor.position() as usize
+            )));
+        }
 
         let claims_map = match value {
             Value::Map(map) => map,
             _ => return Err(CatError::InvalidTokenFormat),
         };
 
-        validate_cbor_map_ordering(&claims_map)?;
+        validate_cbor_map_ordering_limited(&claims_map, limits.max_nesting_depth)?;
+
+        let mut counters = DecodeCounters::default();
 
         let mut core = CoreClaims {
             iss: None,
@@ -891,9 +1096,12 @@ impl Cwt {
             moqt_reval: None,
         };
 
+        let mut composite_claims = crate::claims::CompositeClaims::default();
         let mut custom = HashMap::new();
 
         for (key, value) in claims_map {
+            counters.count_item(limits)?;
+
             let claim_id = match key {
                 Value::Integer(i) => i.try_into().map_err(|_| CatError::InvalidTokenFormat)?,
                 _ => continue,
@@ -903,8 +1111,17 @@ impl Cwt {
                 CLAIM_ISS => {
                     reject_unexpected_tag(&value, "iss")?;
                     if let Value::Text(s) = value {
-                        validate_string_length(&s, "issuer")?;
+                        validate_string_length_with_limit(
+                            &s,
+                            "issuer",
+                            limits.max_string_claim_length,
+                        )?;
+                        counters.count_string(s.len(), limits)?;
                         core.iss = Some(s);
+                    } else {
+                        return Err(CatError::InvalidClaimValue(
+                            "iss must be a text string".to_string(),
+                        ));
                     }
                 }
                 CLAIM_AUD => {
@@ -912,12 +1129,26 @@ impl Cwt {
                     if let Value::Array(arr) = value {
                         let mut audiences = Vec::new();
                         for item in arr {
+                            counters.count_item(limits)?;
                             if let Value::Text(s) = item {
-                                validate_string_length(&s, "audience")?;
+                                validate_string_length_with_limit(
+                                    &s,
+                                    "audience",
+                                    limits.max_string_claim_length,
+                                )?;
+                                counters.count_string(s.len(), limits)?;
                                 audiences.push(s);
+                            } else {
+                                return Err(CatError::InvalidClaimValue(
+                                    "aud array items must be text strings".to_string(),
+                                ));
                             }
                         }
                         core.aud = Some(audiences);
+                    } else {
+                        return Err(CatError::InvalidClaimValue(
+                            "aud must be an array".to_string(),
+                        ));
                     }
                 }
                 CLAIM_EXP => {
@@ -931,7 +1162,11 @@ impl Cwt {
                             validate_float(f, "exp")?;
                             core.exp = Some(f as i64);
                         }
-                        _ => {}
+                        _ => {
+                            return Err(CatError::InvalidClaimValue(
+                                "exp must be an integer or float".to_string(),
+                            ));
+                        }
                     }
                 }
                 CLAIM_NBF => {
@@ -945,7 +1180,11 @@ impl Cwt {
                             validate_float(f, "nbf")?;
                             core.nbf = Some(f as i64);
                         }
-                        _ => {}
+                        _ => {
+                            return Err(CatError::InvalidClaimValue(
+                                "nbf must be an integer or float".to_string(),
+                            ));
+                        }
                     }
                 }
                 CLAIM_CTI => {
@@ -957,7 +1196,11 @@ impl Cwt {
                         Value::Text(s) => {
                             core.cti = Some(s.into_bytes());
                         }
-                        _ => {}
+                        _ => {
+                            return Err(CatError::InvalidClaimValue(
+                                "cti must be bytes or text".to_string(),
+                            ));
+                        }
                     }
                 }
                 CLAIM_CATREPLAY => {
@@ -967,12 +1210,22 @@ impl Cwt {
                             CatError::InvalidClaimValue("Invalid catreplay value".to_string())
                         })?;
                         cat.catreplay = Some(crate::claims::ReplayProtection::try_from(v)?);
+                    } else {
+                        return Err(CatError::InvalidClaimValue(
+                            "catreplay must be an integer".to_string(),
+                        ));
                     }
                 }
                 CLAIM_CATPOR => {
                     reject_unexpected_tag(&value, "catpor")?;
-                    if let Value::Array(arr) = value
-                        && arr.len() >= 2
+                    let arr = match value {
+                        Value::Array(arr) if arr.len() >= 2 => arr,
+                        _ => {
+                            return Err(CatError::InvalidClaimValue(
+                                "catpor must be an array with at least 2 elements".to_string(),
+                            ));
+                        }
+                    };
                     {
                         let probability = match &arr[0] {
                             Value::Float(f) => *f,
@@ -1019,15 +1272,24 @@ impl Cwt {
                         cat.catv = Some(i.try_into().map_err(|_| {
                             CatError::InvalidClaimValue("Invalid catv value".to_string())
                         })?);
+                    } else {
+                        return Err(CatError::InvalidClaimValue(
+                            "catv must be an integer".to_string(),
+                        ));
                     }
                 }
                 CLAIM_CATNIP => {
+                    reject_unexpected_tag(&value, "catnip")?;
                     if let Value::Array(arr) = value {
                         let mut nips = Vec::new();
                         for item in arr {
                             nips.push(decode_network_identifier(&item)?);
                         }
                         cat.catnip = Some(nips);
+                    } else {
+                        return Err(CatError::InvalidClaimValue(
+                            "catnip must be an array".to_string(),
+                        ));
                     }
                 }
                 CLAIM_CATU => {
@@ -1039,19 +1301,35 @@ impl Cwt {
                                 Value::Integer(i) => {
                                     i.try_into().map_err(|_| CatError::InvalidTokenFormat)?
                                 }
-                                _ => continue,
+                                _ => {
+                                    return Err(CatError::InvalidClaimValue(
+                                        "catu map keys must be integers".to_string(),
+                                    ));
+                                }
                             };
                             let match_map = match v {
                                 Value::Map(m) => m,
-                                _ => continue,
+                                _ => {
+                                    return Err(CatError::InvalidClaimValue(
+                                        "catu map values must be maps".to_string(),
+                                    ));
+                                }
                             };
                             let mut matches = Vec::new();
                             for (mk, mv) in &match_map {
-                                matches.push(decode_match_value(mk, mv)?);
+                                let mv_decoded = decode_match_value(mk, mv)?;
+                                if matches!(mv_decoded, MatchValue::Regex(_)) {
+                                    counters.count_regex(limits)?;
+                                }
+                                matches.push(mv_decoded);
                             }
                             rules.push(UriMatchRule { component, matches });
                         }
                         cat.catu = Some(rules);
+                    } else {
+                        return Err(CatError::InvalidClaimValue(
+                            "catu must be a map".to_string(),
+                        ));
                     }
                 }
                 CLAIM_CATM => {
@@ -1067,9 +1345,17 @@ impl Cwt {
                         for item in arr {
                             if let Value::Text(s) = item {
                                 methods.push(s);
+                            } else {
+                                return Err(CatError::InvalidClaimValue(
+                                    "catm array items must be text strings".to_string(),
+                                ));
                             }
                         }
                         cat.catm = Some(methods);
+                    } else {
+                        return Err(CatError::InvalidClaimValue(
+                            "catm must be an array".to_string(),
+                        ));
                     }
                 }
                 CLAIM_CATALPN => {
@@ -1086,10 +1372,18 @@ impl Cwt {
                             match item {
                                 Value::Bytes(b) => alpns.push(b),
                                 Value::Text(s) => alpns.push(s.into_bytes()),
-                                _ => {}
+                                _ => {
+                                    return Err(CatError::InvalidClaimValue(
+                                        "catalpn array items must be bytes or text".to_string(),
+                                    ));
+                                }
                             }
                         }
                         cat.catalpn = Some(alpns);
+                    } else {
+                        return Err(CatError::InvalidClaimValue(
+                            "catalpn must be an array".to_string(),
+                        ));
                     }
                 }
                 CLAIM_CATH => {
@@ -1099,19 +1393,35 @@ impl Cwt {
                         for (k, v) in map {
                             let name = match k {
                                 Value::Text(s) => s,
-                                _ => continue,
+                                _ => {
+                                    return Err(CatError::InvalidClaimValue(
+                                        "cath map keys must be text strings".to_string(),
+                                    ));
+                                }
                             };
                             let match_map = match v {
                                 Value::Map(m) => m,
-                                _ => continue,
+                                _ => {
+                                    return Err(CatError::InvalidClaimValue(
+                                        "cath map values must be maps".to_string(),
+                                    ));
+                                }
                             };
                             let mut matches = Vec::new();
                             for (mk, mv) in &match_map {
-                                matches.push(decode_match_value(mk, mv)?);
+                                let mv_decoded = decode_match_value(mk, mv)?;
+                                if matches!(mv_decoded, MatchValue::Regex(_)) {
+                                    counters.count_regex(limits)?;
+                                }
+                                matches.push(mv_decoded);
                             }
                             rules.push(HeaderMatchRule { name, matches });
                         }
                         cat.cath = Some(rules);
+                    } else {
+                        return Err(CatError::InvalidClaimValue(
+                            "cath must be a map".to_string(),
+                        ));
                     }
                 }
                 CLAIM_CATGEOISO3166 => {
@@ -1121,9 +1431,17 @@ impl Cwt {
                         for item in arr {
                             if let Value::Text(s) = item {
                                 countries.push(s);
+                            } else {
+                                return Err(CatError::InvalidClaimValue(
+                                    "catgeoiso3166 array items must be text strings".to_string(),
+                                ));
                             }
                         }
                         cat.catgeoiso3166 = Some(countries);
+                    } else {
+                        return Err(CatError::InvalidClaimValue(
+                            "catgeoiso3166 must be an array".to_string(),
+                        ));
                     }
                 }
                 CLAIM_CATGEOCOORD => {
@@ -1131,43 +1449,106 @@ impl Cwt {
                     if let Value::Array(zones) = value {
                         let mut coords = Vec::new();
                         for zone in zones {
-                            if let Value::Array(elements) = zone
-                                && elements.len() >= 2
-                            {
+                            if let Value::Array(elements) = zone {
+                                if elements.len() < 2 {
+                                    return Err(CatError::InvalidClaimValue(
+                                        "catgeocoord zone must have at least 2 elements"
+                                            .to_string(),
+                                    ));
+                                }
                                 let lat = match &elements[0] {
                                     Value::Float(f) => *f,
                                     Value::Integer(i) => {
-                                        let v: i64 = (*i).try_into().unwrap_or(0);
+                                        let v: i64 = (*i).try_into().map_err(|_| {
+                                            CatError::InvalidClaimValue(
+                                                "Invalid catgeocoord latitude".to_string(),
+                                            )
+                                        })?;
                                         v as f64
                                     }
-                                    _ => continue,
+                                    _ => {
+                                        return Err(CatError::InvalidClaimValue(
+                                            "catgeocoord latitude must be a number".to_string(),
+                                        ));
+                                    }
                                 };
                                 let lon = match &elements[1] {
                                     Value::Float(f) => *f,
                                     Value::Integer(i) => {
-                                        let v: i64 = (*i).try_into().unwrap_or(0);
+                                        let v: i64 = (*i).try_into().map_err(|_| {
+                                            CatError::InvalidClaimValue(
+                                                "Invalid catgeocoord longitude".to_string(),
+                                            )
+                                        })?;
                                         v as f64
                                     }
-                                    _ => continue,
+                                    _ => {
+                                        return Err(CatError::InvalidClaimValue(
+                                            "catgeocoord longitude must be a number".to_string(),
+                                        ));
+                                    }
                                 };
                                 let radius = if elements.len() > 2 {
-                                    if let Value::Integer(r) = &elements[2] {
-                                        let v: i64 = (*r).try_into().unwrap_or(0);
-                                        Some(v as u32)
-                                    } else {
-                                        None
+                                    match &elements[2] {
+                                        Value::Integer(r) => {
+                                            let v: i64 = (*r).try_into().map_err(|_| {
+                                                CatError::InvalidClaimValue(
+                                                    "Invalid catgeocoord radius".to_string(),
+                                                )
+                                            })?;
+                                            if v < 0 {
+                                                return Err(CatError::InvalidClaimValue(
+                                                    "catgeocoord radius must not be negative"
+                                                        .to_string(),
+                                                ));
+                                            }
+                                            Some(v as u32)
+                                        }
+                                        Value::Float(f) => {
+                                            if *f < 0.0 {
+                                                return Err(CatError::InvalidClaimValue(
+                                                    "catgeocoord radius must not be negative"
+                                                        .to_string(),
+                                                ));
+                                            }
+                                            Some(*f as u32)
+                                        }
+                                        _ => {
+                                            return Err(CatError::InvalidClaimValue(
+                                                "catgeocoord radius must be a number".to_string(),
+                                            ));
+                                        }
                                     }
                                 } else {
                                     None
                                 };
                                 validate_float(lat, "catgeocoord.lat")?;
                                 validate_float(lon, "catgeocoord.lon")?;
+                                if lat.abs() > 90.0 {
+                                    return Err(CatError::InvalidClaimValue(
+                                        "catgeocoord latitude out of range (-90 to 90)".to_string(),
+                                    ));
+                                }
+                                if lon.abs() > 180.0 {
+                                    return Err(CatError::InvalidClaimValue(
+                                        "catgeocoord longitude out of range (-180 to 180)"
+                                            .to_string(),
+                                    ));
+                                }
                                 coords.push(GeoCoordinate { lat, lon, radius });
+                            } else {
+                                return Err(CatError::InvalidClaimValue(
+                                    "catgeocoord zones must be arrays".to_string(),
+                                ));
                             }
                         }
                         if !coords.is_empty() {
                             cat.catgeocoord = Some(coords);
                         }
+                    } else {
+                        return Err(CatError::InvalidClaimValue(
+                            "catgeocoord must be an array".to_string(),
+                        ));
                     }
                 }
                 CLAIM_GEOHASH => {
@@ -1181,65 +1562,93 @@ impl Cwt {
                             for item in arr {
                                 if let Value::Text(s) = item {
                                     hashes.push(s);
+                                } else {
+                                    return Err(CatError::InvalidClaimValue(
+                                        "geohash array items must be text strings".to_string(),
+                                    ));
                                 }
                             }
                             if !hashes.is_empty() {
                                 cat.geohash = Some(hashes);
                             }
                         }
-                        _ => {}
+                        _ => {
+                            return Err(CatError::InvalidClaimValue(
+                                "geohash must be text or an array of text".to_string(),
+                            ));
+                        }
                     }
                 }
                 CLAIM_CATGEOALT => {
                     let value = unwrap_crs_tag(value)?;
-                    if let Value::Array(arr) = value
-                        && arr.len() == 2
-                    {
-                        let altitude = match &arr[0] {
-                            Value::Float(f) => *f,
-                            Value::Integer(i) => {
-                                let v: i64 =
-                                    (*i).try_into().map_err(|_| CatError::InvalidTokenFormat)?;
-                                v as f64
-                            }
-                            _ => {
-                                return Err(CatError::InvalidClaimValue(
-                                    "Invalid catgeoalt altitude".to_string(),
-                                ));
-                            }
-                        };
-                        let deviation = match &arr[1] {
-                            Value::Float(f) => *f,
-                            Value::Integer(i) => {
-                                let v: i64 =
-                                    (*i).try_into().map_err(|_| CatError::InvalidTokenFormat)?;
-                                v as f64
-                            }
-                            _ => {
-                                return Err(CatError::InvalidClaimValue(
-                                    "Invalid catgeoalt deviation".to_string(),
-                                ));
-                            }
-                        };
-                        validate_float(altitude, "catgeoalt.altitude")?;
-                        validate_float(deviation, "catgeoalt.deviation")?;
-                        cat.catgeoalt = Some(crate::claims::GeoAltitude {
-                            altitude,
-                            deviation,
-                        });
+                    match value {
+                        Value::Array(arr) if arr.len() == 2 => {
+                            let altitude = match &arr[0] {
+                                Value::Float(f) => *f,
+                                Value::Integer(i) => {
+                                    let v: i64 = (*i)
+                                        .try_into()
+                                        .map_err(|_| CatError::InvalidTokenFormat)?;
+                                    v as f64
+                                }
+                                _ => {
+                                    return Err(CatError::InvalidClaimValue(
+                                        "Invalid catgeoalt altitude".to_string(),
+                                    ));
+                                }
+                            };
+                            let deviation = match &arr[1] {
+                                Value::Float(f) => *f,
+                                Value::Integer(i) => {
+                                    let v: i64 = (*i)
+                                        .try_into()
+                                        .map_err(|_| CatError::InvalidTokenFormat)?;
+                                    v as f64
+                                }
+                                _ => {
+                                    return Err(CatError::InvalidClaimValue(
+                                        "Invalid catgeoalt deviation".to_string(),
+                                    ));
+                                }
+                            };
+                            validate_float(altitude, "catgeoalt.altitude")?;
+                            validate_float(deviation, "catgeoalt.deviation")?;
+                            cat.catgeoalt = Some(crate::claims::GeoAltitude {
+                                altitude,
+                                deviation,
+                            });
+                        }
+                        _ => {
+                            return Err(CatError::InvalidClaimValue(
+                                "catgeoalt must be an array of [altitude, deviation]".to_string(),
+                            ));
+                        }
                     }
                 }
                 CLAIM_CATTPK => {
                     reject_unexpected_tag(&value, "cattpk")?;
                     if let Value::Bytes(b) = value {
                         cat.cattpk = Some(b);
+                    } else {
+                        return Err(CatError::InvalidClaimValue(
+                            "cattpk must be bytes".to_string(),
+                        ));
                     }
                 }
                 CLAIM_SUB => {
                     reject_unexpected_tag(&value, "sub")?;
                     if let Value::Text(s) = value {
-                        validate_string_length(&s, "subject")?;
+                        validate_string_length_with_limit(
+                            &s,
+                            "subject",
+                            limits.max_string_claim_length,
+                        )?;
+                        counters.count_string(s.len(), limits)?;
                         informational.sub = Some(s);
+                    } else {
+                        return Err(CatError::InvalidClaimValue(
+                            "sub must be a text string".to_string(),
+                        ));
                     }
                 }
                 CLAIM_IAT => {
@@ -1253,7 +1662,11 @@ impl Cwt {
                             validate_float(f, "iat")?;
                             informational.iat = Some(f as i64);
                         }
-                        _ => {}
+                        _ => {
+                            return Err(CatError::InvalidClaimValue(
+                                "iat must be an integer or float".to_string(),
+                            ));
+                        }
                     }
                 }
                 CLAIM_CATIFDATA => {
@@ -1267,13 +1680,21 @@ impl Cwt {
                             for item in arr {
                                 if let Value::Text(s) = item {
                                     items.push(s);
+                                } else {
+                                    return Err(CatError::InvalidClaimValue(
+                                        "catifdata array items must be text strings".to_string(),
+                                    ));
                                 }
                             }
                             if !items.is_empty() {
                                 informational.catifdata = Some(items);
                             }
                         }
-                        _ => {}
+                        _ => {
+                            return Err(CatError::InvalidClaimValue(
+                                "catifdata must be text or an array of text".to_string(),
+                            ));
+                        }
                     }
                 }
                 CLAIM_CNF => {
@@ -1282,92 +1703,158 @@ impl Cwt {
                         let mut jkt = Vec::new();
                         let mut ckt = None;
                         for (k, v) in map {
-                            if let Value::Integer(key_int) = k {
-                                let key_val: i64 = key_int.try_into().unwrap_or(-1);
-                                match key_val {
-                                    CNF_JKT | CNF_JKT_LEGACY => {
-                                        if let Value::Bytes(b) = v {
-                                            jkt = b;
-                                        }
-                                    }
-                                    CNF_CKT => {
-                                        if let Value::Bytes(b) = v {
-                                            ckt = Some(b);
-                                        }
-                                    }
-                                    _ => {}
+                            let key_val: i64 = match k {
+                                Value::Integer(key_int) => key_int.try_into().map_err(|_| {
+                                    CatError::InvalidClaimValue("Invalid cnf map key".to_string())
+                                })?,
+                                _ => {
+                                    return Err(CatError::InvalidClaimValue(
+                                        "cnf map keys must be integers".to_string(),
+                                    ));
                                 }
+                            };
+                            match key_val {
+                                CNF_JKT | CNF_JKT_LEGACY => {
+                                    if let Value::Bytes(b) = v {
+                                        jkt = b;
+                                    } else {
+                                        return Err(CatError::InvalidClaimValue(
+                                            "cnf jkt value must be bytes".to_string(),
+                                        ));
+                                    }
+                                }
+                                CNF_CKT => {
+                                    if let Value::Bytes(b) = v {
+                                        ckt = Some(b);
+                                    } else {
+                                        return Err(CatError::InvalidClaimValue(
+                                            "cnf ckt value must be bytes".to_string(),
+                                        ));
+                                    }
+                                }
+                                _ => {}
                             }
                         }
                         if !jkt.is_empty() || ckt.is_some() {
                             dpop.cnf = Some(ConfirmationClaim { jkt, ckt });
                         }
+                    } else {
+                        return Err(CatError::InvalidClaimValue("cnf must be a map".to_string()));
                     }
                 }
                 CLAIM_CATDPOP => {
+                    reject_unexpected_tag(&value, "catdpop")?;
                     if let Value::Map(map) = value {
                         let mut settings = CatDpopSettings::new();
                         for (k, v) in map {
-                            if let Value::Integer(key_int) = k {
-                                let key_val: i64 = key_int.try_into().unwrap_or(i64::MIN);
-                                match key_val {
-                                    CATDPOP_CRIT => {
-                                        if let Value::Array(arr) = v {
-                                            let mut crit_keys = Vec::new();
-                                            for item in arr {
-                                                if let Value::Integer(i) = item {
-                                                    let val: i64 = i.try_into().unwrap_or(0);
-                                                    crit_keys.push(val);
-                                                }
-                                            }
-                                            settings.crit = Some(crit_keys);
-                                        }
-                                    }
-                                    CATDPOP_WINDOW => {
-                                        if let Value::Integer(window) = v {
-                                            // Reject invalid window values instead of defaulting
-                                            let window_val: i64 =
-                                                window.try_into().map_err(|_| {
+                            let key_val: i64 = match k {
+                                Value::Integer(key_int) => key_int.try_into().map_err(|_| {
+                                    CatError::InvalidClaimValue(
+                                        "Invalid catdpop map key".to_string(),
+                                    )
+                                })?,
+                                _ => {
+                                    return Err(CatError::InvalidClaimValue(
+                                        "catdpop map keys must be integers".to_string(),
+                                    ));
+                                }
+                            };
+                            match key_val {
+                                CATDPOP_CRIT => {
+                                    if let Value::Array(arr) = v {
+                                        let mut crit_keys = Vec::new();
+                                        for item in arr {
+                                            if let Value::Integer(i) = item {
+                                                let val: i64 = i.try_into().map_err(|_| {
                                                     CatError::InvalidClaimValue(
-                                                        "Invalid DPoP window value".to_string(),
+                                                        "Invalid catdpop crit value".to_string(),
                                                     )
                                                 })?;
-                                            if window_val <= 0 {
+                                                crit_keys.push(val);
+                                            } else {
                                                 return Err(CatError::InvalidClaimValue(
-                                                    "DPoP window must be positive".to_string(),
+                                                    "catdpop crit items must be integers"
+                                                        .to_string(),
                                                 ));
                                             }
-                                            settings.window = Some(window_val);
                                         }
+                                        settings.crit = Some(crit_keys);
+                                    } else {
+                                        return Err(CatError::InvalidClaimValue(
+                                            "catdpop crit must be an array".to_string(),
+                                        ));
                                     }
-                                    CATDPOP_HONOR_JTI => {
-                                        if let Value::Integer(jti_val) = v {
-                                            let jti_i64: i64 = jti_val.try_into().unwrap_or(1);
-                                            settings.honor_jti = Some(jti_i64 != 0);
-                                        }
-                                    }
-                                    _ => {}
                                 }
+                                CATDPOP_WINDOW => {
+                                    if let Value::Integer(window) = v {
+                                        let window_val: i64 = window.try_into().map_err(|_| {
+                                            CatError::InvalidClaimValue(
+                                                "Invalid DPoP window value".to_string(),
+                                            )
+                                        })?;
+                                        settings.window = Some(window_val);
+                                    } else {
+                                        return Err(CatError::InvalidClaimValue(
+                                            "catdpop window must be an integer".to_string(),
+                                        ));
+                                    }
+                                }
+                                CATDPOP_HONOR_JTI => {
+                                    if let Value::Integer(jti_val) = v {
+                                        let jti_i64: i64 = jti_val.try_into().map_err(|_| {
+                                            CatError::InvalidClaimValue(
+                                                "Invalid catdpop honor_jti value".to_string(),
+                                            )
+                                        })?;
+                                        settings.honor_jti = Some(jti_i64 != 0);
+                                    } else {
+                                        return Err(CatError::InvalidClaimValue(
+                                            "catdpop honor_jti must be an integer".to_string(),
+                                        ));
+                                    }
+                                }
+                                _ => {}
                             }
                         }
                         dpop.catdpop = Some(settings);
+                    } else {
+                        return Err(CatError::InvalidClaimValue(
+                            "catdpop must be a map".to_string(),
+                        ));
                     }
                 }
                 CLAIM_CATIF => {
+                    reject_unexpected_tag(&value, "catif")?;
                     if let Value::Map(entries) = value {
                         let mut actions = Vec::new();
                         for (k, v) in entries {
                             let claim_key: i64 = match k {
-                                Value::Integer(i) => i.try_into().unwrap_or(0),
-                                _ => continue,
+                                Value::Integer(i) => i.try_into().map_err(|_| {
+                                    CatError::InvalidClaimValue("Invalid catif map key".to_string())
+                                })?,
+                                _ => {
+                                    return Err(CatError::InvalidClaimValue(
+                                        "catif map keys must be integers".to_string(),
+                                    ));
+                                }
                             };
                             if let Value::Array(arr) = v {
                                 if arr.is_empty() {
-                                    continue;
+                                    return Err(CatError::InvalidClaimValue(
+                                        "catif action array must not be empty".to_string(),
+                                    ));
                                 }
                                 let status: u32 = match &arr[0] {
-                                    Value::Integer(i) => (*i).try_into().unwrap_or(0),
-                                    _ => continue,
+                                    Value::Integer(i) => (*i).try_into().map_err(|_| {
+                                        CatError::InvalidClaimValue(
+                                            "Invalid catif status value".to_string(),
+                                        )
+                                    })?,
+                                    _ => {
+                                        return Err(CatError::InvalidClaimValue(
+                                            "catif status must be an integer".to_string(),
+                                        ));
+                                    }
                                 };
                                 let headers = if arr.len() > 1 {
                                     if let Value::Map(hmap) = &arr[1] {
@@ -1376,14 +1863,23 @@ impl Cwt {
                                         } else {
                                             let mut hdrs = Vec::new();
                                             for (hk, hv) in hmap {
-                                                if let (Value::Text(k), Value::Text(v)) = (hk, hv) {
-                                                    hdrs.push((k.clone(), v.clone()));
+                                                match (hk, hv) {
+                                                    (Value::Text(k), Value::Text(v)) => {
+                                                        hdrs.push((k.clone(), v.clone()));
+                                                    }
+                                                    _ => {
+                                                        return Err(CatError::InvalidClaimValue(
+                                                            "catif headers must be text key-value pairs".to_string(),
+                                                        ));
+                                                    }
                                                 }
                                             }
                                             Some(hdrs)
                                         }
                                     } else {
-                                        None
+                                        return Err(CatError::InvalidClaimValue(
+                                            "catif headers must be a map".to_string(),
+                                        ));
                                     }
                                 } else {
                                     None
@@ -1392,7 +1888,9 @@ impl Cwt {
                                     if let Value::Text(s) = &arr[2] {
                                         Some(s.clone())
                                     } else {
-                                        None
+                                        return Err(CatError::InvalidClaimValue(
+                                            "catif kid must be a text string".to_string(),
+                                        ));
                                     }
                                 } else {
                                     None
@@ -1405,63 +1903,125 @@ impl Cwt {
                                         kid,
                                     },
                                 ));
+                            } else {
+                                return Err(CatError::InvalidClaimValue(
+                                    "catif action values must be arrays".to_string(),
+                                ));
                             }
                         }
                         if !actions.is_empty() {
                             request.catif = Some(actions);
                         }
+                    } else {
+                        return Err(CatError::InvalidClaimValue(
+                            "catif must be a map".to_string(),
+                        ));
                     }
                 }
                 CLAIM_CATR => {
+                    reject_unexpected_tag(&value, "catr")?;
                     if let Value::Map(entries) = value {
                         let mut renewal_type = None;
                         let mut expadd = None;
                         let mut deadline = None;
-                        let mut name = None;
-                        let mut params = None;
-                        let mut code = None;
+                        let mut cookie_name = None;
+                        let mut header_name = None;
+                        let mut cookie_params = None;
+                        let mut header_params = None;
+                        let mut status_code = None;
 
                         for (k, v) in entries {
                             let key: i64 = match k {
-                                Value::Integer(i) => i.try_into().unwrap_or(-1),
-                                _ => continue,
+                                Value::Integer(i) => i.try_into().map_err(|_| {
+                                    CatError::InvalidClaimValue("Invalid catr map key".to_string())
+                                })?,
+                                _ => {
+                                    return Err(CatError::InvalidClaimValue(
+                                        "catr map keys must be integers".to_string(),
+                                    ));
+                                }
                             };
                             match key {
                                 CATR_TYPE => {
                                     if let Value::Integer(i) = v {
-                                        let t: u32 = i.try_into().unwrap_or(0);
+                                        let t: u32 = i.try_into().map_err(|_| {
+                                            CatError::InvalidClaimValue(
+                                                "Invalid catr type value".to_string(),
+                                            )
+                                        })?;
                                         renewal_type = CatRenewalType::from_u32(t);
+                                        if renewal_type.is_none() {
+                                            return Err(CatError::InvalidClaimValue(format!(
+                                                "Unknown catr type: {t}"
+                                            )));
+                                        }
+                                    } else {
+                                        return Err(CatError::InvalidClaimValue(
+                                            "catr type must be an integer".to_string(),
+                                        ));
                                     }
                                 }
                                 CATR_EXPADD => {
                                     if let Value::Integer(i) = v {
-                                        expadd = Some(i.try_into().unwrap_or(0i64));
+                                        expadd = Some(i.try_into().map_err(|_| {
+                                            CatError::InvalidClaimValue(
+                                                "Invalid catr expadd value".to_string(),
+                                            )
+                                        })?);
+                                    } else {
+                                        return Err(CatError::InvalidClaimValue(
+                                            "catr expadd must be an integer".to_string(),
+                                        ));
                                     }
                                 }
                                 CATR_DEADLINE => {
                                     if let Value::Integer(i) = v {
-                                        deadline = Some(i.try_into().unwrap_or(0i64));
+                                        deadline = Some(i.try_into().map_err(|_| {
+                                            CatError::InvalidClaimValue(
+                                                "Invalid catr deadline value".to_string(),
+                                            )
+                                        })?);
+                                    } else {
+                                        return Err(CatError::InvalidClaimValue(
+                                            "catr deadline must be an integer".to_string(),
+                                        ));
                                     }
                                 }
-                                CATR_NAME => {
+                                CATR_COOKIE_NAME => {
                                     if let Value::Text(s) = v {
-                                        name = Some(s);
+                                        cookie_name = Some(s);
+                                    } else {
+                                        return Err(CatError::InvalidClaimValue(
+                                            "catr cookie_name must be text".to_string(),
+                                        ));
                                     }
                                 }
-                                CATR_PARAMS => {
-                                    if let Value::Map(pmap) = v {
-                                        let mut p = Vec::new();
-                                        for (pk, pv) in pmap {
-                                            if let (Value::Text(k), Value::Text(v)) = (pk, pv) {
-                                                p.push((k, v));
-                                            }
-                                        }
-                                        params = Some(p);
+                                CATR_HEADER_NAME => {
+                                    if let Value::Text(s) = v {
+                                        header_name = Some(s);
+                                    } else {
+                                        return Err(CatError::InvalidClaimValue(
+                                            "catr header_name must be text".to_string(),
+                                        ));
                                     }
                                 }
-                                CATR_CODE => {
+                                CATR_ADDITIONAL_COOKIE_PARAMS => {
+                                    cookie_params = Some(decode_text_map(v, "catr cookie_params")?);
+                                }
+                                CATR_ADDITIONAL_HEADER_PARAMS => {
+                                    header_params = Some(decode_text_map(v, "catr header_params")?);
+                                }
+                                CATR_STATUS_CODE => {
                                     if let Value::Integer(i) = v {
-                                        code = Some(i.try_into().unwrap_or(0u32));
+                                        status_code = Some(i.try_into().map_err(|_| {
+                                            CatError::InvalidClaimValue(
+                                                "Invalid catr status_code value".to_string(),
+                                            )
+                                        })?);
+                                    } else {
+                                        return Err(CatError::InvalidClaimValue(
+                                            "catr status_code must be an integer".to_string(),
+                                        ));
                                     }
                                 }
                                 _ => {}
@@ -1472,69 +2032,99 @@ impl Cwt {
                                 renewal_type: rt,
                                 expadd,
                                 deadline,
-                                name,
-                                params,
-                                code,
+                                cookie_name,
+                                header_name,
+                                cookie_params,
+                                header_params,
+                                status_code,
                             });
                         }
+                    } else {
+                        return Err(CatError::InvalidClaimValue(
+                            "catr must be a map".to_string(),
+                        ));
                     }
                 }
                 #[cfg(feature = "moqt")]
                 CLAIM_MOQT => {
+                    reject_unexpected_tag(&value, "moqt")?;
                     if let Value::Array(scopes_array) = value {
-                        // Limit scope count to prevent memory exhaustion
-                        if scopes_array.len() > DEFAULT_MAX_MOQT_SCOPES {
+                        if scopes_array.len() > limits.max_moqt_scopes {
                             return Err(CatError::InvalidClaimValue(format!(
                                 "Too many MOQT scopes: {} (max {})",
                                 scopes_array.len(),
-                                DEFAULT_MAX_MOQT_SCOPES
+                                limits.max_moqt_scopes
                             )));
                         }
                         let mut scopes = Vec::new();
                         for scope_value in scopes_array {
                             if let Value::Array(scope_array) = scope_value {
                                 if scope_array.is_empty() {
-                                    continue;
+                                    return Err(CatError::InvalidClaimValue(
+                                        "MOQT scope array must not be empty".to_string(),
+                                    ));
                                 }
 
                                 let mut actions = Vec::new();
-                                if let Value::Array(ref actions_array) = scope_array[0] {
-                                    for action_value in actions_array {
-                                        if let Value::Integer(action_int) = action_value
-                                            && let Ok(action_i32) =
-                                                TryInto::<i32>::try_into(*action_int)
-                                        {
-                                            match MoqtAction::try_from(action_i32) {
-                                                Ok(action) => actions.push(action),
-                                                Err(_) => {
-                                                    return Err(CatError::InvalidClaimValue(
-                                                        format!(
-                                                            "Invalid MOQT action: {}",
-                                                            action_i32
-                                                        ),
-                                                    ));
+                                match &scope_array[0] {
+                                    Value::Array(actions_array) => {
+                                        for action_value in actions_array {
+                                            if let Value::Integer(action_int) = action_value
+                                                && let Ok(action_i32) =
+                                                    TryInto::<i32>::try_into(*action_int)
+                                            {
+                                                match MoqtAction::try_from(action_i32) {
+                                                    Ok(action) => actions.push(action),
+                                                    Err(_) => {
+                                                        return Err(CatError::InvalidClaimValue(
+                                                            format!(
+                                                                "Invalid MOQT action: {}",
+                                                                action_i32
+                                                            ),
+                                                        ));
+                                                    }
                                                 }
+                                            } else {
+                                                return Err(CatError::InvalidClaimValue(
+                                                    "MOQT action values must be integers"
+                                                        .to_string(),
+                                                ));
                                             }
                                         }
+                                    }
+                                    _ => {
+                                        return Err(CatError::InvalidClaimValue(
+                                            "MOQT scope actions must be an array".to_string(),
+                                        ));
                                     }
                                 }
 
                                 let mut namespace_matches = Vec::new();
                                 let mut track_match = None;
 
-                                if scope_array.len() > 1
-                                    && let Value::Array(ref ns_array) = scope_array[1]
-                                {
-                                    // Limit namespace matches per scope
-                                    if ns_array.len() > DEFAULT_MAX_NAMESPACE_MATCHES_PER_SCOPE {
-                                        return Err(CatError::InvalidClaimValue(format!(
-                                            "Too many namespace matches per scope: {} (max {})",
-                                            ns_array.len(),
-                                            DEFAULT_MAX_NAMESPACE_MATCHES_PER_SCOPE
-                                        )));
-                                    }
-                                    for ns_value in ns_array {
-                                        namespace_matches.push(decode_namespace_match(ns_value)?);
+                                if scope_array.len() > 1 {
+                                    match &scope_array[1] {
+                                        Value::Array(ns_array) => {
+                                            if ns_array.len()
+                                                > limits.max_namespace_matches_per_scope
+                                            {
+                                                return Err(CatError::InvalidClaimValue(format!(
+                                                    "Too many namespace matches per scope: {} (max {})",
+                                                    ns_array.len(),
+                                                    limits.max_namespace_matches_per_scope
+                                                )));
+                                            }
+                                            for ns_value in ns_array {
+                                                namespace_matches
+                                                    .push(decode_namespace_match(ns_value)?);
+                                            }
+                                        }
+                                        _ => {
+                                            return Err(CatError::InvalidClaimValue(
+                                                "MOQT namespace matches must be an array"
+                                                    .to_string(),
+                                            ));
+                                        }
                                     }
                                 }
 
@@ -1547,28 +2137,55 @@ impl Cwt {
                                     namespace_matches,
                                     track_match,
                                 });
+                            } else {
+                                return Err(CatError::InvalidClaimValue(
+                                    "MOQT scope values must be arrays".to_string(),
+                                ));
                             }
                         }
                         moqt.moqt = Some(scopes);
+                    } else {
+                        return Err(CatError::InvalidClaimValue(
+                            "moqt must be an array".to_string(),
+                        ));
                     }
                 }
                 #[cfg(feature = "moqt")]
                 CLAIM_MOQT_REVAL => {
-                    if let Value::Float(f) = value {
-                        validate_float(f, "moqt_reval")?;
-                        moqt.moqt_reval = Some(f);
-                    } else if let Value::Integer(i) = value
-                        && let Ok(i_i64) = TryInto::<i64>::try_into(i)
-                    {
-                        moqt.moqt_reval = Some(i_i64 as f64);
+                    reject_unexpected_tag(&value, "moqt_reval")?;
+                    match value {
+                        Value::Float(f) => {
+                            validate_float(f, "moqt_reval")?;
+                            moqt.moqt_reval = Some(f);
+                        }
+                        Value::Integer(i) => {
+                            let i_i64: i64 = i.try_into().map_err(|_| {
+                                CatError::InvalidClaimValue("Invalid moqt_reval value".to_string())
+                            })?;
+                            moqt.moqt_reval = Some(i_i64 as f64);
+                        }
+                        _ => {
+                            return Err(CatError::InvalidClaimValue(
+                                "moqt_reval must be a number".to_string(),
+                            ));
+                        }
+                    }
+                }
+                CLAIM_OR | CLAIM_NOR | CLAIM_AND => {
+                    reject_unexpected_tag(&value, "composite")?;
+                    let composite = decode_composite_claim(claim_id, value, limits, 0)?;
+                    match claim_id {
+                        CLAIM_OR => composite_claims.or_claim = Some(composite),
+                        CLAIM_NOR => composite_claims.nor_claim = Some(composite),
+                        CLAIM_AND => composite_claims.and_claim = Some(composite),
+                        _ => unreachable!(),
                     }
                 }
                 _ => {
-                    // Limit custom claims count to prevent memory exhaustion
-                    if custom.len() >= DEFAULT_MAX_CUSTOM_CLAIMS {
+                    if custom.len() >= limits.max_custom_claims {
                         return Err(CatError::InvalidClaimValue(format!(
                             "Too many custom claims (max {})",
-                            DEFAULT_MAX_CUSTOM_CLAIMS
+                            limits.max_custom_claims
                         )));
                     }
                     custom.insert(claim_id, value);
@@ -1582,10 +2199,84 @@ impl Cwt {
             informational,
             dpop,
             request,
-            composite: crate::claims::CompositeClaims::default(),
+            composite: composite_claims,
             #[cfg(feature = "moqt")]
             moqt,
             custom,
+            was_encrypted: false,
         })
     }
+}
+
+fn decode_composite_claim(
+    claim_id: i64,
+    value: Value,
+    limits: &CwtLimits,
+    depth: usize,
+) -> Result<crate::claims::CompositeClaim, CatError> {
+    if depth >= limits.max_nesting_depth {
+        return Err(CatError::InvalidClaimValue(
+            "Composite claim nesting too deep".to_string(),
+        ));
+    }
+    let op = match claim_id {
+        CLAIM_OR => crate::claims::CompositeOperator::Or,
+        CLAIM_NOR => crate::claims::CompositeOperator::Nor,
+        CLAIM_AND => crate::claims::CompositeOperator::And,
+        _ => {
+            return Err(CatError::InvalidClaimValue(
+                "Unknown composite operator".to_string(),
+            ));
+        }
+    };
+    let arr = match value {
+        Value::Array(a) => a,
+        _ => {
+            return Err(CatError::InvalidClaimValue(
+                "Composite claim must be an array".to_string(),
+            ));
+        }
+    };
+    let mut composite = crate::claims::CompositeClaim::new(op);
+    for item in arr {
+        match item {
+            Value::Map(ref map) => {
+                let has_nested_composite = map.iter().any(|(k, _)| {
+                    if let Value::Integer(i) = k {
+                        let id: i64 = (*i).try_into().unwrap_or(0);
+                        id == CLAIM_OR || id == CLAIM_NOR || id == CLAIM_AND
+                    } else {
+                        false
+                    }
+                });
+                if has_nested_composite && map.len() == 1 {
+                    let (k, v) = map.iter().next().unwrap();
+                    let nested_id: i64 = match k {
+                        Value::Integer(i) => (*i)
+                            .try_into()
+                            .map_err(|_| CatError::InvalidClaimValue("Invalid key".to_string()))?,
+                        _ => {
+                            return Err(CatError::InvalidClaimValue(
+                                "Composite key must be integer".to_string(),
+                            ));
+                        }
+                    };
+                    let nested = decode_composite_claim(nested_id, v.clone(), limits, depth + 1)?;
+                    composite.add_composite(nested);
+                } else {
+                    let mut buf = Vec::new();
+                    ciborium::ser::into_writer(&item, &mut buf)
+                        .map_err(|e| CatError::InvalidCbor(e.to_string()))?;
+                    let token = Cwt::decode_payload_with_limits(&buf, limits)?;
+                    composite.add_token(token);
+                }
+            }
+            _ => {
+                return Err(CatError::InvalidClaimValue(
+                    "Composite claim set must be a map".to_string(),
+                ));
+            }
+        }
+    }
+    Ok(composite)
 }

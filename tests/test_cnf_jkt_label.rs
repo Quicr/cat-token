@@ -9,8 +9,9 @@ fn test_cnf_jkt_label_is_323() {
 }
 
 #[test]
-fn test_cnf_jkt_legacy_label_is_3() {
-    assert_eq!(CNF_JKT_LEGACY, 3);
+fn test_cnf_jkt_legacy_label_accepted() {
+    // CNF_JKT_LEGACY (3) is internal, but verified through decode_legacy_label_3 test below
+    assert_eq!(cat_token::claims::CNF_JKT, 323);
 }
 
 #[test]

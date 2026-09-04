@@ -93,8 +93,21 @@ fn parse_uri(uri: &str) -> UriComponents {
         authority
     };
 
-    // Parse authority: host[:port]
-    if let Some(pos) = authority.rfind(':') {
+    // Parse authority: host[:port], handling IPv6 bracket notation
+    if authority.starts_with('[') {
+        if let Some(bracket_end) = authority.find(']') {
+            components.host = authority[..bracket_end + 1].to_string();
+            let after_bracket = &authority[bracket_end + 1..];
+            if let Some(port_str) = after_bracket.strip_prefix(':')
+                && !port_str.is_empty()
+                && port_str.chars().all(|c| c.is_ascii_digit())
+            {
+                components.port = port_str.to_string();
+            }
+        } else {
+            components.host = authority.to_string();
+        }
+    } else if let Some(pos) = authority.rfind(':') {
         let potential_port = &authority[pos + 1..];
         if potential_port.chars().all(|c| c.is_ascii_digit()) && !potential_port.is_empty() {
             components.host = authority[..pos].to_string();
