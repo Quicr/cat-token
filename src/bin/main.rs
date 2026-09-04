@@ -136,12 +136,10 @@ fn generate_ps256_example() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn verify_token(token_str: &str, alg: &str) -> Result<(), Box<dyn std::error::Error>> {
-    println!("Token verification requires algorithm-specific keys.");
-    println!("This is a placeholder for token verification logic.");
-    println!("Token: {}", token_str);
-    println!("Algorithm: {}", alg);
-    Ok(())
+fn verify_token(_token_str: &str, _alg: &str) -> Result<(), Box<dyn std::error::Error>> {
+    eprintln!("Error: token verification is not yet implemented in this CLI.");
+    eprintln!("Use the cat_token library API (decode_token) directly.");
+    std::process::exit(1);
 }
 
 fn generate_moqt_token(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
@@ -178,7 +176,7 @@ fn generate_moqt_token(args: &[String]) -> Result<(), Box<dyn std::error::Error>
         i += 1;
     }
 
-    let pem = std::fs::read_to_string(key_path)?;
+    let pem = zeroize::Zeroizing::new(std::fs::read_to_string(key_path)?);
     let signing_key = SigningKey::from_pkcs8_pem(&pem)
         .or_else(|_| p256::SecretKey::from_sec1_pem(&pem).map(SigningKey::from))
         .map_err(|e| format!("failed to load private key: {e}"))?;

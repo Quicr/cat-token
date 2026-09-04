@@ -4,7 +4,9 @@
 use crate::{CatError, CatToken, CryptographicAlgorithm, Cwt, CwtHeader, NetworkIdentifier};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, Utc};
-use std::collections::{HashMap, HashSet};
+use lru::LruCache;
+use std::collections::HashSet;
+use std::num::NonZeroUsize;
 use std::sync::Mutex;
 
 const COSE_TAG_SIGN1: u64 = 18;
@@ -243,7 +245,10 @@ pub fn apply_match_value(mv: &crate::claims::MatchValue, input: &str) -> bool {
         MatchValue::Prefix(s) => input.starts_with(s.as_str()),
         MatchValue::Suffix(s) => input.ends_with(s.as_str()),
         MatchValue::Contains(s) => input.contains(s.as_str()),
-        MatchValue::Regex(pattern) => regex::Regex::new(pattern)
+        MatchValue::Regex(pattern) => regex::RegexBuilder::new(pattern)
+            .size_limit(1 << 20) // 1MB NFA size limit
+            .dfa_size_limit(1 << 20)
+            .build()
             .map(|re| re.is_match(input))
             .unwrap_or(false),
         MatchValue::Sha256(expected) => {
@@ -307,21 +312,28 @@ pub fn unfold_header_value(value: &str) -> String {
     result
 }
 
-/// Strip token query parameters from a URI before matching per CTA-5007-B §4.6.10.
 /// Block list for catpor probability-of-rejection enforcement.
+/// Uses a bounded LRU cache to prevent unbounded memory growth.
 pub struct CatPorBlockList {
-    entries: Mutex<HashMap<Vec<u8>, Option<i64>>>,
+    entries: Mutex<LruCache<Vec<u8>, Option<i64>>>,
 }
+
+const DEFAULT_POR_BLOCK_LIST_SIZE: usize = 100_000;
 
 impl CatPorBlockList {
     pub fn new() -> Self {
+        Self::with_capacity(DEFAULT_POR_BLOCK_LIST_SIZE)
+    }
+
+    pub fn with_capacity(capacity: usize) -> Self {
+        let cap = NonZeroUsize::new(capacity.max(1)).expect("capacity is at least 1");
         Self {
-            entries: Mutex::new(HashMap::new()),
+            entries: Mutex::new(LruCache::new(cap)),
         }
     }
 
     pub fn is_blocked(&self, id: &[u8]) -> bool {
-        let entries = self.entries.lock().unwrap();
+        let mut entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(exp) = entries.get(id) {
             if let Some(exp_ts) = exp {
                 Utc::now().timestamp() < *exp_ts
@@ -334,8 +346,8 @@ impl CatPorBlockList {
     }
 
     pub fn add(&self, id: Vec<u8>, expiration: Option<i64>) {
-        let mut entries = self.entries.lock().unwrap();
-        entries.insert(id, expiration);
+        let mut entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
+        entries.put(id, expiration);
     }
 }
 
@@ -648,7 +660,7 @@ pub fn encode_token(
     let payload_cbor = cwt.encode_payload()?;
 
     let signing_input =
-        crate::crypto::create_signing_input(&header_cbor, &payload_cbor, algorithm.algorithm_id());
+        crate::crypto::create_signing_input(&header_cbor, &payload_cbor, algorithm.algorithm_id())?;
     let signature = algorithm.sign(&signing_input)?;
 
     let alg_id = algorithm.algorithm_id();
@@ -684,11 +696,17 @@ pub fn encode_token_base64(
     Ok(URL_SAFE_NO_PAD.encode(&bytes))
 }
 
+const MAX_TOKEN_SIZE: usize = 1024 * 1024; // 1MB
+
 /// Decode a CatToken from COSE_Sign1 (tag 18) or COSE_Mac0 (tag 17) CBOR bytes.
 pub fn decode_token(
     cose_bytes: &[u8],
     algorithm: &dyn CryptographicAlgorithm,
 ) -> Result<CatToken, CatError> {
+    if cose_bytes.len() > MAX_TOKEN_SIZE {
+        return Err(CatError::InvalidTokenFormat);
+    }
+
     let value: ciborium::Value =
         ciborium::de::from_reader(cose_bytes).map_err(|e| CatError::InvalidCbor(e.to_string()))?;
 
@@ -738,11 +756,9 @@ pub fn decode_token(
         });
     }
 
-    let signing_input = crate::crypto::create_signing_input(&header_cbor, &payload_cbor, alg_id);
+    let signing_input = crate::crypto::create_signing_input(&header_cbor, &payload_cbor, alg_id)?;
 
-    if !algorithm.verify(&signing_input, &signature)? {
-        return Err(CatError::SignatureVerificationFailed);
-    }
+    algorithm.verify(&signing_input, &signature)?;
 
     Cwt::decode_payload(&payload_cbor)
 }

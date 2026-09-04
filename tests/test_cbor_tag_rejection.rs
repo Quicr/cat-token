@@ -13,7 +13,8 @@ fn build_cose_mac0_with_payload(payload_cbor: &[u8], alg: &HmacSha256Algorithm) 
     let mut header_buf = Vec::new();
     ciborium::ser::into_writer(&ciborium::Value::Map(header_cbor_map), &mut header_buf).unwrap();
 
-    let signing_input = crypto::create_signing_input(&header_buf, payload_cbor, ALG_HMAC256_256);
+    let signing_input =
+        crypto::create_signing_input(&header_buf, payload_cbor, ALG_HMAC256_256).unwrap();
     let signature = alg.sign(&signing_input).unwrap();
 
     let cose_array = ciborium::Value::Array(vec![

@@ -23,7 +23,7 @@ pub fn extract_spki_from_cert(cert_der: &[u8]) -> Result<Vec<u8>, CatError> {
 /// cattpk claim. The cattpk claim holds the expected SPKI DER bytes.
 pub fn validate_cattpk(cattpk: &[u8], cert_der: &[u8]) -> Result<(), CatError> {
     let spki = extract_spki_from_cert(cert_der)?;
-    if spki == cattpk {
+    if crate::crypto::constant_time_eq(&spki, cattpk) {
         Ok(())
     } else {
         Err(CatError::CertificateValidationFailed(

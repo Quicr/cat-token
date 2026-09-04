@@ -10,7 +10,7 @@ use rsa::traits::PublicKeyParts;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct Jwk {
     pub kty: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -23,6 +23,16 @@ pub struct Jwk {
     pub n: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub e: Option<String>,
+}
+
+impl std::fmt::Debug for Jwk {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Jwk")
+            .field("kty", &self.kty)
+            .field("crv", &self.crv)
+            .field("key_material", &"[REDACTED]")
+            .finish()
+    }
 }
 
 impl Jwk {

@@ -49,7 +49,7 @@ fn test_cose_signing_input_is_cbor_array() {
     let header = vec![0xa1, 0x01, 0x26]; // {1: -7} (ES256)
     let payload = vec![0xa1, 0x01, 0x66, 0x69, 0x73, 0x73, 0x75, 0x65, 0x72]; // {1: "issuer"}
 
-    let signing_input = crypto::create_signing_input(&header, &payload, ALG_ES256);
+    let signing_input = crypto::create_signing_input(&header, &payload, ALG_ES256).unwrap();
 
     // The signing input must be a valid CBOR array
     let value: ciborium::Value = ciborium::de::from_reader(signing_input.as_slice())
@@ -92,7 +92,7 @@ fn test_cose_mac0_context_string_for_hmac() {
     let header = vec![0xa1, 0x01, 0x05]; // {1: 5} (HMAC 256/256)
     let payload = vec![0xa0]; // empty map
 
-    let signing_input = crypto::create_signing_input(&header, &payload, ALG_HMAC256_256);
+    let signing_input = crypto::create_signing_input(&header, &payload, ALG_HMAC256_256).unwrap();
 
     let value: ciborium::Value = ciborium::de::from_reader(signing_input.as_slice())
         .expect("signing input must be valid CBOR");
@@ -111,8 +111,8 @@ fn test_cross_algorithm_signing_input_differs() {
     let header = vec![0xa0]; // empty map
     let payload = vec![0xa0]; // empty map
 
-    let sig_input = crypto::create_signing_input(&header, &payload, ALG_ES256);
-    let mac_input = crypto::create_signing_input(&header, &payload, ALG_HMAC256_256);
+    let sig_input = crypto::create_signing_input(&header, &payload, ALG_ES256).unwrap();
+    let mac_input = crypto::create_signing_input(&header, &payload, ALG_HMAC256_256).unwrap();
 
     // Different context strings mean different signing inputs
     assert_ne!(sig_input, mac_input);

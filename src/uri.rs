@@ -86,6 +86,13 @@ fn parse_uri(uri: &str) -> UriComponents {
         (rest, "")
     };
 
+    // Strip userinfo (RFC 3986 §3.2.1) before host extraction
+    let authority = if let Some(at) = authority.rfind('@') {
+        &authority[at + 1..]
+    } else {
+        authority
+    };
+
     // Parse authority: host[:port]
     if let Some(pos) = authority.rfind(':') {
         let potential_port = &authority[pos + 1..];
@@ -128,6 +135,13 @@ pub fn normalize_uri(uri: &str) -> String {
         (&rest[..pos], &rest[pos..])
     } else {
         (rest, "")
+    };
+
+    // Strip userinfo (RFC 3986 §3.2.1) before normalization
+    let authority = if let Some(at) = authority.rfind('@') {
+        &authority[at + 1..]
+    } else {
+        authority
     };
 
     // §6.2.2.1 Case normalization: host to lowercase

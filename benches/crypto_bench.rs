@@ -55,7 +55,7 @@ fn bench_hmac_operations(c: &mut Criterion) {
         group.bench_with_input(
             BenchmarkId::new("verify", name),
             &(data, sig),
-            |b, (data, sig)| b.iter(|| black_box(hmac.verify(data, sig).unwrap())),
+            |b, (data, sig)| b.iter(|| hmac.verify(black_box(data), black_box(sig)).unwrap()),
         );
     }
 
@@ -96,7 +96,7 @@ fn bench_es256_operations(c: &mut Criterion) {
         group.bench_with_input(
             BenchmarkId::new("verify", name),
             &(data, sig),
-            |b, (data, sig)| b.iter(|| black_box(es256.verify(data, sig).unwrap())),
+            |b, (data, sig)| b.iter(|| es256.verify(black_box(data), black_box(sig)).unwrap()),
         );
     }
 
@@ -137,7 +137,7 @@ fn bench_ps256_operations(c: &mut Criterion) {
         group.bench_with_input(
             BenchmarkId::new("verify", name),
             &(data, sig),
-            |b, (data, sig)| b.iter(|| black_box(ps256.verify(data, sig).unwrap())),
+            |b, (data, sig)| b.iter(|| ps256.verify(black_box(data), black_box(sig)).unwrap()),
         );
     }
 
@@ -171,15 +171,26 @@ fn bench_crypto_comparison(c: &mut Criterion) {
     let ps256_sig = ps256.sign(test_data).unwrap();
 
     group.bench_function("hmac_verify", |b| {
-        b.iter(|| black_box(hmac.verify(test_data, &hmac_sig).unwrap()))
+        b.iter(|| {
+            hmac.verify(black_box(test_data), black_box(&hmac_sig))
+                .unwrap()
+        })
     });
 
     group.bench_function("es256_verify", |b| {
-        b.iter(|| black_box(es256.verify(test_data, &es256_sig).unwrap()))
+        b.iter(|| {
+            es256
+                .verify(black_box(test_data), black_box(&es256_sig))
+                .unwrap()
+        })
     });
 
     group.bench_function("ps256_verify", |b| {
-        b.iter(|| black_box(ps256.verify(test_data, &ps256_sig).unwrap()))
+        b.iter(|| {
+            ps256
+                .verify(black_box(test_data), black_box(&ps256_sig))
+                .unwrap()
+        })
     });
 
     group.finish();
@@ -192,7 +203,7 @@ fn bench_utility_functions(c: &mut Criterion) {
     let payload = b"payload_data";
 
     group.bench_function("create_signing_input", |b| {
-        b.iter(|| black_box(create_signing_input(header, payload, ALG_ES256)))
+        b.iter(|| black_box(create_signing_input(header, payload, ALG_ES256).unwrap()))
     });
 
     group.bench_function("hash_sha256", |b| {

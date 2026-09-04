@@ -21,8 +21,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub const DPOP_TYP: &str = "dpop+jwt";
 
-/// Supported DPoP algorithms
-pub const SUPPORTED_DPOP_ALGORITHMS: &[&str] = &["ES256", "PS256", "HS256"];
+/// Supported DPoP algorithms (asymmetric only per RFC 9449 §4.2)
+pub const SUPPORTED_DPOP_ALGORITHMS: &[&str] = &["ES256", "PS256"];
 
 /// Maximum size for DPoP proof parts (header/payload) in bytes
 const MAX_DPOP_PART_SIZE: usize = 16 * 1024; // 16KB
@@ -458,6 +458,12 @@ impl DpopValidator {
             if jtis.contains(jti) {
                 return Err(CatError::ReplayAttackDetected);
             }
+            if jtis.len() >= self.cache_capacity {
+                return Err(CatError::DpopValidationFailed(
+                    "JTI cache at capacity — replay protection degraded, increase cache size"
+                        .to_string(),
+                ));
+            }
             jtis.put(jti.clone(), proof.payload.iat);
         }
 
@@ -477,9 +483,7 @@ impl DpopValidator {
         self.validate_claims(proof, expected_action, expected_thumbprint, None)?;
 
         let signing_input = proof.signing_input()?;
-        if !algorithm.verify(&signing_input, &proof.signature)? {
-            return Err(CatError::SignatureVerificationFailed);
-        }
+        algorithm.verify(&signing_input, &proof.signature)?;
 
         Ok(())
     }
@@ -501,9 +505,7 @@ impl DpopValidator {
         )?;
 
         let signing_input = proof.signing_input()?;
-        if !algorithm.verify(&signing_input, &proof.signature)? {
-            return Err(CatError::SignatureVerificationFailed);
-        }
+        algorithm.verify(&signing_input, &proof.signature)?;
 
         Ok(())
     }
@@ -533,7 +535,12 @@ pub fn construct_moqt_uri(
     endpoint: &str,
     namespace: Option<&[u8]>,
     track: Option<&[u8]>,
-) -> String {
+) -> Result<String, CatError> {
+    if endpoint.contains('?') || endpoint.contains('#') || endpoint.contains('/') {
+        return Err(CatError::InvalidClaimValue(
+            "MOQT endpoint must not contain '?', '#', or '/'".to_string(),
+        ));
+    }
     let mut uri = format!("moqt://{}", endpoint);
 
     if let Some(ns) = namespace {
@@ -548,7 +555,7 @@ pub fn construct_moqt_uri(
         }
     }
 
-    uri
+    Ok(uri)
 }
 
 pub fn generate_jti() -> String {
@@ -611,12 +618,15 @@ mod tests {
     #[cfg(feature = "moqt")]
     #[test]
     fn test_moqt_uri_construction() {
-        let uri = construct_moqt_uri("relay.example.com", None, None);
+        let uri = construct_moqt_uri("relay.example.com", None, None).unwrap();
         assert_eq!(uri, "moqt://relay.example.com");
 
-        let uri = construct_moqt_uri("relay.example.com", Some(b"ns"), Some(b"track"));
+        let uri = construct_moqt_uri("relay.example.com", Some(b"ns"), Some(b"track")).unwrap();
         assert!(uri.contains("?tns="));
         assert!(uri.contains("&tn="));
+
+        assert!(construct_moqt_uri("relay.example.com/path", None, None).is_err());
+        assert!(construct_moqt_uri("relay.example.com?q=1", None, None).is_err());
     }
 
     #[cfg(feature = "moqt")]

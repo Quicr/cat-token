@@ -140,10 +140,27 @@ pub struct InformationalClaims {
 /// Confirmation claim for key binding (CTA-5007-B §4.8.1).
 ///
 /// Supports both JWK Thumbprint (jkt, key 3) and COSE Key Thumbprint (ckt, key 6, RFC 9679).
-#[derive(Clone, PartialEq, Serialize, Deserialize)]
+/// Serialization redacts thumbprint values to prevent accidental leakage.
+#[derive(Clone, PartialEq, Deserialize)]
 pub struct ConfirmationClaim {
     pub jkt: Vec<u8>,
     pub ckt: Option<Vec<u8>>,
+}
+
+impl Serialize for ConfirmationClaim {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+        let field_count = if self.ckt.is_some() { 2 } else { 1 };
+        let mut s = serializer.serialize_struct("ConfirmationClaim", field_count)?;
+        s.serialize_field("jkt", &format!("[REDACTED {} bytes]", self.jkt.len()))?;
+        if let Some(ref ckt) = self.ckt {
+            s.serialize_field("ckt", &format!("[REDACTED {} bytes]", ckt.len()))?;
+        }
+        s.end()
+    }
 }
 
 impl std::fmt::Debug for ConfirmationClaim {
@@ -401,7 +418,8 @@ impl CompositeClaim {
     /// Get the maximum nesting depth of this composite claim.
     /// Returns an error if depth exceeds the limit to prevent stack overflow.
     pub fn get_depth(&self) -> usize {
-        self.get_depth_bounded(0, 100).unwrap_or(100)
+        self.get_depth_bounded(0, Self::MAX_EVALUATE_DEPTH)
+            .unwrap_or(Self::MAX_EVALUATE_DEPTH)
     }
 
     /// Get depth with bounds checking to prevent stack overflow
@@ -445,8 +463,9 @@ impl CompositeClaim {
         false
     }
 
-    /// Maximum depth for evaluate() to prevent stack overflow
-    const MAX_EVALUATE_DEPTH: usize = 100;
+    /// Maximum depth for evaluate() to prevent stack overflow.
+    /// Aligned with the depth check in CatTokenValidator::validate_composite_claims.
+    const MAX_EVALUATE_DEPTH: usize = 10;
 
     /// Evaluate this composite claim against a validation context
     pub fn evaluate<V>(&self, validator: &V) -> bool

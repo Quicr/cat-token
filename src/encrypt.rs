@@ -33,22 +33,24 @@ impl EncryptionAlgorithm {
     }
 }
 
-fn build_enc_structure(protected: &[u8]) -> Vec<u8> {
+fn build_enc_structure(protected: &[u8]) -> Result<Vec<u8>, CatError> {
     let structure = Value::Array(vec![
         Value::Text("Encrypt0".to_string()),
         Value::Bytes(protected.to_vec()),
         Value::Bytes(vec![]),
     ]);
     let mut buf = Vec::new();
-    ciborium::ser::into_writer(&structure, &mut buf).unwrap();
-    buf
+    ciborium::ser::into_writer(&structure, &mut buf)
+        .map_err(|e| CatError::InvalidCbor(e.to_string()))?;
+    Ok(buf)
 }
 
-fn encode_protected_header(alg_id: i64) -> Vec<u8> {
+fn encode_protected_header(alg_id: i64) -> Result<Vec<u8>, CatError> {
     let map = vec![(Value::Integer(1.into()), Value::Integer(alg_id.into()))];
     let mut buf = Vec::new();
-    ciborium::ser::into_writer(&Value::Map(map), &mut buf).unwrap();
-    buf
+    ciborium::ser::into_writer(&Value::Map(map), &mut buf)
+        .map_err(|e| CatError::InvalidCbor(e.to_string()))?;
+    Ok(buf)
 }
 
 /// Encrypt plaintext as COSE_Encrypt0 (tag 16) per RFC 9052 §5.
@@ -65,8 +67,8 @@ pub fn cose_encrypt0(
         )));
     }
 
-    let protected = encode_protected_header(algorithm.alg_id());
-    let aad = build_enc_structure(&protected);
+    let protected = encode_protected_header(algorithm.alg_id())?;
+    let aad = build_enc_structure(&protected)?;
 
     let (nonce_bytes, ciphertext) = match algorithm {
         EncryptionAlgorithm::A128Gcm => {
@@ -101,11 +103,10 @@ pub fn cose_encrypt0(
         }
     };
 
-    let mut unprotected = vec![(
+    let unprotected = vec![(
         Value::Integer(5.into()), // IV
         Value::Bytes(nonce_bytes),
     )];
-    let _ = &mut unprotected; // suppress warning
 
     let cose_array = Value::Array(vec![
         Value::Bytes(protected),
@@ -183,7 +184,14 @@ pub fn cose_decrypt0(cose_bytes: &[u8], key: &[u8]) -> Result<Vec<u8>, CatError>
         _ => return Err(CatError::InvalidTokenFormat),
     };
 
-    let aad = build_enc_structure(&protected);
+    let aad = build_enc_structure(&protected)?;
+
+    if nonce_bytes.len() != 12 {
+        return Err(CatError::CryptoError(format!(
+            "Invalid nonce length: expected 12, got {}",
+            nonce_bytes.len()
+        )));
+    }
 
     match alg_id {
         ALG_A128GCM => {

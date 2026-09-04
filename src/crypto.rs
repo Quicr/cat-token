@@ -10,7 +10,7 @@ use p256::elliptic_curve::rand_core::OsRng;
 use p256::pkcs8::DecodePublicKey;
 use ring::rand::SecureRandom;
 use ring::{digest, rand};
-use rsa::pkcs1v15::{SigningKey as RsaSigningKey, VerifyingKey as RsaVerifyingKey};
+use rsa::pss::{SigningKey as RsaSigningKey, VerifyingKey as RsaVerifyingKey};
 use rsa::signature::{RandomizedSigner, SignatureEncoding, Signer, Verifier};
 use rsa::traits::PublicKeyParts;
 use rsa::{RsaPrivateKey, RsaPublicKey};
@@ -52,7 +52,7 @@ pub const MIN_RSA_KEY_SIZE: usize = 256;
 
 pub trait CryptographicAlgorithm {
     fn sign(&self, data: &[u8]) -> Result<Vec<u8>, CatError>;
-    fn verify(&self, data: &[u8], signature: &[u8]) -> Result<bool, CatError>;
+    fn verify(&self, data: &[u8], signature: &[u8]) -> Result<(), CatError>;
     fn algorithm_id(&self) -> i64;
 }
 
@@ -107,13 +107,12 @@ impl CryptographicAlgorithm for HmacSha256Algorithm {
         Ok(mac.finalize().into_bytes().to_vec())
     }
 
-    fn verify(&self, data: &[u8], signature: &[u8]) -> Result<bool, CatError> {
+    fn verify(&self, data: &[u8], signature: &[u8]) -> Result<(), CatError> {
         let mut mac = HmacSha256::new_from_slice(&self.key)
             .map_err(|e| CatError::CryptoError(e.to_string()))?;
         mac.update(data);
 
         mac.verify_slice(signature)
-            .map(|_| true)
             .map_err(|_| CatError::SignatureVerificationFailed)
     }
 
@@ -125,14 +124,6 @@ impl CryptographicAlgorithm for HmacSha256Algorithm {
 pub struct Es256Algorithm {
     signing_key: Option<SigningKey>,
     verifying_key: VerifyingKey,
-}
-
-impl Drop for Es256Algorithm {
-    fn drop(&mut self) {
-        // SigningKey from p256 crate implements Zeroize internally,
-        // but we explicitly drop it here to ensure cleanup
-        self.signing_key.take();
-    }
 }
 
 impl Es256Algorithm {
@@ -188,13 +179,12 @@ impl CryptographicAlgorithm for Es256Algorithm {
         Ok(signature.to_bytes().to_vec())
     }
 
-    fn verify(&self, data: &[u8], signature: &[u8]) -> Result<bool, CatError> {
+    fn verify(&self, data: &[u8], signature: &[u8]) -> Result<(), CatError> {
         let signature =
             Signature::try_from(signature).map_err(|e| CatError::CryptoError(e.to_string()))?;
 
         self.verifying_key
             .verify(data, &signature)
-            .map(|_| true)
             .map_err(|_| CatError::SignatureVerificationFailed)
     }
 
@@ -206,14 +196,6 @@ impl CryptographicAlgorithm for Es256Algorithm {
 pub struct Ps256Algorithm {
     signing_key: Option<RsaSigningKey<Sha256>>,
     public_key: RsaPublicKey,
-}
-
-impl Drop for Ps256Algorithm {
-    fn drop(&mut self) {
-        // RsaSigningKey internally holds the private key
-        // Clear by taking and dropping
-        self.signing_key.take();
-    }
 }
 
 impl Ps256Algorithm {
@@ -262,14 +244,13 @@ impl CryptographicAlgorithm for Ps256Algorithm {
         Ok(signature.to_bytes().to_vec())
     }
 
-    fn verify(&self, data: &[u8], signature: &[u8]) -> Result<bool, CatError> {
+    fn verify(&self, data: &[u8], signature: &[u8]) -> Result<(), CatError> {
         let verifying_key = RsaVerifyingKey::<Sha256>::new(self.public_key.clone());
-        let signature = rsa::pkcs1v15::Signature::try_from(signature)
+        let signature = rsa::pss::Signature::try_from(signature)
             .map_err(|e| CatError::CryptoError(e.to_string()))?;
 
         verifying_key
             .verify(data, &signature)
-            .map(|_| true)
             .map_err(|_| CatError::SignatureVerificationFailed)
     }
 
@@ -278,7 +259,11 @@ impl CryptographicAlgorithm for Ps256Algorithm {
     }
 }
 
-pub fn create_signing_input(header_protected: &[u8], payload: &[u8], alg_id: i64) -> Vec<u8> {
+pub fn create_signing_input(
+    header_protected: &[u8],
+    payload: &[u8],
+    alg_id: i64,
+) -> Result<Vec<u8>, CatError> {
     let context = cose_context_string(alg_id);
     create_cose_structure(context, header_protected, payload)
 }
@@ -290,7 +275,11 @@ fn cose_context_string(alg_id: i64) -> &'static str {
     }
 }
 
-fn create_cose_structure(context: &str, body_protected: &[u8], payload: &[u8]) -> Vec<u8> {
+fn create_cose_structure(
+    context: &str,
+    body_protected: &[u8],
+    payload: &[u8],
+) -> Result<Vec<u8>, CatError> {
     let structure = ciborium::Value::Array(vec![
         ciborium::Value::Text(context.to_string()),
         ciborium::Value::Bytes(body_protected.to_vec()),
@@ -298,8 +287,9 @@ fn create_cose_structure(context: &str, body_protected: &[u8], payload: &[u8]) -
         ciborium::Value::Bytes(payload.to_vec()),
     ]);
     let mut buf = Vec::new();
-    ciborium::ser::into_writer(&structure, &mut buf).expect("COSE structure serialization");
-    buf
+    ciborium::ser::into_writer(&structure, &mut buf)
+        .map_err(|e| CatError::InvalidCbor(e.to_string()))?;
+    Ok(buf)
 }
 
 pub fn hash_sha256(data: &[u8]) -> Vec<u8> {
