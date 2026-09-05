@@ -367,26 +367,117 @@ const DEFAULT_JTI_CACHE_SIZE: usize = 100_000;
 #[cfg(feature = "moqt")]
 const MIN_JTI_CACHE_SIZE: usize = 1000;
 
+#[cfg(feature = "moqt")]
+pub trait JtiStore: Send + Sync {
+    fn contains(&self, key: &str) -> Result<bool, CatError>;
+    fn insert(&self, key: String, iat: i64) -> Result<(), CatError>;
+    fn len(&self) -> usize;
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+    fn cleanup(&self, max_age_seconds: i64) {
+        let _ = max_age_seconds;
+    }
+}
+
+#[cfg(feature = "moqt")]
+pub struct LruJtiStore {
+    cache: Mutex<LruCache<String, i64>>,
+    capacity: usize,
+}
+
+#[cfg(feature = "moqt")]
+impl LruJtiStore {
+    pub fn new(capacity: usize) -> Self {
+        let effective = capacity.max(MIN_JTI_CACHE_SIZE);
+        let nz = NonZeroUsize::new(effective).expect("MIN_JTI_CACHE_SIZE guarantees non-zero");
+        Self {
+            cache: Mutex::new(LruCache::new(nz)),
+            capacity: effective,
+        }
+    }
+}
+
+#[cfg(feature = "moqt")]
+impl JtiStore for LruJtiStore {
+    fn contains(&self, key: &str) -> Result<bool, CatError> {
+        let cache = self
+            .cache
+            .lock()
+            .map_err(|_| CatError::CryptoError("Lock poisoned".to_string()))?;
+        Ok(cache.contains(key))
+    }
+
+    fn insert(&self, key: String, iat: i64) -> Result<(), CatError> {
+        let mut cache = self
+            .cache
+            .lock()
+            .map_err(|_| CatError::CryptoError("Lock poisoned".to_string()))?;
+        if cache.contains(&key) {
+            return Err(CatError::ReplayAttackDetected);
+        }
+        if cache.len() >= self.capacity {
+            return Err(CatError::DpopValidationFailed(
+                "JTI cache at capacity — replay protection degraded, increase cache size"
+                    .to_string(),
+            ));
+        }
+        cache.put(key, iat);
+        Ok(())
+    }
+
+    fn len(&self) -> usize {
+        self.cache.lock().map(|c| c.len()).unwrap_or(0)
+    }
+
+    fn cleanup(&self, max_age_seconds: i64) {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::ZERO)
+            .as_secs() as i64;
+
+        if let Ok(mut cache) = self.cache.lock() {
+            let expired: Vec<String> = cache
+                .iter()
+                .filter(|(_, iat): &(&String, &i64)| now - **iat >= max_age_seconds)
+                .map(|(k, _)| k.clone())
+                .collect();
+            for key in expired {
+                cache.pop(&key);
+            }
+        }
+    }
+}
+
 /// Statistics about the JTI cache
 #[cfg(feature = "moqt")]
 #[derive(Debug, Clone, Default)]
 pub struct JtiCacheStats {
-    /// Number of JTIs currently in cache
     pub size: usize,
-    /// Maximum capacity of the cache
     pub capacity: usize,
-    /// True if cache is at or near capacity (>90%)
     pub under_pressure: bool,
 }
 
 #[cfg(feature = "moqt")]
-#[derive(Clone)]
 pub struct DpopValidator {
     settings: CatDpopSettings,
-    used_jtis: Arc<Mutex<LruCache<String, i64>>>,
+    jti_store: Arc<dyn JtiStore>,
     jti_expiry_seconds: i64,
     cache_capacity: usize,
     jti_required: bool,
+}
+
+#[cfg(feature = "moqt")]
+impl Clone for DpopValidator {
+    fn clone(&self) -> Self {
+        Self {
+            settings: self.settings.clone(),
+            jti_store: Arc::clone(&self.jti_store),
+            jti_expiry_seconds: self.jti_expiry_seconds,
+            cache_capacity: self.cache_capacity,
+            jti_required: self.jti_required,
+        }
+    }
 }
 
 #[cfg(feature = "moqt")]
@@ -396,16 +487,22 @@ impl DpopValidator {
     }
 
     pub fn with_cache_size(settings: CatDpopSettings, cache_size: usize) -> Self {
-        // Enforce minimum cache size for meaningful replay protection
         let effective_size = cache_size.max(MIN_JTI_CACHE_SIZE);
-        // SAFETY: effective_size >= MIN_JTI_CACHE_SIZE (1000), so always non-zero
-        let nz_cache_size =
-            NonZeroUsize::new(effective_size).expect("MIN_JTI_CACHE_SIZE guarantees non-zero");
         Self {
             jti_expiry_seconds: settings.effective_window() * 2,
-            settings,
-            used_jtis: Arc::new(Mutex::new(LruCache::new(nz_cache_size))),
+            jti_store: Arc::new(LruJtiStore::new(effective_size)),
             cache_capacity: effective_size,
+            settings,
+            jti_required: true,
+        }
+    }
+
+    pub fn with_jti_store(settings: CatDpopSettings, store: Arc<dyn JtiStore>) -> Self {
+        Self {
+            jti_expiry_seconds: settings.effective_window() * 2,
+            cache_capacity: 0,
+            jti_store: store,
+            settings,
             jti_required: true,
         }
     }
@@ -415,14 +512,9 @@ impl DpopValidator {
         self
     }
 
-    /// Get statistics about the JTI cache.
-    ///
-    /// Use this to monitor cache pressure. If `under_pressure` is true,
-    /// consider increasing the cache size or reducing the validation window
-    /// to prevent potential replay attacks due to early eviction.
     pub fn jti_cache_stats(&self) -> JtiCacheStats {
-        let size = self.used_jtis.lock().map(|cache| cache.len()).unwrap_or(0);
-        let under_pressure = size >= (self.cache_capacity * 9 / 10);
+        let size = self.jti_store.len();
+        let under_pressure = self.cache_capacity > 0 && size >= (self.cache_capacity * 9 / 10);
         JtiCacheStats {
             size,
             capacity: self.cache_capacity,
@@ -487,16 +579,11 @@ impl DpopValidator {
             }
         }
 
-        // Check for replay (read-only) without inserting yet
         if self.settings.should_honor_jti()
             && let Some(ref jti) = proof.payload.jti
         {
             let composite_key = format!("{}:{}", hex::encode(expected_thumbprint), jti);
-            let jtis = self
-                .used_jtis
-                .lock()
-                .map_err(|_| CatError::CryptoError("Lock poisoned".to_string()))?;
-            if jtis.contains(&composite_key) {
+            if self.jti_store.contains(&composite_key)? {
                 return Err(CatError::ReplayAttackDetected);
             }
         }
@@ -509,20 +596,7 @@ impl DpopValidator {
             && let Some(ref jti) = proof.payload.jti
         {
             let composite_key = format!("{}:{}", hex::encode(thumbprint), jti);
-            let mut jtis = self
-                .used_jtis
-                .lock()
-                .map_err(|_| CatError::CryptoError("Lock poisoned".to_string()))?;
-            if jtis.contains(&composite_key) {
-                return Err(CatError::ReplayAttackDetected);
-            }
-            if jtis.len() >= self.cache_capacity {
-                return Err(CatError::DpopValidationFailed(
-                    "JTI cache at capacity — replay protection degraded, increase cache size"
-                        .to_string(),
-                ));
-            }
-            jtis.put(composite_key, proof.payload.iat);
+            self.jti_store.insert(composite_key, proof.payload.iat)?;
         }
         Ok(())
     }
@@ -632,21 +706,7 @@ impl DpopValidator {
     }
 
     pub fn cleanup_expired_jtis(&self) {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or(Duration::ZERO)
-            .as_secs() as i64;
-
-        if let Ok(mut jtis) = self.used_jtis.lock() {
-            let expired: Vec<String> = jtis
-                .iter()
-                .filter(|(_, iat): &(&String, &i64)| now - **iat >= self.jti_expiry_seconds)
-                .map(|(k, _)| k.clone())
-                .collect();
-            for key in expired {
-                jtis.pop(&key);
-            }
-        }
+        self.jti_store.cleanup(self.jti_expiry_seconds);
     }
 }
 

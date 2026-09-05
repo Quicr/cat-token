@@ -15,7 +15,7 @@ pub use crate::crypto::{
     CryptographicAlgorithm, Es256Algorithm, HmacSha256Algorithm, Ps256Algorithm,
 };
 #[cfg(feature = "moqt")]
-pub use crate::dpop::{DpopProof, DpopValidator};
+pub use crate::dpop::{DpopProof, DpopValidator, JtiStore, LruJtiStore};
 pub use crate::dpop::{
     compute_access_token_hash, confirmation_from_jwk, confirmation_matches_jwk, generate_jti,
 };
