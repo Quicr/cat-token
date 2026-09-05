@@ -212,10 +212,10 @@ impl MoqtValidator {
                 return Err(CatError::InvalidDpopBinding);
             }
 
-            // Validate the proof using the embedded JWK
-            validator.validate(proof, request.action, &cnf.jkt)?;
+            // Validate proof without committing JTI — target checks must pass first
+            validator.validate_without_jti_commit(proof, request.action, &cnf.jkt)?;
 
-            // Verify proof is bound to the requested target (C2 fix)
+            // Verify proof is bound to the requested target before committing JTI
             if proof.payload.actx.tns != request.namespace {
                 return Err(CatError::DpopValidationFailed(
                     "DPoP proof namespace does not match request".to_string(),
@@ -226,6 +226,9 @@ impl MoqtValidator {
                     "DPoP proof track does not match request".to_string(),
                 ));
             }
+
+            // All checks passed — commit JTI to replay cache
+            validator.commit_jti(proof, &cnf.jkt)?;
         }
 
         Ok(auth_result)

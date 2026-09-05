@@ -204,11 +204,12 @@ fn test_catr_header_renewal() {
 
 #[test]
 fn test_catr_redirect_renewal() {
-    let token = CatToken::new().with_renewal(CatRenewal::redirect(302));
+    let token = CatToken::new().with_renewal(CatRenewal::redirect(302).with_expadd(3600));
 
     let catr = token.request.catr.unwrap();
     assert_eq!(catr.renewal_type, CatRenewalType::Redirect);
     assert_eq!(catr.status_code, Some(302));
+    assert_eq!(catr.expadd, Some(3600));
 }
 
 #[test]
@@ -254,7 +255,7 @@ fn test_catr_redirect_roundtrip() {
 
     let token = CatToken::new()
         .with_issuer("test")
-        .with_renewal(CatRenewal::redirect(307));
+        .with_renewal(CatRenewal::redirect(307).with_expadd(1800));
 
     let encoded = encode_token(&token, &algorithm).unwrap();
     let decoded = decode_token(&encoded, &algorithm).unwrap();
@@ -262,6 +263,7 @@ fn test_catr_redirect_roundtrip() {
     let catr = decoded.request.catr.unwrap();
     assert_eq!(catr.renewal_type, CatRenewalType::Redirect);
     assert_eq!(catr.status_code, Some(307));
+    assert_eq!(catr.expadd, Some(1800));
 }
 
 #[test]

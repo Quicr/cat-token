@@ -75,6 +75,7 @@ harness = false
 [[bench]]
 name = "trie_bench"
 harness = false
+required-features = ["builtin-trie"]
 
 [[example]]
 name = "quickstart"

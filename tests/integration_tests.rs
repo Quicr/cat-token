@@ -286,77 +286,60 @@ fn test_cwt_payload_encoding_decoding() {
 
 #[test]
 fn test_all_cat_claims() {
-    let token = CatToken {
-        core: CoreClaims {
-            iss: Some("https://issuer.com".to_string()),
-            aud: Some(vec!["aud1".to_string(), "aud2".to_string()]),
-            exp: Some(1234567890),
-            nbf: Some(1234567800),
-            cti: Some(b"unique-token-id".to_vec()),
-        },
-        cat: CatClaims {
-            catreplay: Some(cat_token::ReplayProtection::Prohibited),
-            catpor: None,
-            catv: Some(1),
-            catnip: Some(vec![
-                NetworkIdentifier::IpPrefix("192.168.1.0".parse().unwrap(), 24),
-                NetworkIdentifier::IpPrefix("10.0.0.0".parse().unwrap(), 8),
-            ]),
-            catu: Some(vec![
-                UriMatchRule {
-                    component: URI_COMPONENT_HOST,
-                    matches: vec![MatchValue::Exact("api.example.com".to_string())],
-                },
-                UriMatchRule {
-                    component: URI_COMPONENT_PATH,
-                    matches: vec![MatchValue::Prefix("/v1/".to_string())],
-                },
-            ]),
-            catm: Some(vec!["GET".to_string(), "POST".to_string()]),
-            catalpn: Some(vec![b"h2".to_vec(), b"http/1.1".to_vec()]),
-            cath: Some(vec![
-                HeaderMatchRule {
-                    name: "Host".to_string(),
-                    matches: vec![MatchValue::Exact("api.example.com".to_string())],
-                },
-                HeaderMatchRule {
-                    name: "Host".to_string(),
-                    matches: vec![MatchValue::Suffix(".example.org".to_string())],
-                },
-            ]),
-            catgeoiso3166: Some(vec!["US".to_string(), "CA".to_string()]),
-            catgeocoord: Some(vec![GeoCoordinate {
-                lat: 34.0522,
-                lon: -118.2437,
-                radius: Some(25),
-            }]),
-            geohash: Some(vec!["9q5ct".to_string()]),
-            catgeoalt: Some(cat_token::GeoAltitude {
-                altitude: 100.0,
-                deviation: 10.0,
-            }),
-            cattpk: Some(b"thumbprint-data".to_vec()),
-        },
-        informational: InformationalClaims {
-            sub: None,
-            iat: None,
-            catifdata: None,
-        },
-        dpop: DpopClaims {
-            cnf: None,
-            catdpop: None,
-        },
-        request: RequestClaims {
-            catif: None,
-            catr: None,
-        },
-        composite: cat_token::claims::CompositeClaims::default(),
-        moqt: cat_token::claims::MoqtClaims {
-            moqt: None,
-            moqt_reval: None,
-        },
-        custom: std::collections::HashMap::new(),
-        was_encrypted: false,
+    let mut token = CatToken::new();
+    token.core = CoreClaims {
+        iss: Some("https://issuer.com".to_string()),
+        aud: Some(vec!["aud1".to_string(), "aud2".to_string()]),
+        exp: Some(1234567890),
+        nbf: Some(1234567800),
+        cti: Some(b"unique-token-id".to_vec()),
+    };
+    token.cat = CatClaims {
+        catreplay: Some(cat_token::ReplayProtection::Prohibited),
+        catpor: None,
+        catv: Some(1),
+        catnip: Some(vec![
+            NetworkIdentifier::IpPrefix("192.168.1.0".parse().unwrap(), 24),
+            NetworkIdentifier::IpPrefix("10.0.0.0".parse().unwrap(), 8),
+        ]),
+        catu: Some(vec![
+            UriMatchRule {
+                component: URI_COMPONENT_HOST,
+                matches: vec![MatchValue::Exact("api.example.com".to_string())],
+            },
+            UriMatchRule {
+                component: URI_COMPONENT_PATH,
+                matches: vec![MatchValue::Prefix("/v1/".to_string())],
+            },
+        ]),
+        catm: Some(vec!["GET".to_string(), "POST".to_string()]),
+        catalpn: Some(vec![b"h2".to_vec(), b"http/1.1".to_vec()]),
+        cath: Some(vec![
+            HeaderMatchRule {
+                name: "Host".to_string(),
+                matches: vec![MatchValue::Exact("api.example.com".to_string())],
+            },
+            HeaderMatchRule {
+                name: "Host".to_string(),
+                matches: vec![MatchValue::Suffix(".example.org".to_string())],
+            },
+        ]),
+        catgeoiso3166: Some(vec!["US".to_string(), "CA".to_string()]),
+        catgeocoord: Some(vec![GeoCoordinate {
+            lat: 34.0522,
+            lon: -118.2437,
+            radius: Some(25),
+        }]),
+        geohash: Some(vec!["9q5ct".to_string()]),
+        catgeoalt: Some(cat_token::GeoAltitude {
+            altitude: 100.0,
+            deviation: 10.0,
+        }),
+        cattpk: Some(b"thumbprint-data".to_vec()),
+    };
+    token.moqt = cat_token::claims::MoqtClaims {
+        moqt: None,
+        moqt_reval: None,
     };
 
     let cwt = Cwt::new(-4, token.clone()); // HMAC256

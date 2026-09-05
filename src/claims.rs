@@ -57,7 +57,7 @@ pub(crate) const CATR_ADDITIONAL_COOKIE_PARAMS: i64 = 5;
 pub(crate) const CATR_ADDITIONAL_HEADER_PARAMS: i64 = 6;
 pub(crate) const CATR_STATUS_CODE: i64 = 7;
 
-// Composite Claims (RFC draft-lemmons-cose-composite-claims-01)
+// Composite Claims (RFC draft-lemmons-cose-composite-claims-02)
 pub const CLAIM_OR: i64 = 324;
 pub const CLAIM_NOR: i64 = 325;
 pub const CLAIM_AND: i64 = 326;
@@ -215,11 +215,12 @@ impl CatDpopSettings {
 
     pub fn validate_crit(&self) -> Result<(), crate::CatError> {
         if let Some(ref crit) = self.crit {
-            const KNOWN_KEYS: &[i64] = &[CATDPOP_CRIT, CATDPOP_WINDOW, CATDPOP_HONOR_JTI];
+            // crit MUST NOT contain always-understood keys (CTA-5007-B §4.8.2)
+            const ALWAYS_UNDERSTOOD: &[i64] = &[CATDPOP_CRIT, CATDPOP_WINDOW, CATDPOP_HONOR_JTI];
             for &key in crit {
-                if !KNOWN_KEYS.contains(&key) {
+                if ALWAYS_UNDERSTOOD.contains(&key) {
                     return Err(crate::CatError::InvalidClaimValue(format!(
-                        "Unsupported critical DPoP setting key: {key}"
+                        "catdpop crit must not contain always-understood key: {key}"
                     )));
                 }
             }
@@ -403,7 +404,7 @@ pub enum ClaimSet {
 }
 
 /// Composite claim structure implementing logical relationships between claim sets
-/// as defined in draft-lemmons-cose-composite-claims-01
+/// as defined in draft-lemmons-cose-composite-claims-02
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CompositeClaim {
     /// The logical operator for this composite claim
@@ -905,9 +906,10 @@ impl TryFrom<i32> for MoqtAction {
 #[cfg(feature = "moqt")]
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum BinaryMatchType {
-    Exact = 0,
-    Prefix = 1,
-    Suffix = 2,
+    Any,
+    Exact,
+    Prefix,
+    Suffix,
 }
 
 #[cfg(feature = "moqt")]
@@ -921,7 +923,7 @@ pub struct BinaryMatch {
 impl Default for BinaryMatch {
     fn default() -> Self {
         Self {
-            match_type: BinaryMatchType::Exact,
+            match_type: BinaryMatchType::Any,
             pattern: Vec::new(),
         }
     }
@@ -966,16 +968,13 @@ impl BinaryMatch {
         Self::suffix(s.as_bytes().to_vec())
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.pattern.is_empty()
+    pub fn is_wildcard(&self) -> bool {
+        self.match_type == BinaryMatchType::Any
     }
 
     pub fn matches(&self, input: &[u8]) -> bool {
-        if self.pattern.is_empty() {
-            return true;
-        }
-
         match self.match_type {
+            BinaryMatchType::Any => true,
             BinaryMatchType::Exact => input == self.pattern.as_slice(),
             BinaryMatchType::Prefix => input.starts_with(&self.pattern),
             BinaryMatchType::Suffix => input.ends_with(&self.pattern),
@@ -1133,8 +1132,8 @@ pub struct CatToken {
     pub composite: CompositeClaims,
     #[cfg(feature = "moqt")]
     pub moqt: MoqtClaims,
-    pub custom: HashMap<i64, ciborium::Value>,
-    pub was_encrypted: bool,
+    pub(crate) custom: HashMap<i64, ciborium::Value>,
+    pub(crate) was_encrypted: bool,
 }
 
 impl Default for CatToken {
@@ -1451,6 +1450,14 @@ impl CatToken {
         } else {
             false
         }
+    }
+
+    pub fn was_encrypted(&self) -> bool {
+        self.was_encrypted
+    }
+
+    pub fn custom_claims(&self) -> &HashMap<i64, ciborium::Value> {
+        &self.custom
     }
 
     pub fn custom_claim(&self, key: i64) -> Option<&ciborium::Value> {

@@ -339,6 +339,27 @@ impl DpopProof {
             && self.payload.is_fresh(settings.effective_window())
             && !self.signature.is_empty()
     }
+
+    pub fn validate_with_settings(&self, settings: &CatDpopSettings) -> Result<(), CatError> {
+        settings.validate_crit()?;
+        if !self.header.is_valid() {
+            return Err(CatError::DpopValidationFailed("Invalid header".to_string()));
+        }
+        if !self.payload.is_valid() {
+            return Err(CatError::DpopValidationFailed(
+                "Invalid payload".to_string(),
+            ));
+        }
+        if !self.payload.is_fresh(settings.effective_window()) {
+            return Err(CatError::DpopValidationFailed("Proof expired".to_string()));
+        }
+        if self.signature.is_empty() {
+            return Err(CatError::DpopValidationFailed(
+                "Missing signature".to_string(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 const DEFAULT_JTI_CACHE_SIZE: usize = 100_000;
@@ -365,6 +386,7 @@ pub struct DpopValidator {
     used_jtis: Arc<Mutex<LruCache<String, i64>>>,
     jti_expiry_seconds: i64,
     cache_capacity: usize,
+    jti_required: bool,
 }
 
 #[cfg(feature = "moqt")]
@@ -384,7 +406,13 @@ impl DpopValidator {
             settings,
             used_jtis: Arc::new(Mutex::new(LruCache::new(nz_cache_size))),
             cache_capacity: effective_size,
+            jti_required: true,
         }
+    }
+
+    pub fn with_jti_required(mut self, required: bool) -> Self {
+        self.jti_required = required;
+        self
     }
 
     /// Get statistics about the JTI cache.
@@ -417,6 +445,12 @@ impl DpopValidator {
         if !proof.payload.is_valid() {
             return Err(CatError::DpopValidationFailed(
                 "Invalid payload".to_string(),
+            ));
+        }
+
+        if self.jti_required && proof.payload.jti.is_none() {
+            return Err(CatError::DpopValidationFailed(
+                "DPoP proof missing required jti claim".to_string(),
             ));
         }
 
@@ -516,6 +550,38 @@ impl DpopValidator {
         Ok(())
     }
 
+    /// Validate DPoP proof without committing the JTI to the replay cache.
+    /// Use this when additional checks (e.g. target binding) must pass before replay
+    /// protection is finalized. Call `commit_jti` after those checks succeed.
+    pub fn validate_without_jti_commit(
+        &self,
+        proof: &DpopProof,
+        expected_action: MoqtAction,
+        expected_thumbprint: &[u8],
+    ) -> Result<(), CatError> {
+        self.validate_claims_pre_sig(proof, expected_action, expected_thumbprint, None)?;
+
+        if !proof.header.is_supported_algorithm() {
+            return Err(CatError::DpopAlgorithmNotSupported(
+                proof.header.alg.clone(),
+            ));
+        }
+
+        let computed_thumbprint = proof.header.jwk.thumbprint()?;
+        if !crate::crypto::constant_time_eq(&computed_thumbprint, expected_thumbprint) {
+            return Err(CatError::DpopKeyMismatch);
+        }
+
+        self.verify_with_embedded_key(proof)?;
+
+        Ok(())
+    }
+
+    /// Commit the JTI to the replay cache after all validation checks have passed.
+    pub fn commit_jti(&self, proof: &DpopProof, thumbprint: &[u8]) -> Result<(), CatError> {
+        self.insert_jti(proof, thumbprint)
+    }
+
     /// Validate DPoP proof using the embedded JWK for signature verification.
     ///
     /// This is the recommended validation method. It derives the verification key
@@ -528,28 +594,8 @@ impl DpopValidator {
         expected_action: MoqtAction,
         expected_thumbprint: &[u8],
     ) -> Result<(), CatError> {
-        // 1. Validate claims (without JTI insertion)
-        self.validate_claims_pre_sig(proof, expected_action, expected_thumbprint, None)?;
-
-        // 2. Verify the algorithm is supported
-        if !proof.header.is_supported_algorithm() {
-            return Err(CatError::DpopAlgorithmNotSupported(
-                proof.header.alg.clone(),
-            ));
-        }
-
-        // 3. Verify embedded JWK thumbprint matches expected
-        let computed_thumbprint = proof.header.jwk.thumbprint()?;
-        if !crate::crypto::constant_time_eq(&computed_thumbprint, expected_thumbprint) {
-            return Err(CatError::DpopKeyMismatch);
-        }
-
-        // 4. Verify signature using the embedded JWK
-        self.verify_with_embedded_key(proof)?;
-
-        // 5. Only insert JTI after successful verification
+        self.validate_without_jti_commit(proof, expected_action, expected_thumbprint)?;
         self.insert_jti(proof, expected_thumbprint)?;
-
         Ok(())
     }
 

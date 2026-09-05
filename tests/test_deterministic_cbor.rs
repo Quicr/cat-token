@@ -115,11 +115,25 @@ fn test_many_sorted_keys_accepted() {
 }
 
 #[test]
-fn test_negative_then_positive_keys_ordering() {
-    // In CBOR deterministic encoding, positive integers sort before negative.
-    // However, when converted to i64, -1 < 1. Our validation uses i64 comparison.
-    // This test documents the behavior: we follow integer ordering after conversion.
-    let map = ciborium::Value::Map(vec![
+fn test_canonical_ordering_positive_before_negative() {
+    // RFC 8949 §4.2.1: non-negative (major type 0) sorts before negative (major type 1).
+    // Correct canonical order: 0, 1, ..., -1, -2, ...
+    let correct_map = ciborium::Value::Map(vec![
+        (
+            ciborium::Value::Integer(1.into()),
+            ciborium::Value::Text("positive".to_string()),
+        ),
+        (
+            ciborium::Value::Integer((-1_i64).into()),
+            ciborium::Value::Text("negative".to_string()),
+        ),
+    ]);
+    let mut cbor = Vec::new();
+    ciborium::ser::into_writer(&correct_map, &mut cbor).unwrap();
+    assert!(Cwt::decode_payload(&cbor).is_ok());
+
+    // Wrong order: negative before positive must be rejected
+    let wrong_map = ciborium::Value::Map(vec![
         (
             ciborium::Value::Integer((-1_i64).into()),
             ciborium::Value::Text("negative".to_string()),
@@ -129,12 +143,36 @@ fn test_negative_then_positive_keys_ordering() {
             ciborium::Value::Text("positive".to_string()),
         ),
     ]);
-    let mut cbor = Vec::new();
-    ciborium::ser::into_writer(&map, &mut cbor).unwrap();
+    let mut cbor2 = Vec::new();
+    ciborium::ser::into_writer(&wrong_map, &mut cbor2).unwrap();
+    assert!(Cwt::decode_payload(&cbor2).is_err());
+}
 
-    // This should be accepted since -1 < 1 in i64 ordering
-    let result = Cwt::decode_payload(&cbor);
-    assert!(result.is_ok());
+#[test]
+fn test_canonical_ordering_multiple_negatives() {
+    // RFC 8949 §4.2.1: non-negative keys before negative, ascending within each group
+    // Use high custom claim keys to avoid collision with known claims
+    let correct_map = ciborium::Value::Map(vec![
+        (
+            ciborium::Value::Integer(1000.into()),
+            ciborium::Value::Integer(0.into()),
+        ),
+        (
+            ciborium::Value::Integer(1001.into()),
+            ciborium::Value::Integer(1.into()),
+        ),
+        (
+            ciborium::Value::Integer((-1_i64).into()),
+            ciborium::Value::Integer(2.into()),
+        ),
+        (
+            ciborium::Value::Integer((-2_i64).into()),
+            ciborium::Value::Integer(3.into()),
+        ),
+    ]);
+    let mut cbor = Vec::new();
+    ciborium::ser::into_writer(&correct_map, &mut cbor).unwrap();
+    assert!(Cwt::decode_payload(&cbor).is_ok());
 }
 
 #[test]

@@ -1,22 +1,22 @@
 // Tests for CTA-5007-B §4.8.2.1: catdpop critical settings (key -1).
+// crit MUST NOT contain always-understood keys (-1, 0, 1).
 
 use cat_token::*;
 
 #[test]
-fn test_crit_known_keys_accepted() {
+fn test_crit_known_keys_rejected() {
     let settings = CatDpopSettings::new()
         .with_critical(vec![0, 1])
         .with_window(300)
         .with_jti_processing(true);
 
-    assert!(settings.validate_crit().is_ok());
+    assert!(settings.validate_crit().is_err());
 }
 
 #[test]
-fn test_crit_unknown_key_rejected() {
-    let settings = CatDpopSettings::new().with_critical(vec![0, 1, 99]);
-
-    assert!(settings.validate_crit().is_err());
+fn test_crit_unknown_extension_key_accepted() {
+    let settings = CatDpopSettings::new().with_critical(vec![99]);
+    assert!(settings.validate_crit().is_ok());
 }
 
 #[test]
@@ -37,7 +37,7 @@ fn test_crit_roundtrip_encode_decode() {
     let algorithm = HmacSha256Algorithm::from_secret_key(&alg);
 
     let settings = CatDpopSettings::new()
-        .with_critical(vec![0, 1])
+        .with_critical(vec![99])
         .with_window(600);
 
     let token = CatToken::new()
@@ -48,13 +48,30 @@ fn test_crit_roundtrip_encode_decode() {
     let decoded = decode_token(&encoded, &algorithm).unwrap();
 
     let dpop = decoded.dpop.catdpop.unwrap();
-    assert_eq!(dpop.crit, Some(vec![0, 1]));
+    assert_eq!(dpop.crit, Some(vec![99]));
     assert_eq!(dpop.window, Some(600));
 }
 
 #[test]
-fn test_crit_with_negative_one_key() {
+fn test_crit_with_negative_one_key_rejected() {
     let settings = CatDpopSettings::new().with_critical(vec![-1, 0]);
+    assert!(settings.validate_crit().is_err());
+}
 
-    assert!(settings.validate_crit().is_ok());
+#[test]
+fn test_crit_negative_one_alone_rejected() {
+    let settings = CatDpopSettings::new().with_critical(vec![-1]);
+    assert!(settings.validate_crit().is_err());
+}
+
+#[test]
+fn test_crit_zero_alone_rejected() {
+    let settings = CatDpopSettings::new().with_critical(vec![0]);
+    assert!(settings.validate_crit().is_err());
+}
+
+#[test]
+fn test_crit_one_alone_rejected() {
+    let settings = CatDpopSettings::new().with_critical(vec![1]);
+    assert!(settings.validate_crit().is_err());
 }

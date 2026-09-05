@@ -52,6 +52,23 @@ fn validate_cbor_map_ordering_limited(
     validate_cbor_map_ordering_with_depth(map, 0, max_depth)
 }
 
+/// RFC 8949 §4.2.1 canonical ordering for integer keys.
+/// Major type 0 (unsigned/non-negative) sorts before major type 1 (negative).
+/// Within each group, keys sort by ascending absolute value.
+/// Correct order: 0, 1, 2, ..., -1, -2, -3, ...
+fn cbor_canonical_key_cmp(a: i64, b: i64) -> std::cmp::Ordering {
+    match (a >= 0, b >= 0) {
+        (true, true) => a.cmp(&b),
+        (false, false) => {
+            // Both negative: -1 < -2 < -3 in canonical order (smaller abs first)
+            // -1 has abs 1, -2 has abs 2, so compare absolute values ascending
+            b.cmp(&a) // reverse because more negative = larger abs
+        }
+        (true, false) => std::cmp::Ordering::Less, // non-negative before negative
+        (false, true) => std::cmp::Ordering::Greater,
+    }
+}
+
 fn validate_cbor_map_ordering_with_depth(
     map: &[(Value, Value)],
     depth: usize,
@@ -70,7 +87,7 @@ fn validate_cbor_map_ordering_with_depth(
                 if k == prev {
                     return Err(CatError::InvalidCbor(format!("Duplicate map key: {k}")));
                 }
-                if k < prev {
+                if cbor_canonical_key_cmp(k, prev) != std::cmp::Ordering::Greater {
                     return Err(CatError::InvalidCbor(
                         "Map keys not in deterministic order per RFC 8949 §4.2.1".to_string(),
                     ));
@@ -166,7 +183,7 @@ fn sort_integer_keyed_map(map: &mut [(Value, Value)]) {
             Value::Integer(i) => (*i).try_into().unwrap_or(i64::MAX),
             _ => i64::MAX,
         };
-        a_key.cmp(&b_key)
+        cbor_canonical_key_cmp(a_key, b_key)
     });
 }
 
@@ -611,14 +628,7 @@ impl Cwt {
 
         if let Some(ref catdpop) = self.payload.dpop.catdpop {
             let mut dpop_map = Vec::new();
-            if let Some(ref crit) = catdpop.crit {
-                let crit_array: Vec<Value> =
-                    crit.iter().map(|&k| Value::Integer(k.into())).collect();
-                dpop_map.push((
-                    Value::Integer(CATDPOP_CRIT.into()),
-                    Value::Array(crit_array),
-                ));
-            }
+            // Canonical order per RFC 8949 §4.2.1: non-negative first (0, 1), then negative (-1)
             if let Some(window) = catdpop.window {
                 dpop_map.push((
                     Value::Integer(CATDPOP_WINDOW.into()),
@@ -630,6 +640,14 @@ impl Cwt {
                 dpop_map.push((
                     Value::Integer(CATDPOP_HONOR_JTI.into()),
                     Value::Integer(jti_value.into()),
+                ));
+            }
+            if let Some(ref crit) = catdpop.crit {
+                let crit_array: Vec<Value> =
+                    crit.iter().map(|&k| Value::Integer(k.into())).collect();
+                dpop_map.push((
+                    Value::Integer(CATDPOP_CRIT.into()),
+                    Value::Array(crit_array),
                 ));
             }
             if !dpop_map.is_empty() {
@@ -793,11 +811,8 @@ impl Cwt {
 
 #[cfg(feature = "moqt")]
 fn encode_binary_match(binary_match: &crate::claims::BinaryMatch) -> Value {
-    if binary_match.is_empty() {
-        return Value::Bytes(vec![]);
-    }
-
     match binary_match.match_type {
+        BinaryMatchType::Any => Value::Bytes(vec![]),
         BinaryMatchType::Exact => Value::Bytes(binary_match.pattern.clone()),
         BinaryMatchType::Prefix => Value::Array(vec![
             Value::Integer(MATCH_TYPE_PREFIX.into()),
@@ -1253,12 +1268,21 @@ impl Cwt {
                                 Value::Integer(i) => Some(
                                     (*i).try_into().map_err(|_| CatError::InvalidTokenFormat)?,
                                 ),
-                                _ => None,
+                                _ => {
+                                    return Err(CatError::InvalidClaimValue(
+                                        "catpor expiration must be an integer".to_string(),
+                                    ));
+                                }
                             }
                         } else {
                             None
                         };
                         validate_float(probability, "catpor.probability")?;
+                        if !(0.0..=1.0).contains(&probability) {
+                            return Err(CatError::InvalidClaimValue(format!(
+                                "catpor probability must be in [0.0, 1.0], got {probability}"
+                            )));
+                        }
                         cat.catpor = Some(crate::claims::ProbabilityOfRejection {
                             probability,
                             id,
@@ -1455,6 +1479,12 @@ impl Cwt {
                                         "catgeocoord zone must have at least 2 elements"
                                             .to_string(),
                                     ));
+                                }
+                                if elements.len() > 3 {
+                                    return Err(CatError::InvalidClaimValue(format!(
+                                        "catgeocoord zone must have at most 3 elements (lat, lon, radius), got {}",
+                                        elements.len()
+                                    )));
                                 }
                                 let lat = match &elements[0] {
                                     Value::Float(f) => *f,
@@ -1813,9 +1843,14 @@ impl Cwt {
                                         ));
                                     }
                                 }
-                                _ => {}
+                                _ => {
+                                    return Err(CatError::InvalidClaimValue(format!(
+                                        "Unknown catdpop sub-key: {key_val}"
+                                    )));
+                                }
                             }
                         }
+                        settings.validate_crit()?;
                         dpop.catdpop = Some(settings);
                     } else {
                         return Err(CatError::InvalidClaimValue(
@@ -2024,10 +2059,26 @@ impl Cwt {
                                         ));
                                     }
                                 }
-                                _ => {}
+                                _ => {
+                                    return Err(CatError::InvalidClaimValue(format!(
+                                        "Unknown catr sub-key: {key}"
+                                    )));
+                                }
                             }
                         }
                         if let Some(rt) = renewal_type {
+                            if let Some(ea) = expadd {
+                                if ea <= 0 {
+                                    return Err(CatError::InvalidClaimValue(
+                                        "catr expadd must be a positive integer".to_string(),
+                                    ));
+                                }
+                            } else {
+                                return Err(CatError::InvalidClaimValue(
+                                    "catr expadd is required when renewal type is present"
+                                        .to_string(),
+                                ));
+                            }
                             request.catr = Some(CatRenewal {
                                 renewal_type: rt,
                                 expadd,
@@ -2214,6 +2265,17 @@ fn decode_composite_claim(
     limits: &CwtLimits,
     depth: usize,
 ) -> Result<crate::claims::CompositeClaim, CatError> {
+    let mut counters = DecodeCounters::default();
+    decode_composite_claim_with_counters(claim_id, value, limits, depth, &mut counters)
+}
+
+fn decode_composite_claim_with_counters(
+    claim_id: i64,
+    value: Value,
+    limits: &CwtLimits,
+    depth: usize,
+    counters: &mut DecodeCounters,
+) -> Result<crate::claims::CompositeClaim, CatError> {
     if depth >= limits.max_nesting_depth {
         return Err(CatError::InvalidClaimValue(
             "Composite claim nesting too deep".to_string(),
@@ -2239,6 +2301,7 @@ fn decode_composite_claim(
     };
     let mut composite = crate::claims::CompositeClaim::new(op);
     for item in arr {
+        counters.count_item(limits)?;
         match item {
             Value::Map(ref map) => {
                 let has_nested_composite = map.iter().any(|(k, _)| {
@@ -2261,7 +2324,13 @@ fn decode_composite_claim(
                             ));
                         }
                     };
-                    let nested = decode_composite_claim(nested_id, v.clone(), limits, depth + 1)?;
+                    let nested = decode_composite_claim_with_counters(
+                        nested_id,
+                        v.clone(),
+                        limits,
+                        depth + 1,
+                        counters,
+                    )?;
                     composite.add_composite(nested);
                 } else {
                     let mut buf = Vec::new();

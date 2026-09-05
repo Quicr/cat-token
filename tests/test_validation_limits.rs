@@ -38,13 +38,8 @@ fn test_catm_50_methods_accepted() {
     let alg = HmacSha256Algorithm::from_secret_key(&key);
 
     let methods: Vec<String> = (0..50).map(|i| format!("METHOD{i}")).collect();
-    let token = CatToken {
-        cat: CatClaims {
-            catm: Some(methods),
-            ..Default::default()
-        },
-        ..CatToken::new()
-    };
+    let mut token = CatToken::new();
+    token.cat.catm = Some(methods);
 
     let encoded = encode_token(&token, &alg).unwrap();
     assert!(decode_token(&encoded, &alg).is_ok());
@@ -56,13 +51,8 @@ fn test_catm_51_methods_rejected() {
     let alg = HmacSha256Algorithm::from_secret_key(&key);
 
     let methods: Vec<String> = (0..51).map(|i| format!("METHOD{i}")).collect();
-    let token = CatToken {
-        cat: CatClaims {
-            catm: Some(methods),
-            ..Default::default()
-        },
-        ..CatToken::new()
-    };
+    let mut token = CatToken::new();
+    token.cat.catm = Some(methods);
 
     let encoded = encode_token(&token, &alg).unwrap();
     let result = decode_token(&encoded, &alg);
@@ -75,13 +65,8 @@ fn test_catalpn_50_entries_accepted() {
     let alg = HmacSha256Algorithm::from_secret_key(&key);
 
     let alpns: Vec<Vec<u8>> = (0..50).map(|i| format!("alpn{i}").into_bytes()).collect();
-    let token = CatToken {
-        cat: CatClaims {
-            catalpn: Some(alpns),
-            ..Default::default()
-        },
-        ..CatToken::new()
-    };
+    let mut token = CatToken::new();
+    token.cat.catalpn = Some(alpns);
 
     let encoded = encode_token(&token, &alg).unwrap();
     assert!(decode_token(&encoded, &alg).is_ok());
@@ -93,13 +78,8 @@ fn test_catalpn_51_entries_rejected() {
     let alg = HmacSha256Algorithm::from_secret_key(&key);
 
     let alpns: Vec<Vec<u8>> = (0..51).map(|i| format!("alpn{i}").into_bytes()).collect();
-    let token = CatToken {
-        cat: CatClaims {
-            catalpn: Some(alpns),
-            ..Default::default()
-        },
-        ..CatToken::new()
-    };
+    let mut token = CatToken::new();
+    token.cat.catalpn = Some(alpns);
 
     let encoded = encode_token(&token, &alg).unwrap();
     let result = decode_token(&encoded, &alg);
