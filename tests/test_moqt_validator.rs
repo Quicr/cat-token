@@ -506,11 +506,11 @@ fn test_dpop_validator_concurrent_jti() {
                 .with_jti(jti.clone());
                 proof.sign(alg_clone.as_ref()).unwrap();
 
-                let result = validator.validate(&proof, MoqtAction::Publish, &thumbprint);
+                let result = validator.validate(&proof, MoqtAction::Publish, &thumbprint, None);
                 assert!(result.is_ok(), "First use of JTI {} should succeed", jti);
 
                 // Second use should fail (replay)
-                let result = validator.validate(&proof, MoqtAction::Publish, &thumbprint);
+                let result = validator.validate(&proof, MoqtAction::Publish, &thumbprint, None);
                 assert!(
                     matches!(result, Err(CatError::ReplayAttackDetected)),
                     "Replay of JTI {} should fail",
@@ -552,7 +552,7 @@ fn test_jti_cache_stats() {
         .with_jti(jti);
         proof.sign(&alg).unwrap();
 
-        let result = validator.validate(&proof, MoqtAction::Publish, &thumbprint);
+        let result = validator.validate(&proof, MoqtAction::Publish, &thumbprint, None);
         assert!(result.is_ok(), "Validation should succeed for unique JTI");
     }
 

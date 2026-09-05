@@ -10,6 +10,7 @@ use std::collections::HashMap;
 pub struct KeyHint {
     pub algorithm_id: i64,
     pub kid: Option<Vec<u8>>,
+    pub issuer: Option<String>,
 }
 
 impl From<&TokenHeader> for KeyHint {
@@ -17,7 +18,15 @@ impl From<&TokenHeader> for KeyHint {
         Self {
             algorithm_id: header.algorithm_id,
             kid: header.kid.clone(),
+            issuer: None,
         }
+    }
+}
+
+impl KeyHint {
+    pub fn with_issuer(mut self, issuer: Option<String>) -> Self {
+        self.issuer = issuer;
+        self
     }
 }
 
@@ -43,6 +52,7 @@ impl<A: CryptographicAlgorithm + Send + Sync> KeyResolver for StaticKeyResolver<
 
 pub struct KeyRingResolver {
     keys: HashMap<Vec<u8>, Box<dyn CryptographicAlgorithm + Send + Sync>>,
+    issuer_keys: HashMap<String, Box<dyn CryptographicAlgorithm + Send + Sync>>,
     default: Option<Box<dyn CryptographicAlgorithm + Send + Sync>>,
 }
 
@@ -50,6 +60,7 @@ impl KeyRingResolver {
     pub fn new() -> Self {
         Self {
             keys: HashMap::new(),
+            issuer_keys: HashMap::new(),
             default: None,
         }
     }
@@ -68,6 +79,15 @@ impl KeyRingResolver {
         algorithm: Box<dyn CryptographicAlgorithm + Send + Sync>,
     ) -> Self {
         self.default = Some(algorithm);
+        self
+    }
+
+    pub fn with_key_for_issuer(
+        mut self,
+        issuer: String,
+        algorithm: Box<dyn CryptographicAlgorithm + Send + Sync>,
+    ) -> Self {
+        self.issuer_keys.insert(issuer, algorithm);
         self
     }
 
@@ -96,6 +116,12 @@ impl Default for KeyRingResolver {
 
 impl KeyResolver for KeyRingResolver {
     fn resolve(&self, hint: &KeyHint) -> Result<&dyn CryptographicAlgorithm, CatError> {
+        if let Some(ref issuer) = hint.issuer
+            && let Some(alg) = self.issuer_keys.get(issuer)
+        {
+            return Ok(alg.as_ref() as &dyn CryptographicAlgorithm);
+        }
+
         match &hint.kid {
             Some(kid) => self
                 .keys

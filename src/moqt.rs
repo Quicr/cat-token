@@ -220,8 +220,10 @@ impl MoqtValidator {
                 return Err(CatError::InvalidDpopBinding);
             }
 
+            let issuer = token.claims().core.iss.as_deref();
+
             // Validate proof without committing JTI — target checks must pass first
-            validator.validate_without_jti_commit(proof, request.action, &cnf.jkt)?;
+            validator.validate_without_jti_commit(proof, request.action, &cnf.jkt, issuer)?;
 
             // Verify proof is bound to the requested target before committing JTI
             if proof.payload.actx.tns != request.namespace {
@@ -254,7 +256,7 @@ impl MoqtValidator {
             }
 
             // All checks passed — commit JTI to replay cache
-            validator.commit_jti(proof, &cnf.jkt)?;
+            validator.commit_jti(proof, &cnf.jkt, issuer)?;
         }
 
         Ok(auth_result)

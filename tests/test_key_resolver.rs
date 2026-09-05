@@ -41,18 +41,21 @@ fn test_keyring_resolver_multiple_keys() {
     let hint_1 = KeyHint {
         algorithm_id: -7,
         kid: Some(b"key-1".to_vec()),
+        issuer: None,
     };
     assert!(resolver.resolve(&hint_1).is_ok());
 
     let hint_2 = KeyHint {
         algorithm_id: -7,
         kid: Some(b"key-2".to_vec()),
+        issuer: None,
     };
     assert!(resolver.resolve(&hint_2).is_ok());
 
     let hint_missing = KeyHint {
         algorithm_id: -7,
         kid: Some(b"key-3".to_vec()),
+        issuer: None,
     };
     assert!(resolver.resolve(&hint_missing).is_err());
 }

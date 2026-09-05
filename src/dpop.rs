@@ -457,7 +457,6 @@ pub struct DpopValidator {
     jti_store: Arc<dyn JtiStore>,
     jti_expiry_seconds: i64,
     cache_capacity: usize,
-    jti_required: bool,
 }
 
 #[cfg(feature = "moqt")]
@@ -468,7 +467,6 @@ impl Clone for DpopValidator {
             jti_store: Arc::clone(&self.jti_store),
             jti_expiry_seconds: self.jti_expiry_seconds,
             cache_capacity: self.cache_capacity,
-            jti_required: self.jti_required,
         }
     }
 }
@@ -482,27 +480,26 @@ impl DpopValidator {
     pub fn with_cache_size(settings: CatDpopSettings, cache_size: usize) -> Self {
         let effective_size = cache_size.max(MIN_JTI_CACHE_SIZE);
         Self {
-            jti_expiry_seconds: settings.effective_window() * 2,
+            jti_expiry_seconds: settings
+                .effective_window()
+                .checked_mul(2)
+                .unwrap_or(i64::MAX),
             jti_store: Arc::new(LruJtiStore::new(effective_size)),
             cache_capacity: effective_size,
             settings,
-            jti_required: true,
         }
     }
 
     pub fn with_jti_store(settings: CatDpopSettings, store: Arc<dyn JtiStore>) -> Self {
         Self {
-            jti_expiry_seconds: settings.effective_window() * 2,
+            jti_expiry_seconds: settings
+                .effective_window()
+                .checked_mul(2)
+                .unwrap_or(i64::MAX),
             cache_capacity: 0,
             jti_store: store,
             settings,
-            jti_required: true,
         }
-    }
-
-    pub fn with_jti_required(mut self, required: bool) -> Self {
-        self.jti_required = required;
-        self
     }
 
     pub fn jti_cache_stats(&self) -> JtiCacheStats {
@@ -533,7 +530,7 @@ impl DpopValidator {
             ));
         }
 
-        if self.jti_required && proof.payload.jti.is_none() {
+        if proof.payload.jti.is_none() {
             return Err(CatError::DpopValidationFailed(
                 "DPoP proof missing required jti claim".to_string(),
             ));
@@ -575,11 +572,17 @@ impl DpopValidator {
         Ok(())
     }
 
-    fn insert_jti(&self, proof: &DpopProof, thumbprint: &[u8]) -> Result<(), CatError> {
+    fn insert_jti(
+        &self,
+        proof: &DpopProof,
+        thumbprint: &[u8],
+        issuer: Option<&str>,
+    ) -> Result<(), CatError> {
         if self.settings.should_honor_jti()
             && let Some(ref jti) = proof.payload.jti
         {
-            let composite_key = format!("{}:{}", hex::encode(thumbprint), jti);
+            let iss = issuer.unwrap_or("_");
+            let composite_key = format!("{}:{}:{}", iss, hex::encode(thumbprint), jti);
             self.jti_store
                 .check_and_insert(composite_key, proof.payload.iat)?;
         }
@@ -614,6 +617,7 @@ impl DpopValidator {
         proof: &DpopProof,
         expected_action: MoqtAction,
         expected_thumbprint: &[u8],
+        _issuer: Option<&str>,
     ) -> Result<(), CatError> {
         self.validate_claims_pre_sig(proof, expected_action, expected_thumbprint, None)?;
 
@@ -633,8 +637,13 @@ impl DpopValidator {
         Ok(())
     }
 
-    pub(crate) fn commit_jti(&self, proof: &DpopProof, thumbprint: &[u8]) -> Result<(), CatError> {
-        self.insert_jti(proof, thumbprint)
+    pub(crate) fn commit_jti(
+        &self,
+        proof: &DpopProof,
+        thumbprint: &[u8],
+        issuer: Option<&str>,
+    ) -> Result<(), CatError> {
+        self.insert_jti(proof, thumbprint, issuer)
     }
 
     /// Validate DPoP proof using the embedded JWK for signature verification.
@@ -648,9 +657,10 @@ impl DpopValidator {
         proof: &DpopProof,
         expected_action: MoqtAction,
         expected_thumbprint: &[u8],
+        issuer: Option<&str>,
     ) -> Result<(), CatError> {
-        self.validate_without_jti_commit(proof, expected_action, expected_thumbprint)?;
-        self.insert_jti(proof, expected_thumbprint)?;
+        self.validate_without_jti_commit(proof, expected_action, expected_thumbprint, issuer)?;
+        self.insert_jti(proof, expected_thumbprint, issuer)?;
         Ok(())
     }
 
@@ -661,6 +671,7 @@ impl DpopValidator {
         expected_action: MoqtAction,
         expected_thumbprint: &[u8],
         access_token_hash: Option<&str>,
+        issuer: Option<&str>,
     ) -> Result<(), CatError> {
         self.validate_claims_pre_sig(
             proof,
@@ -681,7 +692,7 @@ impl DpopValidator {
         }
 
         self.verify_with_embedded_key(proof)?;
-        self.insert_jti(proof, expected_thumbprint)?;
+        self.insert_jti(proof, expected_thumbprint, issuer)?;
 
         Ok(())
     }
@@ -782,7 +793,7 @@ mod tests {
 
         // Use new validate() which derives the key from the embedded JWK
         validator
-            .validate(&proof, MoqtAction::Subscribe, &thumbprint)
+            .validate(&proof, MoqtAction::Subscribe, &thumbprint, None)
             .unwrap();
     }
 

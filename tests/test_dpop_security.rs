@@ -38,7 +38,7 @@ fn test_dpop_uses_embedded_key() {
 
     // validate() derives the key from the embedded JWK — no external algorithm needed
     validator
-        .validate(&proof, MoqtAction::Subscribe, &thumbprint)
+        .validate(&proof, MoqtAction::Subscribe, &thumbprint, None)
         .unwrap();
 }
 
@@ -68,7 +68,7 @@ fn test_dpop_wrong_embedded_key_rejected() {
     let validator = DpopValidator::new(settings);
 
     // Should fail — signature was made with cat_alg but JWK advertises dpop_alg's key
-    let result = validator.validate(&proof, MoqtAction::Subscribe, &dpop_thumbprint);
+    let result = validator.validate(&proof, MoqtAction::Subscribe, &dpop_thumbprint, None);
     assert!(result.is_err(), "Should reject proof signed with wrong key");
     assert!(matches!(result, Err(CatError::SignatureVerificationFailed)));
 }
@@ -226,7 +226,7 @@ fn test_replay_cache_not_polluted_on_bad_signature() {
     let validator = DpopValidator::new(settings);
 
     // Should fail — wrong signature
-    let result = validator.validate(&bad_proof, MoqtAction::Subscribe, &thumbprint);
+    let result = validator.validate(&bad_proof, MoqtAction::Subscribe, &thumbprint, None);
     assert!(result.is_err());
 
     // Now create a valid proof with the SAME JTI
@@ -241,7 +241,7 @@ fn test_replay_cache_not_polluted_on_bad_signature() {
     good_proof.sign(&good_alg).unwrap();
 
     // Should succeed — the JTI was NOT consumed by the failed attempt
-    let result = validator.validate(&good_proof, MoqtAction::Subscribe, &thumbprint);
+    let result = validator.validate(&good_proof, MoqtAction::Subscribe, &thumbprint, None);
     assert!(
         result.is_ok(),
         "JTI should not be consumed by failed signature verification: {:?}",
@@ -273,7 +273,7 @@ fn test_dpop_key_mismatch_detected() {
     let validator = DpopValidator::new(settings);
 
     // Should fail — embedded JWK thumbprint doesn't match expected
-    let result = validator.validate(&proof, MoqtAction::Subscribe, &other_thumbprint);
+    let result = validator.validate(&proof, MoqtAction::Subscribe, &other_thumbprint, None);
     assert!(
         matches!(
             result,

@@ -1064,6 +1064,7 @@ pub fn decode_token_with_resolver_and_limits(
     let hint = crate::key_resolver::KeyHint {
         algorithm_id: header_alg,
         kid: header_kid.clone(),
+        issuer: None,
     };
     let algorithm = resolver.resolve(&hint)?;
 
