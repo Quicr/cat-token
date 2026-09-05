@@ -21,6 +21,7 @@ pub use crate::dpop::{
 };
 pub use crate::encrypt::{EncryptionAlgorithm, cose_decrypt0, cose_encrypt0};
 pub use crate::error::CatError;
+pub use crate::geo::{GeoLocationProvider, RequestLocation, validate_geographic_enforcement};
 pub use crate::jwk::Jwk;
 pub use crate::key_resolver::{KeyHint, KeyResolver, KeyRingResolver, StaticKeyResolver};
 pub use crate::pipeline::{

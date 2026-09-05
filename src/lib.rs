@@ -7,6 +7,7 @@ pub mod cwt;
 pub mod dpop;
 pub mod encrypt;
 pub mod error;
+pub mod geo;
 pub mod jwk;
 pub mod key_resolver;
 #[cfg(feature = "moqt")]
@@ -36,6 +37,7 @@ pub use cwt::*;
 pub use dpop::*;
 pub use encrypt::*;
 pub use error::*;
+pub use geo::*;
 pub use jwk::*;
 pub use key_resolver::*;
 #[cfg(feature = "moqt")]
