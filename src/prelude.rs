@@ -40,7 +40,7 @@ pub use crate::token::{
     validate_all_headers, validate_header, validate_method,
 };
 pub use crate::x509::{
-    CertificateValidator, SpkiOnlyValidator, UnsignedChainValidator, extract_spki_from_cert,
+    CertificateValidator, SpkiOnlyValidator, TimeOnlyChainValidator, extract_spki_from_cert,
     validate_cattpk, validate_cattpk_chain, validate_cattpk_with_validator,
 };
 

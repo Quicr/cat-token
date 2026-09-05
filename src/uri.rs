@@ -259,21 +259,23 @@ fn normalize_percent_encoding(s: &str) -> String {
     let mut i = 0;
 
     while i < bytes.len() {
-        if bytes[i] == b'%'
-            && i + 2 < bytes.len()
-            && let (Some(hi), Some(lo)) = (hex_val(bytes[i + 1]), hex_val(bytes[i + 2]))
-        {
-            let decoded = (hi << 4) | lo;
-            if is_unreserved(decoded) {
-                // §6.2.2.2: decode unreserved characters
-                result.push(decoded as char);
+        if bytes[i] == b'%' {
+            if i + 2 < bytes.len()
+                && let (Some(hi), Some(lo)) = (hex_val(bytes[i + 1]), hex_val(bytes[i + 2]))
+            {
+                let decoded = (hi << 4) | lo;
+                if is_unreserved(decoded) {
+                    result.push(decoded as char);
+                } else {
+                    result.push('%');
+                    result.push(to_upper_hex(hi));
+                    result.push(to_upper_hex(lo));
+                }
+                i += 3;
             } else {
-                // §6.2.2.2: uppercase hex digits for reserved/other
-                result.push('%');
-                result.push(to_upper_hex(hi));
-                result.push(to_upper_hex(lo));
+                result.push_str("%25");
+                i += 1;
             }
-            i += 3;
             continue;
         }
         result.push(bytes[i] as char);

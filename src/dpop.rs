@@ -203,9 +203,9 @@ pub fn confirmation_matches_jwk(cnf: &ConfirmationClaim, jwk: &Jwk) -> Result<bo
 #[cfg(feature = "moqt")]
 #[derive(Clone)]
 pub struct DpopProof {
-    pub header: DpopHeader,
-    pub payload: DpopPayload,
-    pub signature: Vec<u8>,
+    pub(crate) header: DpopHeader,
+    pub(crate) payload: DpopPayload,
+    pub(crate) signature: Vec<u8>,
 }
 
 #[cfg(feature = "moqt")]
@@ -227,6 +227,18 @@ impl DpopProof {
             payload,
             signature,
         }
+    }
+
+    pub fn header(&self) -> &DpopHeader {
+        &self.header
+    }
+
+    pub fn payload(&self) -> &DpopPayload {
+        &self.payload
+    }
+
+    pub fn signature(&self) -> &[u8] {
+        &self.signature
     }
 
     pub fn create_for_moqt(

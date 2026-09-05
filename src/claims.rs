@@ -1025,9 +1025,9 @@ impl NamespaceMatch {
 #[cfg(feature = "moqt")]
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct MoqtScope {
-    pub actions: Vec<MoqtAction>,
-    pub namespace_matches: Vec<NamespaceMatch>,
-    pub track_match: Option<BinaryMatch>,
+    pub(crate) actions: Vec<MoqtAction>,
+    pub(crate) namespace_matches: Vec<NamespaceMatch>,
+    pub(crate) track_match: Option<BinaryMatch>,
 }
 
 #[cfg(feature = "moqt")]
@@ -1070,6 +1070,18 @@ impl MoqtScope {
     pub fn with_track_match(mut self, track_match: BinaryMatch) -> Self {
         self.track_match = Some(track_match);
         self
+    }
+
+    pub fn actions(&self) -> &[MoqtAction] {
+        &self.actions
+    }
+
+    pub fn namespace_matches(&self) -> &[NamespaceMatch] {
+        &self.namespace_matches
+    }
+
+    pub fn track_match(&self) -> Option<&BinaryMatch> {
+        self.track_match.as_ref()
     }
 
     pub fn allows_action(&self, action: &MoqtAction) -> bool {

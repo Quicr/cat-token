@@ -66,9 +66,9 @@ impl CertificateValidator for SpkiOnlyValidator {
     }
 }
 
-pub struct UnsignedChainValidator;
+pub struct TimeOnlyChainValidator;
 
-impl CertificateValidator for UnsignedChainValidator {
+impl CertificateValidator for TimeOnlyChainValidator {
     fn validate_chain(
         &self,
         cattpk: &[u8],

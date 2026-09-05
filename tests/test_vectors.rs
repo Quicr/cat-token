@@ -383,9 +383,9 @@ fn test_vector_moqt_publisher_exact() {
 
     let scopes = decoded.moqt.moqt.as_ref().unwrap();
     assert_eq!(scopes.len(), 1);
-    assert_eq!(scopes[0].actions.len(), 2);
-    assert!(scopes[0].actions.contains(&MoqtAction::PublishNamespace));
-    assert!(scopes[0].actions.contains(&MoqtAction::Publish));
+    assert_eq!(scopes[0].actions().len(), 2);
+    assert!(scopes[0].actions().contains(&MoqtAction::PublishNamespace));
+    assert!(scopes[0].actions().contains(&MoqtAction::Publish));
 
     for test in v["authorization_tests"].as_array().unwrap() {
         let action_id = test["action"].as_i64().unwrap() as i32;
@@ -429,7 +429,7 @@ fn test_vector_moqt_subscriber_prefix() {
 
     let scopes = decoded.moqt.moqt.as_ref().unwrap();
     assert_eq!(scopes.len(), 1);
-    assert_eq!(scopes[0].actions.len(), 3);
+    assert_eq!(scopes[0].actions().len(), 3);
 
     for test in v["authorization_tests"].as_array().unwrap() {
         let action_id = test["action"].as_i64().unwrap() as i32;
@@ -517,7 +517,7 @@ fn test_vector_moqt_admin_wildcard() {
 
     let scopes = decoded.moqt.moqt.as_ref().unwrap();
     assert_eq!(scopes.len(), 1);
-    assert_eq!(scopes[0].actions.len(), 9);
+    assert_eq!(scopes[0].actions().len(), 9);
 
     for test in v["authorization_tests"].as_array().unwrap() {
         let action_id = test["action"].as_i64().unwrap() as i32;

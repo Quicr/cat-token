@@ -346,12 +346,12 @@ fn test_moqt_scope_builder() {
         .track_prefix(b"/stream/")
         .build();
 
-    assert_eq!(scope.actions.len(), 2);
+    assert_eq!(scope.actions().len(), 2);
     assert!(scope.allows_action(&MoqtAction::Publish));
     assert!(scope.allows_action(&MoqtAction::Fetch));
     assert!(!scope.allows_action(&MoqtAction::Subscribe));
-    assert_eq!(scope.namespace_matches.len(), 2);
-    assert!(scope.track_match.is_some());
+    assert_eq!(scope.namespace_matches().len(), 2);
+    assert!(scope.track_match().is_some());
 }
 
 #[test]

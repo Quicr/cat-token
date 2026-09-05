@@ -489,9 +489,9 @@ fn test_moqt_claims_creation() {
 
     let scopes = token.moqt.moqt.as_ref().unwrap();
     assert_eq!(scopes.len(), 1);
-    assert_eq!(scopes[0].actions.len(), 4);
-    assert!(scopes[0].actions.contains(&MoqtAction::PublishNamespace));
-    assert!(scopes[0].actions.contains(&MoqtAction::Publish));
+    assert_eq!(scopes[0].actions().len(), 4);
+    assert!(scopes[0].actions().contains(&MoqtAction::PublishNamespace));
+    assert!(scopes[0].actions().contains(&MoqtAction::Publish));
 
     // Test action authorization
     assert!(token.allows_moqt_action(
@@ -593,19 +593,19 @@ fn test_moqt_token_encoding_decoding() {
     assert_eq!(decoded_scopes.len(), 2);
 
     // Verify first scope
-    assert_eq!(decoded_scopes[0].actions.len(), 2);
+    assert_eq!(decoded_scopes[0].actions().len(), 2);
     assert!(
         decoded_scopes[0]
-            .actions
+            .actions()
             .contains(&MoqtAction::PublishNamespace)
     );
-    assert!(decoded_scopes[0].actions.contains(&MoqtAction::Publish));
+    assert!(decoded_scopes[0].actions().contains(&MoqtAction::Publish));
     assert!(decoded_scopes[0].matches_namespace(&[b"example.com".to_vec()]));
     assert!(decoded_scopes[0].matches_track(b"/bob/stream1"));
 
     // Verify second scope
-    assert_eq!(decoded_scopes[1].actions.len(), 1);
-    assert!(decoded_scopes[1].actions.contains(&MoqtAction::Fetch));
+    assert_eq!(decoded_scopes[1].actions().len(), 1);
+    assert!(decoded_scopes[1].actions().contains(&MoqtAction::Fetch));
     assert!(decoded_scopes[1].matches_track(b"logs/12345/bob"));
     assert!(!decoded_scopes[1].matches_track(b"logs/12345/alice"));
 }
