@@ -14,6 +14,7 @@ pub mod key_resolver;
 pub mod moqt;
 pub mod pipeline;
 pub mod prelude;
+pub mod response;
 pub mod structured_header;
 pub mod token;
 pub mod uri;
@@ -43,6 +44,7 @@ pub use key_resolver::*;
 #[cfg(feature = "moqt")]
 pub use moqt::*;
 pub use pipeline::*;
+pub use response::*;
 pub use structured_header::*;
 pub use token::*;
 pub use uri::*;

@@ -27,6 +27,7 @@ pub use crate::key_resolver::{KeyHint, KeyResolver, KeyRingResolver, StaticKeyRe
 pub use crate::pipeline::{
     AdmissionPolicy, TokenHeader, TokenProvenance, ValidatedToken, VerifiedToken,
 };
+pub use crate::response::{CatResponsePolicy, sanitize_uri_for_cache};
 pub use crate::structured_header::{
     get_sf_dictionary_member, normalize_sf_value, parse_sf_dictionary, parse_sf_item, parse_sf_list,
 };
