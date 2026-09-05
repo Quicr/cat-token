@@ -60,21 +60,30 @@ impl CatTokenValidator {
         self
     }
 
-    /// Set symmetric clock skew tolerance for both exp and nbf
-    pub fn with_clock_skew_tolerance(mut self, tolerance_seconds: i64) -> Self {
+    pub fn with_clock_skew_tolerance(mut self, tolerance_seconds: i64) -> Result<Self, CatError> {
+        if tolerance_seconds < 0 {
+            return Err(CatError::InvalidClaimValue(
+                "clock skew tolerance must not be negative".to_string(),
+            ));
+        }
         self.exp_tolerance = tolerance_seconds;
         self.nbf_tolerance = tolerance_seconds;
-        self
+        Ok(self)
     }
 
-    /// Set separate tolerances for expiration and not-before checks.
-    ///
-    /// - `exp_tolerance`: seconds past expiration that token is still accepted
-    /// - `nbf_tolerance`: seconds before not-before that token is accepted
-    pub fn with_separate_tolerances(mut self, exp_tolerance: i64, nbf_tolerance: i64) -> Self {
+    pub fn with_separate_tolerances(
+        mut self,
+        exp_tolerance: i64,
+        nbf_tolerance: i64,
+    ) -> Result<Self, CatError> {
+        if exp_tolerance < 0 || nbf_tolerance < 0 {
+            return Err(CatError::InvalidClaimValue(
+                "tolerance values must not be negative".to_string(),
+            ));
+        }
         self.exp_tolerance = exp_tolerance;
         self.nbf_tolerance = nbf_tolerance;
-        self
+        Ok(self)
     }
 
     pub fn allow_unencrypted_privacy_claims(mut self) -> Self {
@@ -94,13 +103,13 @@ impl CatTokenValidator {
         let now = Utc::now().timestamp();
 
         if let Some(exp) = token.core.exp
-            && now > exp + self.exp_tolerance
+            && now > exp.saturating_add(self.exp_tolerance)
         {
             return Err(CatError::TokenExpired);
         }
 
         if let Some(nbf) = token.core.nbf
-            && now < nbf - self.nbf_tolerance
+            && now < nbf.saturating_sub(self.nbf_tolerance)
         {
             return Err(CatError::TokenNotYetValid);
         }
@@ -733,8 +742,31 @@ impl CatTokenBuilder {
         self
     }
 
-    pub fn build(self) -> CatToken {
-        self.inner
+    pub fn build(self) -> Result<CatToken, CatError> {
+        if let Some(ref coords) = self.inner.cat.catgeocoord {
+            for coord in coords {
+                if coord.lat < -90.0 || coord.lat > 90.0 {
+                    return Err(CatError::InvalidClaimValue(format!(
+                        "latitude {} out of range [-90, 90]",
+                        coord.lat
+                    )));
+                }
+                if coord.lon < -180.0 || coord.lon > 180.0 {
+                    return Err(CatError::InvalidClaimValue(format!(
+                        "longitude {} out of range [-180, 180]",
+                        coord.lon
+                    )));
+                }
+            }
+        }
+        if let Some(ref dpop) = self.inner.dpop.catdpop
+            && dpop.effective_window() < 0
+        {
+            return Err(CatError::InvalidClaimValue(
+                "DPoP window must not be negative".to_string(),
+            ));
+        }
+        Ok(self.inner)
     }
 }
 

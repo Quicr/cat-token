@@ -36,7 +36,8 @@ fn test_moqt_validator_spec_example_exact_match() {
     let token = CatTokenBuilder::new()
         .issuer("https://spec-example.com")
         .moqt_scope(scope)
-        .build();
+        .build()
+        .unwrap();
 
     let validator = MoqtValidator::new();
 
@@ -97,7 +98,8 @@ fn test_moqt_validator_spec_example_prefix_match() {
     let token = CatTokenBuilder::new()
         .issuer("https://spec-example.com")
         .moqt_scope(scope)
-        .build();
+        .build()
+        .unwrap();
 
     let validator = MoqtValidator::new();
 
@@ -159,7 +161,8 @@ fn test_moqt_validator_multiple_scopes() {
         .audience(vec!["relay".to_string()])
         .expires_at(Utc::now() + Duration::hours(1))
         .moqt_scopes(vec![pub_scope, sub_scope])
-        .build();
+        .build()
+        .unwrap();
 
     let validator = MoqtValidator::new();
 
@@ -225,7 +228,8 @@ fn test_moqt_validator_revalidation_required() {
         .issuer("https://test.com")
         .moqt_scope(scope)
         .moqt_reval(300.0) // 5 minute revalidation
-        .build();
+        .build()
+        .unwrap();
 
     let validator = MoqtValidator::new();
 
@@ -255,7 +259,8 @@ fn test_moqt_validator_revalidation_zero() {
         .issuer("https://test.com")
         .moqt_scope(scope)
         .moqt_reval(0.0)
-        .build();
+        .build()
+        .unwrap();
 
     let validator = MoqtValidator::new();
 
@@ -285,7 +290,8 @@ fn test_moqt_validator_claims_validation() {
         .issuer("https://test.com")
         .moqt_scope(scope.clone())
         .moqt_reval(30.0) // 30 seconds
-        .build();
+        .build()
+        .unwrap();
 
     // Validator that requires at least 60 seconds
     let validator = MoqtValidator::new().with_min_revalidation_interval(60.0);
@@ -301,7 +307,8 @@ fn test_moqt_validator_claims_validation() {
         .issuer("https://test.com")
         .moqt_scope(scope)
         .moqt_reval(120.0) // 2 minutes
-        .build();
+        .build()
+        .unwrap();
 
     let result = validator.validate_moqt_claims(&token2);
     assert!(result.is_ok());
@@ -318,7 +325,8 @@ fn test_moqt_validator_no_revalidation_support() {
         .issuer("https://test.com")
         .moqt_scope(scope)
         .moqt_reval(300.0)
-        .build();
+        .build()
+        .unwrap();
 
     // Validator that doesn't support revalidation
     let validator = MoqtValidator::new().without_revalidation_support();
@@ -374,7 +382,10 @@ fn test_moqt_roles() {
 #[test]
 fn test_moqt_default_blocked() {
     // "The default for all actions is 'Blocked'"
-    let token = CatTokenBuilder::new().issuer("https://test.com").build(); // No MOQT scopes
+    let token = CatTokenBuilder::new()
+        .issuer("https://test.com")
+        .build()
+        .unwrap(); // No MOQT scopes
 
     let validator = MoqtValidator::new();
 
@@ -396,7 +407,8 @@ fn test_moqt_empty_scopes() {
     let token = CatTokenBuilder::new()
         .issuer("https://test.com")
         .moqt_scopes(vec![]) // Empty scopes array
-        .build();
+        .build()
+        .unwrap();
 
     let validator = MoqtValidator::new();
 
@@ -423,7 +435,8 @@ fn test_moqt_validator_concurrent_access() {
         CatTokenBuilder::new()
             .issuer("https://concurrent-test.com")
             .moqt_scope(scope)
-            .build(),
+            .build()
+            .unwrap(),
     );
 
     let validator = Arc::new(MoqtValidator::new());

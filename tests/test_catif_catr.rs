@@ -158,7 +158,8 @@ fn test_catif_builder() {
                 kid: None,
             },
         )
-        .build();
+        .build()
+        .unwrap();
 
     assert!(token.request.catif.is_some());
     assert_eq!(token.request.catif.unwrap()[0].1.status, 401);
@@ -168,11 +169,11 @@ fn test_catif_builder() {
 
 #[test]
 fn test_catr_automatic_renewal() {
-    let token = CatToken::new().with_renewal(CatRenewal::automatic().with_expadd(3600));
+    let token = CatToken::new().with_renewal(CatRenewal::automatic().with_expadd(3600.0));
 
     let catr = token.request.catr.unwrap();
     assert_eq!(catr.renewal_type, CatRenewalType::Automatic);
-    assert_eq!(catr.expadd, Some(3600));
+    assert_eq!(catr.expadd, Some(3600.0));
     assert!(catr.cookie_name.is_none());
     assert!(catr.status_code.is_none());
 }
@@ -181,20 +182,21 @@ fn test_catr_automatic_renewal() {
 fn test_catr_cookie_renewal() {
     let token = CatToken::new().with_renewal(
         CatRenewal::cookie("session_token")
-            .with_expadd(7200)
+            .with_expadd(7200.0)
             .with_cookie_params(vec!["SameSite=Strict".to_string(), "Secure".to_string()]),
     );
 
     let catr = token.request.catr.unwrap();
     assert_eq!(catr.renewal_type, CatRenewalType::Cookie);
     assert_eq!(catr.cookie_name.as_ref().unwrap(), "session_token");
-    assert_eq!(catr.expadd, Some(7200));
+    assert_eq!(catr.expadd, Some(7200.0));
     assert_eq!(catr.cookie_params.as_ref().unwrap().len(), 2);
 }
 
 #[test]
 fn test_catr_header_renewal() {
-    let token = CatToken::new().with_renewal(CatRenewal::header("X-Auth-Token").with_expadd(1800));
+    let token =
+        CatToken::new().with_renewal(CatRenewal::header("X-Auth-Token").with_expadd(1800.0));
 
     let catr = token.request.catr.unwrap();
     assert_eq!(catr.renewal_type, CatRenewalType::Header);
@@ -203,12 +205,12 @@ fn test_catr_header_renewal() {
 
 #[test]
 fn test_catr_redirect_renewal() {
-    let token = CatToken::new().with_renewal(CatRenewal::redirect(302).with_expadd(3600));
+    let token = CatToken::new().with_renewal(CatRenewal::redirect(302).with_expadd(3600.0));
 
     let catr = token.request.catr.unwrap();
     assert_eq!(catr.renewal_type, CatRenewalType::Redirect);
     assert_eq!(catr.status_code, Some(302));
-    assert_eq!(catr.expadd, Some(3600));
+    assert_eq!(catr.expadd, Some(3600.0));
 }
 
 #[test]
@@ -216,12 +218,12 @@ fn test_catr_with_deadline() {
     let deadline = chrono::Utc::now().timestamp() + 86400;
     let token = CatToken::new().with_renewal(
         CatRenewal::automatic()
-            .with_expadd(3600)
-            .with_deadline(deadline),
+            .with_expadd(3600.0)
+            .with_deadline(deadline as f64),
     );
 
     let catr = token.request.catr.unwrap();
-    assert_eq!(catr.deadline, Some(deadline));
+    assert_eq!(catr.deadline, Some(deadline as f64));
 }
 
 #[test]
@@ -231,8 +233,8 @@ fn test_catr_roundtrip() {
 
     let token = CatToken::new().with_issuer("test").with_renewal(
         CatRenewal::cookie("token")
-            .with_expadd(3600)
-            .with_deadline(1700000000)
+            .with_expadd(3600.0)
+            .with_deadline(1700000000.0)
             .with_cookie_params(vec!["Secure".to_string()]),
     );
 
@@ -244,8 +246,8 @@ fn test_catr_roundtrip() {
     let catr = decoded.request.catr.unwrap();
     assert_eq!(catr.renewal_type, CatRenewalType::Cookie);
     assert_eq!(catr.cookie_name.as_ref().unwrap(), "token");
-    assert_eq!(catr.expadd, Some(3600));
-    assert_eq!(catr.deadline, Some(1700000000));
+    assert_eq!(catr.expadd, Some(3600.0));
+    assert_eq!(catr.deadline, Some(1700000000.0));
     assert_eq!(catr.cookie_params.as_ref().unwrap()[0], "Secure");
 }
 
@@ -256,7 +258,7 @@ fn test_catr_redirect_roundtrip() {
 
     let token = CatToken::new()
         .with_issuer("test")
-        .with_renewal(CatRenewal::redirect(307).with_expadd(1800));
+        .with_renewal(CatRenewal::redirect(307).with_expadd(1800.0));
 
     let encoded = encode_token(&token, &algorithm).unwrap();
     let decoded = decode_token(&encoded, &algorithm)
@@ -266,19 +268,20 @@ fn test_catr_redirect_roundtrip() {
     let catr = decoded.request.catr.unwrap();
     assert_eq!(catr.renewal_type, CatRenewalType::Redirect);
     assert_eq!(catr.status_code, Some(307));
-    assert_eq!(catr.expadd, Some(1800));
+    assert_eq!(catr.expadd, Some(1800.0));
 }
 
 #[test]
 fn test_catr_builder() {
     let token = CatTokenBuilder::new()
         .issuer("test")
-        .renewal(CatRenewal::automatic().with_expadd(600))
-        .build();
+        .renewal(CatRenewal::automatic().with_expadd(600.0))
+        .build()
+        .unwrap();
 
     let catr = token.request.catr.unwrap();
     assert_eq!(catr.renewal_type, CatRenewalType::Automatic);
-    assert_eq!(catr.expadd, Some(600));
+    assert_eq!(catr.expadd, Some(600.0));
 }
 
 #[test]
@@ -308,7 +311,7 @@ fn test_catif_and_catr_together_roundtrip() {
                 kid: None,
             },
         )
-        .with_renewal(CatRenewal::automatic().with_expadd(3600));
+        .with_renewal(CatRenewal::automatic().with_expadd(3600.0));
 
     let encoded = encode_token(&token, &algorithm).unwrap();
     let decoded = decode_token(&encoded, &algorithm)

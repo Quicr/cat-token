@@ -11,7 +11,8 @@ fn test_default_validator_has_zero_tolerance() {
         .issuer("test")
         .single_audience("aud")
         .expires_in(-1)
-        .build();
+        .build()
+        .unwrap();
 
     let encoded = encode_token(&token, &key).unwrap();
     let decoded = decode_token(&encoded, &key)
@@ -35,7 +36,8 @@ fn test_default_validator_rejects_nbf_in_future() {
         .single_audience("aud")
         .expires_in(3600)
         .not_before(nbf)
-        .build();
+        .build()
+        .unwrap();
 
     let encoded = encode_token(&token, &key).unwrap();
     let decoded = decode_token(&encoded, &key)
@@ -50,14 +52,17 @@ fn test_default_validator_rejects_nbf_in_future() {
 
 #[test]
 fn test_explicit_tolerance_allows_skew() {
-    let validator = CatTokenValidator::new().with_clock_skew_tolerance(60);
+    let validator = CatTokenValidator::new()
+        .with_clock_skew_tolerance(60)
+        .unwrap();
     let key = Es256Algorithm::new_with_key_pair().unwrap();
 
     let token = CatTokenBuilder::new()
         .issuer("test")
         .single_audience("aud")
         .expires_in(-5)
-        .build();
+        .build()
+        .unwrap();
 
     let encoded = encode_token(&token, &key).unwrap();
     let decoded = decode_token(&encoded, &key)
@@ -69,14 +74,17 @@ fn test_explicit_tolerance_allows_skew() {
 
 #[test]
 fn test_separate_tolerances() {
-    let validator = CatTokenValidator::new().with_separate_tolerances(10, 0);
+    let validator = CatTokenValidator::new()
+        .with_separate_tolerances(10, 0)
+        .unwrap();
     let key = Es256Algorithm::new_with_key_pair().unwrap();
 
     let token = CatTokenBuilder::new()
         .issuer("test")
         .single_audience("aud")
         .expires_in(-5)
-        .build();
+        .build()
+        .unwrap();
 
     let encoded = encode_token(&token, &key).unwrap();
     let decoded = decode_token(&encoded, &key)

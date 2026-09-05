@@ -48,7 +48,8 @@ fn test_geohash_builder_accumulates() {
     let token = CatTokenBuilder::new()
         .geohash("9q8yyk")
         .geohash("dr5regw")
-        .build();
+        .build()
+        .unwrap();
 
     let hashes = token.cat.geohash.unwrap();
     assert_eq!(hashes.len(), 2);

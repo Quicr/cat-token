@@ -86,7 +86,8 @@ fn bench_token_validation(c: &mut Criterion) {
     let validator = CatTokenValidator::new()
         .with_expected_issuers(vec!["https://auth.example.com".to_string()])
         .with_expected_audiences(vec!["client1".to_string(), "client2".to_string()])
-        .with_clock_skew_tolerance(60);
+        .with_clock_skew_tolerance(60)
+        .unwrap();
 
     group.bench_function("simple_token_validation", |b| {
         b.iter(|| black_box(validator.validate(&simple_token)).ok())
@@ -129,7 +130,8 @@ fn bench_moqt_authorization(c: &mut Criterion) {
     let single_scope_token = CatTokenBuilder::new()
         .issuer("https://auth.example.com")
         .moqt_scope(single_scope)
-        .build();
+        .build()
+        .unwrap();
 
     // Multi-scope token (10 scopes)
     let multi_scopes: Vec<_> = (0..10)
@@ -146,7 +148,8 @@ fn bench_moqt_authorization(c: &mut Criterion) {
     let multi_scope_token = CatTokenBuilder::new()
         .issuer("https://auth.example.com")
         .moqt_scopes(multi_scopes)
-        .build();
+        .build()
+        .unwrap();
 
     let validator = MoqtValidator::new();
 
@@ -252,7 +255,8 @@ fn bench_moqt_throughput(c: &mut Criterion) {
     let token = CatTokenBuilder::new()
         .issuer("https://auth.example.com")
         .moqt_scope(scope)
-        .build();
+        .build()
+        .unwrap();
 
     let validator = MoqtValidator::new();
     let validated = make_validated(&token);

@@ -161,7 +161,8 @@ fn test_full_catnip_roundtrip() {
         .asn(64512)
         .asn_range(65000, 65100)
         .expires_in(3600)
-        .build();
+        .build()
+        .unwrap();
 
     let encoded = encode_token(&token, &alg).unwrap();
     let decoded = decode_token(&encoded, &alg)

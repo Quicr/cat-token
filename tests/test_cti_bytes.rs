@@ -63,13 +63,19 @@ fn test_cti_empty_bytes() {
 
 #[test]
 fn test_builder_cwt_id_str() {
-    let token = CatTokenBuilder::new().cwt_id_str("test-id").build();
+    let token = CatTokenBuilder::new()
+        .cwt_id_str("test-id")
+        .build()
+        .unwrap();
     assert_eq!(token.core.cti, Some(b"test-id".to_vec()));
 }
 
 #[test]
 fn test_builder_cwt_id_bytes() {
     let bytes = vec![0xDE, 0xAD, 0xBE, 0xEF];
-    let token = CatTokenBuilder::new().cwt_id(bytes.clone()).build();
+    let token = CatTokenBuilder::new()
+        .cwt_id(bytes.clone())
+        .build()
+        .unwrap();
     assert_eq!(token.core.cti, Some(bytes));
 }

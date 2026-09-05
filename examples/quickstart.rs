@@ -25,7 +25,7 @@ fn main() -> Result<(), CatError> {
                 .track_prefix(b"/streams/")
                 .build(),
         )
-        .build();
+        .build()?;
 
     // 3. Encode the token (returns COSE_Sign1 CBOR bytes)
     let encoded = encode_token(&token, &key)?;

@@ -10,7 +10,8 @@ fn test_static_resolver_decodes_token() {
     let token = CatTokenBuilder::new()
         .issuer("https://test.com")
         .expires_at(Utc::now() + Duration::hours(1))
-        .build();
+        .build()
+        .unwrap();
     let encoded = encode_token(&token, &key).unwrap();
 
     let resolver = StaticKeyResolver::new(Es256Algorithm::new_verifier(*key.verifying_key()));
@@ -62,7 +63,8 @@ fn test_keyring_resolver_with_default() {
     let token = CatTokenBuilder::new()
         .issuer("https://test.com")
         .expires_at(Utc::now() + Duration::hours(1))
-        .build();
+        .build()
+        .unwrap();
     let encoded = encode_token(&token, &key).unwrap();
 
     let resolver = KeyRingResolver::new()
@@ -79,7 +81,8 @@ fn test_keyring_resolver_no_matching_key() {
     let token = CatTokenBuilder::new()
         .issuer("https://test.com")
         .expires_at(Utc::now() + Duration::hours(1))
-        .build();
+        .build()
+        .unwrap();
     let encoded = encode_token(&token, &key).unwrap();
 
     let resolver = KeyRingResolver::new().with_key(
@@ -125,7 +128,8 @@ fn test_static_resolver_wrong_key_fails() {
     let token = CatTokenBuilder::new()
         .issuer("https://test.com")
         .expires_at(Utc::now() + Duration::hours(1))
-        .build();
+        .build()
+        .unwrap();
     let encoded = encode_token(&token, &signing_key).unwrap();
 
     let resolver = StaticKeyResolver::new(wrong_key);
@@ -139,7 +143,8 @@ fn test_keyring_default_used_when_kid_absent() {
     let token = CatTokenBuilder::new()
         .issuer("https://test.com")
         .expires_at(Utc::now() + Duration::hours(1))
-        .build();
+        .build()
+        .unwrap();
     let encoded = encode_token(&token, &key).unwrap();
 
     let other_key = Es256Algorithm::new_with_key_pair().unwrap();
@@ -162,7 +167,8 @@ fn test_resolver_full_pipeline() {
         .issuer("https://auth.example.com")
         .audience(vec!["relay.example.com".to_string()])
         .expires_at(Utc::now() + Duration::hours(1))
-        .build();
+        .build()
+        .unwrap();
     let encoded = encode_token(&token, &key).unwrap();
 
     let resolver = StaticKeyResolver::new(Es256Algorithm::new_verifier(*key.verifying_key()));

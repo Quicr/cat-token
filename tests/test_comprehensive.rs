@@ -66,8 +66,9 @@ fn test_comprehensive_token_creation() {
                 kid: None,
             },
         )
-        .renewal(CatRenewal::automatic().with_expadd(3600))
-        .build();
+        .renewal(CatRenewal::automatic().with_expadd(3600.0))
+        .build()
+        .unwrap();
 
     // Verify all claims are properly set
     assert_eq!(token.core.iss, Some("https://auth.example.com".to_string()));
@@ -120,7 +121,7 @@ fn test_comprehensive_token_creation() {
     assert_eq!(catif[0].1.status, 401);
     let catr = token.request.catr.as_ref().unwrap();
     assert_eq!(catr.renewal_type, CatRenewalType::Automatic);
-    assert_eq!(catr.expadd, Some(3600));
+    assert_eq!(catr.expadd, Some(3600.0));
 }
 
 #[test]
@@ -140,6 +141,7 @@ fn test_token_validation_comprehensive() {
         .with_expected_issuers(vec!["https://trusted.issuer.com".to_string()])
         .with_expected_audiences(vec!["expected-audience".to_string()])
         .with_clock_skew_tolerance(120)
+        .unwrap()
         .allow_unencrypted_privacy_claims();
 
     assert!(validator.validate(&token).is_ok());
@@ -458,7 +460,7 @@ fn test_maximal_token() {
                 kid: None,
             },
         )
-        .with_renewal(CatRenewal::cookie("token").with_expadd(7200));
+        .with_renewal(CatRenewal::cookie("token").with_expadd(7200.0));
 
     // Verify all claims are set
     assert!(token.core.iss.is_some());

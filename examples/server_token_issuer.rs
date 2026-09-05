@@ -52,7 +52,7 @@ fn issue_publisher_token(
         );
     }
 
-    let token = builder.build();
+    let token = builder.build()?;
     encode_token(&token, algorithm)
 }
 
@@ -83,7 +83,7 @@ fn issue_subscriber_token(
         .expires_at(now + Duration::hours(24)) // Longer validity for viewers
         .cwt_id_str(format!("sub-{}-{}", user_id, now.timestamp()))
         .moqt_scopes(scopes)
-        .build();
+        .build()?;
 
     encode_token(&token, algorithm)
 }
@@ -118,7 +118,7 @@ fn issue_admin_token(
                 .with_window(60)
                 .with_jti_processing(true),
         )
-        .build();
+        .build()?;
 
     encode_token(&token, algorithm)
 }

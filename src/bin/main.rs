@@ -204,7 +204,7 @@ fn generate_moqt_token(args: &[String]) -> Result<(), Box<dyn std::error::Error>
         .expires_in(expires)
         .moqt_scope(scope)
         .moqt_scope(setup_scope)
-        .build();
+        .build()?;
 
     let encoded = encode_token_base64(&token, &algorithm)?;
     println!("{encoded}");
@@ -227,4 +227,5 @@ fn create_sample_token() -> CatToken {
         .geo_coordinate(37.7749, -122.4194, 100)
         .geohash("9q8yy")
         .build()
+        .unwrap()
 }

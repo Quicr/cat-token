@@ -229,7 +229,8 @@ fn test_full_roundtrip_with_all_fixed_claim_types() {
         .replay_protection(ReplayProtection::ReuseDetection)
         .probability_of_rejection(0.02, b"block-list-1".to_vec(), Some(1700000000))
         .expires_in(3600)
-        .build();
+        .build()
+        .unwrap();
 
     let encoded = encode_token(&token, &alg).unwrap();
     let decoded = decode_token(&encoded, &alg)

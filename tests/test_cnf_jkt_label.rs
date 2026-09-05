@@ -23,7 +23,8 @@ fn test_encoded_token_uses_label_323() {
     let token = CatTokenBuilder::new()
         .issuer("https://example.com")
         .confirmation(jkt_bytes.clone())
-        .build();
+        .build()
+        .unwrap();
 
     let cose_bytes = encode_token(&token, &alg).unwrap();
 
@@ -132,7 +133,8 @@ fn test_roundtrip_with_label_323() {
     let token = CatTokenBuilder::new()
         .issuer("https://example.com")
         .confirmation(jkt_bytes.clone())
-        .build();
+        .build()
+        .unwrap();
 
     let encoded = encode_token(&token, &alg).unwrap();
     let decoded = decode_token(&encoded, &alg)

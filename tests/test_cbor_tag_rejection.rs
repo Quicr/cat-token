@@ -86,7 +86,8 @@ fn test_catnip_with_proper_tags_still_works() {
     let token = CatTokenBuilder::new()
         .ip_address("192.168.1.1")
         .unwrap()
-        .build();
+        .build()
+        .unwrap();
 
     let encoded = encode_token(&token, &alg).unwrap();
     let decoded = decode_token(&encoded, &alg)
@@ -102,7 +103,8 @@ fn test_catgeocoord_with_crs_wrapper_still_works() {
 
     let token = CatTokenBuilder::new()
         .geo_coordinate(45.5, -90.5, 1000)
-        .build();
+        .build()
+        .unwrap();
 
     let encoded = encode_token(&token, &alg).unwrap();
     let decoded = decode_token(&encoded, &alg)

@@ -492,7 +492,8 @@ mod tests {
         let token = CatTokenBuilder::new()
             .issuer("https://test.com")
             .moqt_scope(scope)
-            .build();
+            .build()
+            .unwrap();
 
         let validator = MoqtValidator::new();
 
@@ -552,7 +553,8 @@ mod tests {
             .issuer("https://test.com")
             .moqt_scope(scope)
             .moqt_reval(300.0)
-            .build();
+            .build()
+            .unwrap();
 
         let validator = MoqtValidator::new();
 
@@ -581,7 +583,8 @@ mod tests {
             .issuer("https://test.com")
             .moqt_scope(scope)
             .moqt_reval(300.0)
-            .build();
+            .build()
+            .unwrap();
 
         let validator = MoqtValidator::new().without_revalidation_support();
 
@@ -600,7 +603,8 @@ mod tests {
             .issuer("https://test.com")
             .moqt_scope(scope)
             .moqt_reval(60.0) // 1 minute
-            .build();
+            .build()
+            .unwrap();
 
         let validator = MoqtValidator::new().with_min_revalidation_interval(300.0); // 5 minutes minimum
 
@@ -647,7 +651,8 @@ mod tests {
         let token = CatTokenBuilder::new()
             .issuer("https://test.com")
             .moqt_scopes(vec![scope1, scope2])
-            .build();
+            .build()
+            .unwrap();
 
         let validator = MoqtValidator::new();
 

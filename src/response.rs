@@ -78,7 +78,8 @@ mod tests {
         let token = CatTokenBuilder::new()
             .issuer("https://test.com")
             .expires_at(Utc::now() + Duration::hours(1))
-            .build();
+            .build()
+            .unwrap();
         let validated = ValidatedToken::from_unchecked(token);
 
         let policy = CatResponsePolicy::for_token(&validated);
@@ -87,7 +88,10 @@ mod tests {
 
     #[test]
     fn test_token_policy_without_expiry() {
-        let token = CatTokenBuilder::new().issuer("https://test.com").build();
+        let token = CatTokenBuilder::new()
+            .issuer("https://test.com")
+            .build()
+            .unwrap();
         let validated = ValidatedToken::from_unchecked(token);
 
         let policy = CatResponsePolicy::for_token(&validated);

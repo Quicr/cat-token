@@ -66,7 +66,8 @@ fn test_with_geo_coordinates_bulk() {
 
     let token = CatTokenBuilder::new()
         .geo_coordinates(coords.clone())
-        .build();
+        .build()
+        .unwrap();
 
     assert_eq!(token.cat.catgeocoord.as_ref().unwrap().len(), 3);
     assert_eq!(token.cat.catgeocoord, Some(coords));

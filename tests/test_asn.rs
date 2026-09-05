@@ -78,7 +78,8 @@ fn test_token_builder_network_methods() {
         .unwrap()
         .asn(64496)
         .asn_range(65000, 65010)
-        .build();
+        .build()
+        .unwrap();
 
     assert!(token.cat.catnip.is_some());
     let nips = token.cat.catnip.unwrap();
@@ -199,7 +200,8 @@ fn test_mixed_network_identifiers_comprehensive() {
         .asn(65001)
         .asn_range(64512, 64520)
         .asn_range(65000, 65010)
-        .build();
+        .build()
+        .unwrap();
 
     assert_eq!(token.cat.catv, Some(1));
     let nips = token.cat.catnip.unwrap();

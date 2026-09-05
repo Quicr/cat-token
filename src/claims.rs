@@ -280,8 +280,8 @@ impl CatRenewalType {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct CatRenewal {
     pub renewal_type: CatRenewalType,
-    pub expadd: Option<i64>,
-    pub deadline: Option<i64>,
+    pub expadd: Option<f64>,
+    pub deadline: Option<f64>,
     pub cookie_name: Option<String>,
     pub header_name: Option<String>,
     pub cookie_params: Option<Vec<String>>,
@@ -342,12 +342,12 @@ impl CatRenewal {
         }
     }
 
-    pub fn with_expadd(mut self, seconds: i64) -> Self {
+    pub fn with_expadd(mut self, seconds: f64) -> Self {
         self.expadd = Some(seconds);
         self
     }
 
-    pub fn with_deadline(mut self, timestamp: i64) -> Self {
+    pub fn with_deadline(mut self, timestamp: f64) -> Self {
         self.deadline = Some(timestamp);
         self
     }

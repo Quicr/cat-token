@@ -146,6 +146,31 @@ fn validate_float(f: f64, claim_name: &str) -> Result<(), CatError> {
     Ok(())
 }
 
+fn safe_float_to_i64(f: f64, claim_name: &str) -> Result<i64, CatError> {
+    validate_float(f, claim_name)?;
+    if f.abs() > i64::MAX as f64 {
+        return Err(CatError::InvalidClaimValue(format!(
+            "{claim_name}: float magnitude {f} exceeds i64 range"
+        )));
+    }
+    Ok(f as i64)
+}
+
+fn safe_float_to_u32(f: f64, claim_name: &str) -> Result<u32, CatError> {
+    validate_float(f, claim_name)?;
+    if f < 0.0 {
+        return Err(CatError::InvalidClaimValue(format!(
+            "{claim_name}: value must not be negative"
+        )));
+    }
+    if f > u32::MAX as f64 {
+        return Err(CatError::InvalidClaimValue(format!(
+            "{claim_name}: float magnitude {f} exceeds u32 range"
+        )));
+    }
+    Ok(f as u32)
+}
+
 fn reject_unexpected_tag(value: &Value, claim_name: &str) -> Result<(), CatError> {
     if let Value::Tag(tag, _) = value {
         return Err(CatError::InvalidClaimValue(format!(
@@ -704,13 +729,13 @@ impl Cwt {
             if let Some(expadd) = catr.expadd {
                 renewal_map.push((
                     Value::Integer(CATR_EXPADD.into()),
-                    Value::Integer(expadd.into()),
+                    encode_number_shortest(expadd),
                 ));
             }
             if let Some(deadline) = catr.deadline {
                 renewal_map.push((
                     Value::Integer(CATR_DEADLINE.into()),
-                    Value::Integer(deadline.into()),
+                    encode_number_shortest(deadline),
                 ));
             }
             if let Some(ref name) = catr.cookie_name {
@@ -1232,8 +1257,7 @@ impl Cwt {
                                 Some(i.try_into().map_err(|_| CatError::InvalidTokenFormat)?);
                         }
                         Value::Float(f) => {
-                            validate_float(f, "exp")?;
-                            core.exp = Some(f as i64);
+                            core.exp = Some(safe_float_to_i64(f, "exp")?);
                         }
                         _ => {
                             return Err(CatError::InvalidClaimValue(
@@ -1250,8 +1274,7 @@ impl Cwt {
                                 Some(i.try_into().map_err(|_| CatError::InvalidTokenFormat)?);
                         }
                         Value::Float(f) => {
-                            validate_float(f, "nbf")?;
-                            core.nbf = Some(f as i64);
+                            core.nbf = Some(safe_float_to_i64(f, "nbf")?);
                         }
                         _ => {
                             return Err(CatError::InvalidClaimValue(
@@ -1582,15 +1605,7 @@ impl Cwt {
                                         }
                                         v as u32
                                     }
-                                    Value::Float(f) => {
-                                        if *f < 0.0 {
-                                            return Err(CatError::InvalidClaimValue(
-                                                "catgeocoord radius must not be negative"
-                                                    .to_string(),
-                                            ));
-                                        }
-                                        *f as u32
-                                    }
+                                    Value::Float(f) => safe_float_to_u32(*f, "catgeocoord radius")?,
                                     _ => {
                                         return Err(CatError::InvalidClaimValue(
                                             "catgeocoord radius must be a number".to_string(),
@@ -1734,8 +1749,7 @@ impl Cwt {
                                 Some(i.try_into().map_err(|_| CatError::InvalidTokenFormat)?);
                         }
                         Value::Float(f) => {
-                            validate_float(f, "iat")?;
-                            informational.iat = Some(f as i64);
+                            informational.iat = Some(safe_float_to_i64(f, "iat")?);
                         }
                         _ => {
                             return Err(CatError::InvalidClaimValue(
@@ -2057,14 +2071,17 @@ impl Cwt {
                                 }
                                 CATR_EXPADD => {
                                     expadd = Some(match v {
-                                        Value::Integer(i) => i.try_into().map_err(|_| {
-                                            CatError::InvalidClaimValue(
-                                                "Invalid catr expadd value".to_string(),
-                                            )
-                                        })?,
+                                        Value::Integer(i) => {
+                                            let val: i64 = i.try_into().map_err(|_| {
+                                                CatError::InvalidClaimValue(
+                                                    "Invalid catr expadd value".to_string(),
+                                                )
+                                            })?;
+                                            val as f64
+                                        }
                                         Value::Float(f) => {
                                             validate_float(f, "catr expadd")?;
-                                            f as i64
+                                            f
                                         }
                                         _ => {
                                             return Err(CatError::InvalidClaimValue(
@@ -2075,14 +2092,17 @@ impl Cwt {
                                 }
                                 CATR_DEADLINE => {
                                     deadline = Some(match v {
-                                        Value::Integer(i) => i.try_into().map_err(|_| {
-                                            CatError::InvalidClaimValue(
-                                                "Invalid catr deadline value".to_string(),
-                                            )
-                                        })?,
+                                        Value::Integer(i) => {
+                                            let val: i64 = i.try_into().map_err(|_| {
+                                                CatError::InvalidClaimValue(
+                                                    "Invalid catr deadline value".to_string(),
+                                                )
+                                            })?;
+                                            val as f64
+                                        }
                                         Value::Float(f) => {
                                             validate_float(f, "catr deadline")?;
-                                            f as i64
+                                            f
                                         }
                                         _ => {
                                             return Err(CatError::InvalidClaimValue(
@@ -2135,7 +2155,7 @@ impl Cwt {
                         }
                         if let Some(rt) = renewal_type {
                             if let Some(ea) = expadd {
-                                if ea <= 0 {
+                                if ea <= 0.0 {
                                     return Err(CatError::InvalidClaimValue(
                                         "catr expadd must be a positive integer".to_string(),
                                     ));

@@ -99,7 +99,8 @@ fn test_dpop_namespace_mismatch_rejected() {
         .issuer("https://test.com")
         .moqt_scope(scope)
         .confirmation(thumbprint)
-        .build();
+        .build()
+        .unwrap();
 
     let settings = CatDpopSettings::new().with_window(300);
     let validator = cat_token::moqt::MoqtValidator::new().with_dpop_validation(settings);
@@ -143,7 +144,8 @@ fn test_dpop_track_mismatch_rejected() {
         .issuer("https://test.com")
         .moqt_scope(scope)
         .confirmation(thumbprint)
-        .build();
+        .build()
+        .unwrap();
 
     let settings = CatDpopSettings::new().with_window(300);
     let validator = cat_token::moqt::MoqtValidator::new().with_dpop_validation(settings);
@@ -184,7 +186,8 @@ fn test_dpop_matching_target_succeeds() {
         .issuer("https://test.com")
         .moqt_scope(scope)
         .confirmation(thumbprint)
-        .build();
+        .build()
+        .unwrap();
 
     let settings = CatDpopSettings::new().with_window(300);
     let validator = cat_token::moqt::MoqtValidator::new().with_dpop_validation(settings);

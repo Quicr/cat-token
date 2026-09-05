@@ -238,7 +238,8 @@ fn test_builder_uri_match_rules() {
     }];
     let token = CatTokenBuilder::new()
         .uri_match_rules(rules.clone())
-        .build();
+        .build()
+        .unwrap();
     assert_eq!(token.cat.catu, Some(rules));
 }
 
@@ -250,6 +251,7 @@ fn test_builder_header_match_rules() {
     }];
     let token = CatTokenBuilder::new()
         .header_match_rules(rules.clone())
-        .build();
+        .build()
+        .unwrap();
     assert_eq!(token.cat.cath, Some(rules));
 }

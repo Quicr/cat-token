@@ -23,7 +23,8 @@ fn main() {
     let token_validator = CatTokenValidator::new()
         .with_expected_issuers(vec!["https://auth.example.com".to_string()])
         .with_expected_audiences(vec!["moqt-relay.example.com".to_string()])
-        .with_clock_skew_tolerance(60);
+        .with_clock_skew_tolerance(60)
+        .unwrap();
 
     let moqt_validator = MoqtValidator::new().with_min_revalidation_interval(60.0);
 
@@ -155,7 +156,8 @@ fn create_test_token(key: &Es256Algorithm) -> Vec<u8> {
         .expires_at(now + Duration::hours(2))
         .moqt_scope(scope)
         .moqt_reval(300.0)
-        .build();
+        .build()
+        .unwrap();
 
     encode_token(&token, key).expect("Failed to encode token")
 }
@@ -168,7 +170,8 @@ fn create_expired_token(key: &Es256Algorithm) -> Vec<u8> {
         .audience(vec!["moqt-relay.example.com".to_string()])
         .expires_at(now - Duration::hours(1)) // Expired 1 hour ago
         .moqt_scope(MoqtScopeBuilder::new().publisher().build())
-        .build();
+        .build()
+        .unwrap();
 
     encode_token(&token, key).expect("Failed to encode token")
 }

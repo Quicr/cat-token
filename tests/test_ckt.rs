@@ -95,7 +95,8 @@ fn test_ckt_builder() {
         .issuer("test")
         .confirmation(b"jkt".to_vec())
         .cose_key_thumbprint(b"ckt".to_vec())
-        .build();
+        .build()
+        .unwrap();
 
     let cnf = token.dpop.cnf.unwrap();
     assert_eq!(cnf.jkt, b"jkt".to_vec());

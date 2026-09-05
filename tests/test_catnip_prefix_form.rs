@@ -11,7 +11,8 @@ fn test_valid_prefix_form_accepted() {
     let token = CatTokenBuilder::new()
         .ip_range("192.168.0.0/16")
         .unwrap()
-        .build();
+        .build()
+        .unwrap();
 
     let encoded = encode_token(&token, &alg).unwrap();
     let decoded = decode_token(&encoded, &alg)

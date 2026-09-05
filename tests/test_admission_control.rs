@@ -8,7 +8,8 @@ fn make_token_bytes(key: &Es256Algorithm) -> Vec<u8> {
     let token = CatTokenBuilder::new()
         .issuer("https://test.com")
         .expires_at(Utc::now() + Duration::hours(1))
-        .build();
+        .build()
+        .unwrap();
     encode_token(&token, key).unwrap()
 }
 

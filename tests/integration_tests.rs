@@ -25,7 +25,8 @@ fn test_cat_token_creation() {
         .replay_protection(cat_token::ReplayProtection::Prohibited)
         .geo_coordinate(37.7749, -122.4194, 100)
         .geohash("9q8yy")
-        .build();
+        .build()
+        .unwrap();
 
     assert_eq!(token.core.iss, Some("https://example.com".to_string()));
     assert_eq!(
@@ -70,7 +71,8 @@ fn test_hmac_token_encoding_decoding() {
         .expires_at(exp)
         .cwt_id_str("test-hmac-token")
         .version(1)
-        .build();
+        .build()
+        .unwrap();
 
     let encoded = encode_token(&token, &algorithm).unwrap();
     assert!(!encoded.is_empty());
@@ -98,7 +100,8 @@ fn test_es256_token_encoding_decoding() {
         .expires_at(exp)
         .cwt_id_str("test-es256-token")
         .version(1)
-        .build();
+        .build()
+        .unwrap();
 
     let encoded = encode_token(&token, &algorithm).unwrap();
     assert!(!encoded.is_empty());
@@ -126,7 +129,8 @@ fn test_ps256_token_encoding_decoding() {
         .expires_at(exp)
         .cwt_id_str("test-ps256-token")
         .version(1)
-        .build();
+        .build()
+        .unwrap();
 
     let encoded = encode_token(&token, &algorithm).unwrap();
     assert!(!encoded.is_empty());
@@ -155,12 +159,14 @@ fn test_token_validation_success() {
         .version(1)
         .geo_coordinate(40.7128, -74.0060, 50)
         .geohash("dr5reg")
-        .build();
+        .build()
+        .unwrap();
 
     let validator = CatTokenValidator::new()
         .with_expected_issuers(vec!["https://trusted-issuer.com".to_string()])
         .with_expected_audiences(vec!["https://my-service.com".to_string()])
         .with_clock_skew_tolerance(60)
+        .unwrap()
         .allow_unencrypted_privacy_claims();
 
     assert!(validator.validate(&token).is_ok());
@@ -176,7 +182,8 @@ fn test_token_validation_expired() {
         .audience(vec!["https://my-service.com".to_string()])
         .expires_at(exp)
         .cwt_id_str("expired-token")
-        .build();
+        .build()
+        .unwrap();
 
     let validator = CatTokenValidator::new()
         .with_expected_issuers(vec!["https://trusted-issuer.com".to_string()])
@@ -198,7 +205,8 @@ fn test_token_validation_not_yet_valid() {
         .expires_at(exp)
         .not_before(nbf)
         .cwt_id_str("future-token")
-        .build();
+        .build()
+        .unwrap();
 
     let validator = CatTokenValidator::new()
         .with_expected_issuers(vec!["https://trusted-issuer.com".to_string()])
@@ -218,7 +226,8 @@ fn test_token_validation_invalid_issuer() {
         .audience(vec!["https://my-service.com".to_string()])
         .expires_at(exp)
         .cwt_id_str("invalid-issuer-token")
-        .build();
+        .build()
+        .unwrap();
 
     let validator = CatTokenValidator::new()
         .with_expected_issuers(vec!["https://trusted-issuer.com".to_string()])
@@ -238,7 +247,8 @@ fn test_token_validation_invalid_audience() {
         .audience(vec!["https://other-service.com".to_string()])
         .expires_at(exp)
         .cwt_id_str("invalid-audience-token")
-        .build();
+        .build()
+        .unwrap();
 
     let validator = CatTokenValidator::new()
         .with_expected_issuers(vec!["https://trusted-issuer.com".to_string()])
@@ -267,7 +277,8 @@ fn test_cwt_payload_encoding_decoding() {
         .replay_protection(cat_token::ReplayProtection::Prohibited)
         .geo_coordinate(51.5074, -0.1278, 0)
         .geohash("gcpvj")
-        .build();
+        .build()
+        .unwrap();
 
     let cwt = Cwt::new(-7, token.clone()); // ES256 algorithm
     let encoded_payload = cwt.encode_payload().unwrap();
@@ -390,7 +401,8 @@ fn test_invalid_signature_verification() {
     let token = CatTokenBuilder::new()
         .issuer("https://test.com")
         .cwt_id_str("signature-test")
-        .build();
+        .build()
+        .unwrap();
 
     let encoded = encode_token(&token, &algorithm1).unwrap();
 
@@ -468,7 +480,8 @@ fn test_moqt_claims_creation() {
         .cwt_id_str("moqt-token")
         .moqt_scope(scope)
         .moqt_reval(300.0)
-        .build();
+        .build()
+        .unwrap();
 
     // Test MOQT claims are present
     assert!(token.moqt.moqt.is_some());
@@ -564,7 +577,8 @@ fn test_moqt_token_encoding_decoding() {
         .cwt_id_str("moqt-encode-test")
         .moqt_scopes(vec![scope1, scope2])
         .moqt_reval(600.0)
-        .build();
+        .build()
+        .unwrap();
 
     let encoded = encode_token(&token, &algorithm).unwrap();
     let decoded = decode_token(&encoded, &algorithm)
@@ -619,7 +633,8 @@ fn test_moqt_multiple_scopes_authorization() {
         .audience(vec!["moqt-relay".to_string()])
         .expires_at(Utc::now() + Duration::hours(1))
         .moqt_scopes(vec![scope1, scope2])
-        .build();
+        .build()
+        .unwrap();
 
     // Test permissions for public namespace (scope1)
     assert!(token.allows_moqt_action(
@@ -707,7 +722,8 @@ fn test_moqt_spec_example_exact_match() {
     let token = CatTokenBuilder::new()
         .issuer("https://spec-example.com")
         .moqt_scope(scope)
-        .build();
+        .build()
+        .unwrap();
 
     // Should permit
     assert!(token.allows_moqt_action(
@@ -768,7 +784,8 @@ fn test_moqt_spec_example_prefix_match() {
     let token = CatTokenBuilder::new()
         .issuer("https://spec-prefix-example.com")
         .moqt_scope(scope)
-        .build();
+        .build()
+        .unwrap();
 
     // Should permit
     assert!(token.allows_moqt_action(

@@ -129,7 +129,8 @@ fn test_strip_no_query() {
 fn test_catpor_probability_1_always_rejected() {
     let token = CatTokenBuilder::new()
         .probability_of_rejection(1.0, vec![1, 2, 3], None)
-        .build();
+        .build()
+        .unwrap();
     let block_list = CatPorBlockList::new();
     assert!(enforce_catpor(&token, &block_list).is_err());
 }
@@ -138,7 +139,8 @@ fn test_catpor_probability_1_always_rejected() {
 fn test_catpor_probability_0_never_rejected() {
     let token = CatTokenBuilder::new()
         .probability_of_rejection(0.0, vec![1, 2, 3], None)
-        .build();
+        .build()
+        .unwrap();
     let block_list = CatPorBlockList::new();
     // With probability 0, should never be rejected (run multiple times)
     for _ in 0..100 {
@@ -154,7 +156,8 @@ fn test_catpor_block_list_persists() {
 
     let token = CatTokenBuilder::new()
         .probability_of_rejection(0.0, vec![1, 2, 3], None)
-        .build();
+        .build()
+        .unwrap();
 
     // Even with 0 probability, blocked ID is rejected
     assert!(enforce_catpor(&token, &block_list).is_err());
@@ -168,7 +171,8 @@ fn test_catpor_block_list_expiration() {
 
     let token = CatTokenBuilder::new()
         .probability_of_rejection(0.0, vec![1, 2, 3], None)
-        .build();
+        .build()
+        .unwrap();
 
     // Expired block = not blocked
     assert!(enforce_catpor(&token, &block_list).is_ok());

@@ -10,7 +10,8 @@ fn test_cose_sig_structure_es256() {
     let token = CatTokenBuilder::new()
         .issuer("https://example.com")
         .expires_in(3600)
-        .build();
+        .build()
+        .unwrap();
 
     let encoded = encode_token(&token, &alg).unwrap();
     let decoded = decode_token(&encoded, &alg)
@@ -25,7 +26,8 @@ fn test_cose_sig_structure_ps256() {
     let token = CatTokenBuilder::new()
         .issuer("https://example.com")
         .expires_in(3600)
-        .build();
+        .build()
+        .unwrap();
 
     let encoded = encode_token(&token, &alg).unwrap();
     let decoded = decode_token(&encoded, &alg)
@@ -41,7 +43,8 @@ fn test_cose_mac0_structure_hmac() {
     let token = CatTokenBuilder::new()
         .issuer("https://example.com")
         .expires_in(3600)
-        .build();
+        .build()
+        .unwrap();
 
     let encoded = encode_token(&token, &alg).unwrap();
     let decoded = decode_token(&encoded, &alg)
@@ -133,7 +136,8 @@ fn test_tampered_token_rejected_with_cose_structure() {
         .issuer("https://example.com")
         .audience(vec!["https://api.example.com".to_string()])
         .expires_at(Utc::now() + Duration::hours(1))
-        .build();
+        .build()
+        .unwrap();
 
     let encoded = encode_token(&token, &alg).unwrap();
 
@@ -154,7 +158,10 @@ fn test_wrong_key_rejected_with_cose_structure() {
     let alg1 = HmacSha256Algorithm::from_secret_key(&key1);
     let alg2 = HmacSha256Algorithm::from_secret_key(&key2);
 
-    let token = CatTokenBuilder::new().issuer("https://example.com").build();
+    let token = CatTokenBuilder::new()
+        .issuer("https://example.com")
+        .build()
+        .unwrap();
 
     let encoded = encode_token(&token, &alg1).unwrap();
     let result = decode_token(&encoded, &alg2);
@@ -171,7 +178,8 @@ fn test_roundtrip_all_algorithms_with_cose() {
         .not_before(now)
         .cwt_id_str("roundtrip-test")
         .subject("test-user")
-        .build();
+        .build()
+        .unwrap();
 
     // HMAC
     let hmac_key = HmacSha256Algorithm::generate_key().unwrap();

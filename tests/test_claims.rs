@@ -105,7 +105,7 @@ fn test_request_claims() {
     };
     let token = CatToken::new()
         .with_if_action(CLAIM_EXP, action.clone())
-        .with_renewal(CatRenewal::automatic().with_expadd(3600));
+        .with_renewal(CatRenewal::automatic().with_expadd(3600.0));
 
     let catif = token.request.catif.unwrap();
     assert_eq!(catif.len(), 1);
@@ -114,7 +114,7 @@ fn test_request_claims() {
 
     let catr = token.request.catr.unwrap();
     assert_eq!(catr.renewal_type, CatRenewalType::Automatic);
-    assert_eq!(catr.expadd, Some(3600));
+    assert_eq!(catr.expadd, Some(3600.0));
 }
 
 #[test]
@@ -167,7 +167,8 @@ fn test_token_builder() {
                 kid: None,
             },
         )
-        .build();
+        .build()
+        .unwrap();
 
     assert_eq!(token.core.iss, Some("https://auth.example.com".to_string()));
     assert_eq!(token.cat.catv, Some(1));
