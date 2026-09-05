@@ -36,7 +36,10 @@ pub use crate::token::{
     encode_token_base64, enforce_catpor, strip_token_from_uri, unfold_header_value,
     validate_header, validate_method,
 };
-pub use crate::x509::{extract_spki_from_cert, validate_cattpk, validate_cattpk_chain};
+pub use crate::x509::{
+    BasicChainValidator, CertificateValidator, SpkiOnlyValidator, extract_spki_from_cert,
+    validate_cattpk, validate_cattpk_chain, validate_cattpk_with_validator,
+};
 
 // MOQT-specific types (only when moqt feature is enabled)
 #[cfg(feature = "moqt")]
