@@ -523,3 +523,70 @@ fn test_replay_not_committed_when_audience_fails() {
         )
         .expect("legitimate follow-up must not be flagged as replay");
 }
+
+/// Simulates a distributed replay backend that fails transiently on its
+/// first call and succeeds afterwards. Used to prove that a transient cti
+/// commit failure does not burn the client's token: on retry the cti store
+/// must still see a fresh cti.
+struct FlakyReplayGuard {
+    calls: Mutex<u32>,
+    fail_first: bool,
+    seen: Mutex<Vec<Vec<u8>>>,
+}
+
+impl FlakyReplayGuard {
+    fn new(fail_first: bool) -> Self {
+        Self {
+            calls: Mutex::new(0),
+            fail_first,
+            seen: Mutex::new(Vec::new()),
+        }
+    }
+}
+
+impl ReplayGuard for FlakyReplayGuard {
+    fn check_and_record(&self, cti: &[u8]) -> Result<bool, CatError> {
+        let mut calls = self.calls.lock().unwrap();
+        *calls += 1;
+        if self.fail_first && *calls == 1 {
+            return Err(CatError::CryptoError(
+                "transient backend failure".to_string(),
+            ));
+        }
+        let mut seen = self.seen.lock().unwrap();
+        let already = seen.iter().any(|s| s.as_slice() == cti);
+        if !already {
+            seen.push(cti.to_vec());
+        }
+        Ok(already)
+    }
+}
+
+#[test]
+fn test_transient_cti_commit_failure_leaves_no_state_for_retry() {
+    // First attempt: cti backend errors out. Second attempt with the same
+    // token succeeds and treats the cti as fresh — because the first
+    // attempt never actually consumed it (the store errored before
+    // recording).
+    let mut token = CatTokenBuilder::new()
+        .issuer("https://issuer.example")
+        .single_audience("relay")
+        .moqt_scope(scope())
+        .build()
+        .unwrap();
+    token.core.cti = Some(b"cti-retry".to_vec());
+    token.cat.catreplay = Some(ReplayProtection::Prohibited);
+
+    let guard = FlakyReplayGuard::new(true);
+    let validated = make_validated(&token);
+    let validator = MoqtValidator::new();
+
+    let first = validator.authorize(&validated, &baseline_ctx(), Some(&guard), None);
+    assert!(
+        matches!(first, Err(CatError::CryptoError(_))),
+        "first attempt should surface the backend error, got: {first:?}"
+    );
+
+    let second = validator.authorize(&validated, &baseline_ctx(), Some(&guard), None);
+    second.expect("retry after transient failure must not be flagged as replay");
+}

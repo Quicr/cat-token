@@ -3,7 +3,7 @@
 
 #![cfg(feature = "moqt")]
 
-use cat_token::dpop::{DpopProof, DpopValidator, generate_jti};
+use cat_token::dpop::{DpopProof, DpopValidator, compute_access_token_hash, generate_jti};
 use cat_token::jwk::Jwk;
 use cat_token::*;
 
@@ -15,6 +15,10 @@ fn make_validated(token: &CatToken) -> ValidatedToken {
         .unwrap()
         .validate(&validator)
         .unwrap()
+}
+
+fn ath_for(validated: &ValidatedToken) -> String {
+    compute_access_token_hash(validated.serialized())
 }
 
 #[test]
@@ -178,11 +182,6 @@ fn test_dpop_matching_target_succeeds() {
     let ns = vec![b"ns".to_vec()];
     let track = b"track";
 
-    let mut proof =
-        DpopProof::create_for_moqt(MoqtAction::Publish, ns.clone(), track, "ES256", jwk.clone())
-            .with_jti(generate_jti());
-    proof.sign(&alg).unwrap();
-
     let scope = cat_token::moqt::MoqtScopeBuilder::new()
         .action(MoqtAction::Publish)
         .namespace_exact(b"ns")
@@ -196,6 +195,13 @@ fn test_dpop_matching_target_succeeds() {
         .build()
         .unwrap();
 
+    let validated = make_validated(&token);
+    let mut proof =
+        DpopProof::create_for_moqt(MoqtAction::Publish, ns.clone(), track, "ES256", jwk.clone())
+            .with_jti(generate_jti())
+            .with_access_token_hash(ath_for(&validated));
+    proof.sign(&alg).unwrap();
+
     let settings = CatDpopSettings::new().with_window(300).unwrap();
     let validator = cat_token::moqt::MoqtValidator::new().with_dpop_validation(settings);
 
@@ -203,9 +209,8 @@ fn test_dpop_matching_target_succeeds() {
         cat_token::moqt::RelayRequestContext::new("relay", MoqtAction::Publish, ns, track.to_vec())
             .with_dpop_proof(proof);
 
-    let result =
-        validator.authorize::<dyn ReplayGuard>(&make_validated(&token), &request, None, None);
-    assert!(result.is_ok());
+    let result = validator.authorize::<dyn ReplayGuard>(&validated, &request, None, None);
+    assert!(result.is_ok(), "authorize should succeed with valid ath: {result:?}");
 }
 
 #[test]
@@ -290,5 +295,106 @@ fn test_dpop_key_mismatch_detected() {
         ),
         "Should reject key mismatch: {:?}",
         result
+    );
+}
+
+// --- H1: DPoP proofs accompanying a cnf-bound token must carry `ath` that
+//         hashes the exact wire bytes of the token. Without this binding a
+//         valid proof for one token could be reused against another token
+//         issued to the same holder key.
+
+fn dpop_bound_token(jkt: Vec<u8>) -> CatToken {
+    let scope = cat_token::moqt::MoqtScopeBuilder::new()
+        .action(MoqtAction::Publish)
+        .namespace_exact(b"ns")
+        .build();
+    CatTokenBuilder::new()
+        .issuer("https://test.com")
+        .single_audience("relay")
+        .moqt_scope(scope)
+        .confirmation(jkt)
+        .build()
+        .unwrap()
+}
+
+fn dpop_request(proof: DpopProof) -> cat_token::moqt::RelayRequestContext {
+    cat_token::moqt::RelayRequestContext::new(
+        "relay",
+        MoqtAction::Publish,
+        vec![b"ns".to_vec()],
+        b"track".to_vec(),
+    )
+    .with_dpop_proof(proof)
+}
+
+#[test]
+fn test_authorize_rejects_missing_ath() {
+    let alg = Es256Algorithm::new_with_key_pair().unwrap();
+    let jwk = Jwk::from_es256_verifying_key(alg.verifying_key()).unwrap();
+    let thumbprint = jwk.thumbprint().unwrap();
+
+    let token = dpop_bound_token(thumbprint);
+    let validated = make_validated(&token);
+
+    let mut proof = DpopProof::create_for_moqt(
+        MoqtAction::Publish,
+        vec![b"ns".to_vec()],
+        b"track",
+        "ES256",
+        jwk,
+    )
+    .with_jti(generate_jti());
+    proof.sign(&alg).unwrap();
+
+    let settings = CatDpopSettings::new().with_window(300).unwrap();
+    let v = cat_token::moqt::MoqtValidator::new().with_dpop_validation(settings);
+
+    let result = v.authorize::<dyn ReplayGuard>(&validated, &dpop_request(proof), None, None);
+    assert!(
+        matches!(result, Err(CatError::DpopValidationFailed(_))),
+        "authorize must fail closed when proof omits ath: {result:?}"
+    );
+}
+
+#[test]
+fn test_authorize_rejects_ath_bound_to_different_token() {
+    let alg = Es256Algorithm::new_with_key_pair().unwrap();
+    let jwk = Jwk::from_es256_verifying_key(alg.verifying_key()).unwrap();
+    let thumbprint = jwk.thumbprint().unwrap();
+
+    // Two tokens sharing the same holder key. A proof valid for token_a must
+    // not authorize a request that presents token_b.
+    let mut token_a = dpop_bound_token(thumbprint.clone());
+    token_a.core.iss = Some("https://a.example".to_string());
+    let mut token_b = dpop_bound_token(thumbprint);
+    token_b.core.iss = Some("https://b.example".to_string());
+
+    let validated_a = make_validated(&token_a);
+    let validated_b = make_validated(&token_b);
+    assert_ne!(
+        validated_a.serialized(),
+        validated_b.serialized(),
+        "test setup: distinct tokens must serialize distinctly"
+    );
+
+    // Proof carries ath computed from token_a, presented alongside token_b.
+    let mut proof = DpopProof::create_for_moqt(
+        MoqtAction::Publish,
+        vec![b"ns".to_vec()],
+        b"track",
+        "ES256",
+        jwk,
+    )
+    .with_jti(generate_jti())
+    .with_access_token_hash(ath_for(&validated_a));
+    proof.sign(&alg).unwrap();
+
+    let settings = CatDpopSettings::new().with_window(300).unwrap();
+    let v = cat_token::moqt::MoqtValidator::new().with_dpop_validation(settings);
+
+    let result = v.authorize::<dyn ReplayGuard>(&validated_b, &dpop_request(proof), None, None);
+    assert!(
+        matches!(result, Err(CatError::DpopValidationFailed(_))),
+        "cross-token proof reuse must be rejected: {result:?}"
     );
 }

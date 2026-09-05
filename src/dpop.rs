@@ -295,6 +295,12 @@ impl DpopProof {
         self
     }
 
+    pub fn with_access_token_hash(mut self, ath: String) -> Self {
+        self.payload.ath = Some(ath);
+        self.signing_input.clear();
+        self
+    }
+
     /// Returns the exact JWS signing input this proof was verified against
     /// (for decoded proofs) or will be signed as (for locally-built proofs).
     /// For decoded proofs this is the received `header_b64.payload_b64` byte
@@ -411,10 +417,35 @@ const DEFAULT_JTI_CACHE_SIZE: usize = 100_000;
 #[cfg(feature = "moqt")]
 const MIN_JTI_CACHE_SIZE: usize = 1000;
 
+/// Upper bound on the byte length of a JTI accepted into the replay cache.
+/// A hostile issuer emitting kilobyte-scale JTI strings would otherwise be
+/// able to trivially exhaust cache memory or slow every insert through the
+/// hashmap. 256 bytes accommodates every canonical form (uuid, base64url of
+/// SHA-256, hex of SHA-256) with headroom.
+#[cfg(feature = "moqt")]
+pub const MAX_JTI_LENGTH_BYTES: usize = 256;
+
+/// Number of independent shards backing the default replay cache. Each
+/// shard has its own mutex, so concurrent inserts on distinct JTIs (which
+/// hash to different shards with high probability) do not contend on a
+/// single lock. 16 is enough to eliminate contention under typical relay
+/// load without blowing up per-shard capacity for small deployments.
+#[cfg(feature = "moqt")]
+pub const DEFAULT_JTI_SHARDS: usize = 16;
+
 #[cfg(feature = "moqt")]
 pub trait JtiStore: Send + Sync {
     /// Atomically check whether `key` exists and insert it if not.
-    /// Returns `Ok(())` on successful insert, or `Err(ReplayAttackDetected)` if already present.
+    /// Returns `Ok(())` on successful insert, `Err(ReplayAttackDetected)`
+    /// if already present, or `Err(DpopValidationFailed)` if the key
+    /// exceeds implementation limits (e.g. length caps).
+    ///
+    /// Implementations SHOULD apply LRU eviction rather than rejecting
+    /// inserts when the store reaches its capacity: hard-failing under
+    /// load turns every relay peak into a total outage of DPoP-protected
+    /// operations. Callers that need harder guarantees should back
+    /// [`DpopValidator`] with a distributed store instead of the in-memory
+    /// LRU that ships with the crate.
     fn check_and_insert(&self, key: String, iat: i64) -> Result<(), CatError>;
     fn len(&self) -> usize;
     fn is_empty(&self) -> bool {
@@ -423,48 +454,132 @@ pub trait JtiStore: Send + Sync {
     fn cleanup(&self, max_age_seconds: i64) {
         let _ = max_age_seconds;
     }
+    /// Number of entries evicted from the cache **while still inside the
+    /// replay-freshness window** — i.e., evictions that reduced replay
+    /// protection rather than merely reclaiming stale space. Operators
+    /// should monitor this counter; a non-zero value means the cache is
+    /// undersized for the current traffic.
+    fn premature_evictions(&self) -> u64 {
+        0
+    }
 }
 
 #[cfg(feature = "moqt")]
-pub struct LruJtiStore {
+struct LruShard {
     cache: Mutex<LruCache<String, i64>>,
-    capacity: usize,
+}
+
+#[cfg(feature = "moqt")]
+impl LruShard {
+    fn new(capacity: usize) -> Self {
+        let nz = NonZeroUsize::new(capacity.max(1)).expect("capacity >= 1");
+        Self {
+            cache: Mutex::new(LruCache::new(nz)),
+        }
+    }
+}
+
+/// Sharded, LRU-evicting replay-JTI store for in-process deployments.
+///
+/// Concurrency: distinct JTIs hash to independent shards (default 16), so
+/// unrelated inserts do not serialize on a single mutex. Only inserts that
+/// collide on the same shard contend, and that contention is per-shard, not
+/// per-cache.
+///
+/// Capacity: each shard is an LRU cache of `capacity / shards`. When a
+/// shard fills, the least-recently-used entry is evicted rather than
+/// rejecting the incoming insert. If the evicted entry is still inside the
+/// replay-freshness window (`iat` within `max_age_seconds`), the store
+/// increments [`Self::premature_evictions`] so operators can detect an
+/// undersized cache.
+///
+/// Length caps: JTIs longer than [`MAX_JTI_LENGTH_BYTES`] are rejected at
+/// insert time.
+#[cfg(feature = "moqt")]
+pub struct LruJtiStore {
+    shards: Vec<LruShard>,
+    hasher_state: std::collections::hash_map::RandomState,
+    premature_evictions: std::sync::atomic::AtomicU64,
+    freshness_window_seconds: i64,
 }
 
 #[cfg(feature = "moqt")]
 impl LruJtiStore {
     pub fn new(capacity: usize) -> Self {
-        let effective = capacity.max(MIN_JTI_CACHE_SIZE);
-        let nz = NonZeroUsize::new(effective).expect("MIN_JTI_CACHE_SIZE guarantees non-zero");
+        Self::with_shards_and_window(capacity, DEFAULT_JTI_SHARDS, 300)
+    }
+
+    pub fn with_shards(capacity: usize, shards: usize) -> Self {
+        Self::with_shards_and_window(capacity, shards, 300)
+    }
+
+    /// Build a sharded store with an explicit shard count and freshness
+    /// window. The window is used only to decide whether an LRU eviction
+    /// counts as "premature" for reporting; it does not gate acceptance.
+    pub fn with_shards_and_window(
+        capacity: usize,
+        shards: usize,
+        freshness_window_seconds: i64,
+    ) -> Self {
+        let effective_capacity = capacity.max(MIN_JTI_CACHE_SIZE);
+        let shard_count = shards.max(1);
+        let per_shard = (effective_capacity / shard_count).max(1);
+        let shards = (0..shard_count).map(|_| LruShard::new(per_shard)).collect();
         Self {
-            cache: Mutex::new(LruCache::new(nz)),
-            capacity: effective,
+            shards,
+            hasher_state: std::collections::hash_map::RandomState::new(),
+            premature_evictions: std::sync::atomic::AtomicU64::new(0),
+            freshness_window_seconds,
         }
+    }
+
+    fn shard_for(&self, key: &str) -> &LruShard {
+        use std::hash::{BuildHasher, Hasher};
+        let mut hasher = self.hasher_state.build_hasher();
+        hasher.write(key.as_bytes());
+        let idx = (hasher.finish() as usize) % self.shards.len();
+        &self.shards[idx]
     }
 }
 
 #[cfg(feature = "moqt")]
 impl JtiStore for LruJtiStore {
     fn check_and_insert(&self, key: String, iat: i64) -> Result<(), CatError> {
-        let mut cache = self
+        if key.len() > MAX_JTI_LENGTH_BYTES {
+            return Err(CatError::DpopValidationFailed(format!(
+                "JTI exceeds {} byte cap", MAX_JTI_LENGTH_BYTES
+            )));
+        }
+        let shard = self.shard_for(&key);
+        let mut cache = shard
             .cache
             .lock()
             .map_err(|_| CatError::CryptoError("Lock poisoned".to_string()))?;
         if cache.contains(&key) {
             return Err(CatError::ReplayAttackDetected);
         }
-        if cache.len() >= self.capacity {
-            return Err(CatError::DpopValidationFailed(
-                "JTI cache at capacity — replay protection degraded, increase cache size"
-                    .to_string(),
-            ));
+        // `LruCache::push` returns the evicted (key, iat) when the shard is
+        // at capacity so we can detect "still-fresh eviction" — the case
+        // that actually degrades replay protection.
+        if let Some((_, evicted_iat)) = cache.push(key, iat) {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or(Duration::ZERO)
+                .as_secs() as i64;
+            let age = now.saturating_sub(evicted_iat);
+            if age < self.freshness_window_seconds {
+                self.premature_evictions
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
         }
-        cache.put(key, iat);
         Ok(())
     }
 
     fn len(&self) -> usize {
-        self.cache.lock().map(|c| c.len()).unwrap_or(0)
+        self.shards
+            .iter()
+            .map(|s| s.cache.lock().map(|c| c.len()).unwrap_or(0))
+            .sum()
     }
 
     fn cleanup(&self, max_age_seconds: i64) {
@@ -473,16 +588,23 @@ impl JtiStore for LruJtiStore {
             .unwrap_or(Duration::ZERO)
             .as_secs() as i64;
 
-        if let Ok(mut cache) = self.cache.lock() {
-            let expired: Vec<String> = cache
-                .iter()
-                .filter(|(_, iat): &(&String, &i64)| now - **iat >= max_age_seconds)
-                .map(|(k, _)| k.clone())
-                .collect();
-            for key in expired {
-                cache.pop(&key);
+        for shard in &self.shards {
+            if let Ok(mut cache) = shard.cache.lock() {
+                let expired: Vec<String> = cache
+                    .iter()
+                    .filter(|(_, iat): &(&String, &i64)| now - **iat >= max_age_seconds)
+                    .map(|(k, _)| k.clone())
+                    .collect();
+                for key in expired {
+                    cache.pop(&key);
+                }
             }
         }
+    }
+
+    fn premature_evictions(&self) -> u64 {
+        self.premature_evictions
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 }
 
@@ -493,6 +615,7 @@ pub struct JtiCacheStats {
     pub size: usize,
     pub capacity: usize,
     pub under_pressure: bool,
+    pub premature_evictions: u64,
 }
 
 #[cfg(feature = "moqt")]
@@ -523,12 +646,14 @@ impl DpopValidator {
 
     pub fn with_cache_size(settings: CatDpopSettings, cache_size: usize) -> Self {
         let effective_size = cache_size.max(MIN_JTI_CACHE_SIZE);
+        let window = settings.effective_window();
         Self {
-            jti_expiry_seconds: settings
-                .effective_window()
-                .checked_mul(2)
-                .unwrap_or(i64::MAX),
-            jti_store: Arc::new(LruJtiStore::new(effective_size)),
+            jti_expiry_seconds: window.checked_mul(2).unwrap_or(i64::MAX),
+            jti_store: Arc::new(LruJtiStore::with_shards_and_window(
+                effective_size,
+                DEFAULT_JTI_SHARDS,
+                window,
+            )),
             cache_capacity: effective_size,
             settings,
         }
@@ -553,6 +678,7 @@ impl DpopValidator {
             size,
             capacity: self.cache_capacity,
             under_pressure,
+            premature_evictions: self.jti_store.premature_evictions(),
         }
     }
 
@@ -662,8 +788,14 @@ impl DpopValidator {
         expected_action: MoqtAction,
         expected_thumbprint: &[u8],
         _issuer: Option<&str>,
+        access_token_hash: Option<&str>,
     ) -> Result<(), CatError> {
-        self.validate_claims_pre_sig(proof, expected_action, expected_thumbprint, None)?;
+        self.validate_claims_pre_sig(
+            proof,
+            expected_action,
+            expected_thumbprint,
+            access_token_hash,
+        )?;
 
         if !proof.header.is_supported_algorithm() {
             return Err(CatError::DpopAlgorithmNotSupported(
@@ -703,7 +835,13 @@ impl DpopValidator {
         expected_thumbprint: &[u8],
         issuer: Option<&str>,
     ) -> Result<(), CatError> {
-        self.validate_without_jti_commit(proof, expected_action, expected_thumbprint, issuer)?;
+        self.validate_without_jti_commit(
+            proof,
+            expected_action,
+            expected_thumbprint,
+            issuer,
+            None,
+        )?;
         self.insert_jti(proof, expected_thumbprint, issuer)?;
         Ok(())
     }
@@ -778,10 +916,16 @@ pub fn generate_jti() -> String {
     uuid::Uuid::new_v4().to_string()
 }
 
-/// Compute access token hash (ath) for DPoP binding
-/// Returns base64url-encoded SHA-256 hash of the access token
-pub fn compute_access_token_hash(access_token: &str) -> String {
-    let hash = crate::crypto::hash_sha256(access_token.as_bytes());
+/// Compute access token hash (ath) for DPoP binding.
+///
+/// Returns base64url-encoded (no-pad) SHA-256 of the access token's raw
+/// serialized bytes. `MoqtValidator::authorize` computes the *expected* ath
+/// this way from the exact wire bytes the token was decoded from
+/// (see [`crate::VerifiedToken::serialized`]) and the proof-issuer must
+/// produce a matching value; any re-encoding of the token would change the
+/// hash and break binding.
+pub fn compute_access_token_hash(access_token: impl AsRef<[u8]>) -> String {
+    let hash = crate::crypto::hash_sha256(access_token.as_ref());
     URL_SAFE_NO_PAD.encode(hash)
 }
 
@@ -868,6 +1012,61 @@ mod tests {
         assert_eq!(actx.action, MoqtAction::Publish as i32);
         assert!(actx.is_valid());
         assert_eq!(actx.action_string(), "PUBLISH");
+    }
+
+    #[cfg(feature = "moqt")]
+    #[test]
+    fn test_jti_store_lru_evicts_instead_of_rejecting() {
+        // Undersized cache (MIN_JTI_CACHE_SIZE) with a large freshness
+        // window and single shard so we can force capacity deterministically.
+        let store = LruJtiStore::with_shards_and_window(MIN_JTI_CACHE_SIZE, 1, 3600);
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::ZERO)
+            .as_secs() as i64;
+        for i in 0..(MIN_JTI_CACHE_SIZE + 100) {
+            store
+                .check_and_insert(format!("jti-{i}"), now)
+                .expect("insert should not fail with LRU eviction");
+        }
+        assert_eq!(store.len(), MIN_JTI_CACHE_SIZE);
+        // Every insert past capacity evicted a fresh entry (iat=now, well
+        // inside the 3600s window), so the counter must reflect that the
+        // cache is undersized for its traffic.
+        assert!(
+            store.premature_evictions() >= 100,
+            "premature evictions should be counted; got {}",
+            store.premature_evictions()
+        );
+    }
+
+    #[cfg(feature = "moqt")]
+    #[test]
+    fn test_jti_store_rejects_oversized_jti() {
+        let store = LruJtiStore::new(MIN_JTI_CACHE_SIZE);
+        let long_jti = "x".repeat(MAX_JTI_LENGTH_BYTES + 1);
+        let result = store.check_and_insert(long_jti, 0);
+        assert!(matches!(result, Err(CatError::DpopValidationFailed(_))));
+    }
+
+    #[cfg(feature = "moqt")]
+    #[test]
+    fn test_jti_store_still_detects_replay_after_lru_promotion() {
+        let store = LruJtiStore::with_shards_and_window(MIN_JTI_CACHE_SIZE, 4, 300);
+        // Insert one, then fill enough other entries to potentially rotate
+        // it in the LRU ordering, and confirm the original insert is still
+        // blocked as a replay.
+        store.check_and_insert("keeper".to_string(), 0).unwrap();
+        for i in 0..(MIN_JTI_CACHE_SIZE / 4) {
+            store
+                .check_and_insert(format!("jti-{i}"), 0)
+                .expect("insert");
+        }
+        let result = store.check_and_insert("keeper".to_string(), 0);
+        assert!(
+            matches!(result, Err(CatError::ReplayAttackDetected)),
+            "cached JTI must still be detected as replay"
+        );
     }
 
     #[test]

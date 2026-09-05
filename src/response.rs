@@ -4,6 +4,27 @@
 use crate::CatError;
 use crate::pipeline::ValidatedToken;
 
+/// Cache scope for CAT-authorized responses.
+///
+/// The default is [`CacheScope::Private`] because CATs typically carry
+/// per-user identifiers (`sub`, `cnf`, subject-scoped MOQT scopes) that a
+/// shared cache must not fan out across principals. Integrators who have
+/// explicitly designed a shared-cache key that segregates by principal — for
+/// example, keying on the token's `sub` or on a derived pseudonymous
+/// identifier — may opt into [`CacheScope::Public`], which also emits an
+/// `s-maxage` for shared caches (RFC 9111 §5.2.2.10).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CacheScope {
+    Private,
+    Public,
+}
+
+impl Default for CacheScope {
+    fn default() -> Self {
+        Self::Private
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct CatResponsePolicy {
     pub cache_control: String,
@@ -11,12 +32,31 @@ pub struct CatResponsePolicy {
 }
 
 impl CatResponsePolicy {
-    /// Build a response policy for a validated token. Fails closed if any
-    /// header value derived from claims contains control characters; a
-    /// silent-strip approach would let a hostile issuer smuggle a CRLF past
-    /// downstream serializers even though the token appeared to validate.
+    /// Build a response policy for a validated token. Emits `Cache-Control:
+    /// private` — the safe default — plus a `max-age` derived from the
+    /// token's `exp` claim when present. Fails closed if any header value
+    /// derived from claims contains control characters; a silent-strip
+    /// approach would let a hostile issuer smuggle a CRLF past downstream
+    /// serializers even though the token appeared to validate.
+    ///
+    /// Integrators who have designed a principal-segregated shared cache
+    /// should call [`Self::for_token_with_scope`] with
+    /// [`CacheScope::Public`] instead.
     pub fn for_token(token: &ValidatedToken) -> Result<Self, CatError> {
-        let mut cache_control = "private".to_string();
+        Self::for_token_with_scope(token, CacheScope::Private)
+    }
+
+    /// Build a response policy with an explicit cache scope. See
+    /// [`CacheScope`] for the caller responsibilities when selecting
+    /// [`CacheScope::Public`].
+    pub fn for_token_with_scope(
+        token: &ValidatedToken,
+        scope: CacheScope,
+    ) -> Result<Self, CatError> {
+        let mut cache_control = match scope {
+            CacheScope::Private => "private".to_string(),
+            CacheScope::Public => "public".to_string(),
+        };
 
         if let Some(exp) = token.claims().core.exp {
             let now = chrono::Utc::now().timestamp();
@@ -28,6 +68,9 @@ impl CatResponsePolicy {
             match exp.checked_sub(now) {
                 Some(remaining) if remaining > 0 => {
                     cache_control.push_str(&format!(", max-age={remaining}"));
+                    if scope == CacheScope::Public {
+                        cache_control.push_str(&format!(", s-maxage={remaining}"));
+                    }
                 }
                 _ => cache_control.push_str(", no-cache"),
             }
@@ -128,6 +171,43 @@ mod tests {
 
         let policy = CatResponsePolicy::for_token(&validated).unwrap();
         assert_eq!(policy.cache_control, "private, no-cache");
+    }
+
+    #[test]
+    fn test_token_policy_public_scope_adds_s_maxage() {
+        let token = CatTokenBuilder::new()
+            .issuer("https://test.com")
+            .expires_at(Utc::now() + Duration::hours(1))
+            .build()
+            .unwrap();
+        let validated = ValidatedToken::from_unchecked(token);
+
+        let policy =
+            CatResponsePolicy::for_token_with_scope(&validated, CacheScope::Public).unwrap();
+        assert!(
+            policy.cache_control.starts_with("public, max-age="),
+            "got: {}",
+            policy.cache_control
+        );
+        assert!(
+            policy.cache_control.contains(", s-maxage="),
+            "expected s-maxage for public scope; got: {}",
+            policy.cache_control
+        );
+    }
+
+    #[test]
+    fn test_token_policy_default_is_private() {
+        let token = CatTokenBuilder::new()
+            .issuer("https://test.com")
+            .expires_at(Utc::now() + Duration::hours(1))
+            .build()
+            .unwrap();
+        let validated = ValidatedToken::from_unchecked(token);
+
+        let policy = CatResponsePolicy::for_token(&validated).unwrap();
+        assert!(policy.cache_control.starts_with("private, max-age="));
+        assert!(!policy.cache_control.contains("s-maxage"));
     }
 
     #[test]

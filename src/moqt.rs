@@ -7,6 +7,8 @@ use crate::{
     confirmation_matches_jwk, enforce_catnip, enforce_catpor, enforce_catreplay, enforce_catu,
     validate_all_headers, validate_method,
 };
+use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 
 /// IANA-registered token type for C4M (CAT for MoQ) AUTHORIZATION TOKEN parameter.
 pub const C4M_TOKEN_TYPE: u64 = 0x01;
@@ -407,7 +409,21 @@ impl MoqtValidator {
             }
 
             let issuer = claims.core.iss.as_deref();
-            validator.validate_without_jti_commit(proof, ctx.action, &cnf.jkt, issuer)?;
+            // Bind the DPoP proof to *this specific token instance* via the
+            // access-token-hash claim. Without this binding a valid proof for
+            // one token could be reused against a different token sharing the
+            // same holder key (e.g. two tokens minted for the same subject with
+            // different scopes). The hash covers the wire bytes exactly as
+            // received — see [`crate::VerifiedToken::serialized`] for why we
+            // do not re-encode.
+            let ath_expected = URL_SAFE_NO_PAD.encode(crate::crypto::hash_sha256(token.serialized()));
+            validator.validate_without_jti_commit(
+                proof,
+                ctx.action,
+                &cnf.jkt,
+                issuer,
+                Some(&ath_expected),
+            )?;
 
             if proof.payload.actx.tns != ctx.namespace {
                 return Err(CatError::DpopValidationFailed(
@@ -437,6 +453,29 @@ impl MoqtValidator {
                 }
             }
 
+            // CAT-4-MOQT requires the resource URI, if present, to be
+            // consistent with the tns/tn fields of the same proof. A proof
+            // that carries `resource=moqt://a?tns=X&tn=Y` while actx.tns/tn
+            // point somewhere else would let a caller advertise one target
+            // to the audit log and prove possession against another.
+            if let Some(resource) = proof.payload.actx.resource.as_deref() {
+                let parsed = parse_moqt_resource_uri(resource)?;
+                if let Some(ref ns) = parsed.namespace
+                    && (proof.payload.actx.tns.len() != 1 || &proof.payload.actx.tns[0] != ns)
+                {
+                    return Err(CatError::DpopValidationFailed(
+                        "DPoP proof resource namespace disagrees with actx.tns".to_string(),
+                    ));
+                }
+                if let Some(ref tn) = parsed.track
+                    && &proof.payload.actx.tn != tn
+                {
+                    return Err(CatError::DpopValidationFailed(
+                        "DPoP proof resource track disagrees with actx.tn".to_string(),
+                    ));
+                }
+            }
+
             Some((validator, proof, cnf, issuer))
         } else {
             None
@@ -445,15 +484,33 @@ impl MoqtValidator {
         // 13. Commit phase. All authorization checks above have passed; only
         //     now do we consume replay-state resources so an unauthorized
         //     request cannot burn a legitimate token's cti.
+        //
+        // Commit the in-memory DPoP JTI first, then the CAT cti. The two
+        // stores are independent; without a two-phase transaction the crate
+        // must pick an ordering. JTI first is safer because:
+        //   - The default JTI store is in-process and rarely fails
+        //     transiently (lock poisoning is the only real failure surface).
+        //   - The `cti` store is often a distributed backend behind the
+        //     `ReplayGuard` trait and its failures can be transient.
+        //   - If the cti commit fails after JTI commit, the client retries
+        //     with a fresh JTI (required per RFC 9449) so no state is
+        //     leaked: the second attempt sees a virgin cti store and
+        //     succeeds. The reverse ordering (cti first) would leave the
+        //     cti consumed on a JTI failure and turn every transient JTI
+        //     hiccup into a permanent replay error on the caller's retry.
+        //   - If a caller needs strict atomicity between the two stores,
+        //     they can bind both to the same backend behind `ReplayGuard`
+        //     and issue a single transactional commit inside
+        //     `check_and_record`.
+        if let Some((validator, proof, cnf, issuer)) = dpop_commit {
+            validator.commit_jti(proof, &cnf.jkt, issuer)?;
+        }
+
         let reuse_detected = if let Some(guard) = replay_guard_for_commit {
             enforce_catreplay(claims, guard)?
         } else {
             false
         };
-
-        if let Some((validator, proof, cnf, issuer)) = dpop_commit {
-            validator.commit_jti(proof, &cnf.jkt, issuer)?;
-        }
 
         let mut authorized = AuthorizedRequest::allowed(scope_index);
         authorized.reuse_detected = reuse_detected;
@@ -683,6 +740,77 @@ pub mod roles {
             .track_prefix(track_prefix)
             .build()
     }
+}
+
+/// Parsed components of a `moqt://<endpoint>?tns=<b64>&tn=<b64>` resource URI
+/// as produced by [`crate::dpop::construct_moqt_uri`]. Used to cross-validate
+/// a DPoP proof's `actx.resource` against its own `actx.tns`/`actx.tn`.
+///
+/// The parser accepts only the strict shape emitted by the constructor. A
+/// resource URI with additional query parameters, path components, fragments,
+/// or a scheme other than `moqt://` is rejected as invalid form rather than
+/// silently ignored, so a hostile proof cannot smuggle a mismatched target
+/// through fields the crate does not inspect.
+struct MoqtResourceUri {
+    #[allow(dead_code)]
+    endpoint: String,
+    namespace: Option<Vec<u8>>,
+    track: Option<Vec<u8>>,
+}
+
+fn parse_moqt_resource_uri(uri: &str) -> Result<MoqtResourceUri, CatError> {
+    use base64::Engine as _;
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+
+    let rest = uri.strip_prefix("moqt://").ok_or_else(|| {
+        CatError::DpopValidationFailed(format!(
+            "DPoP proof resource must start with moqt://; got '{uri}'"
+        ))
+    })?;
+    if rest.contains('#') || rest.contains('/') {
+        return Err(CatError::DpopValidationFailed(
+            "DPoP proof resource must not contain '#' or '/'".to_string(),
+        ));
+    }
+    let (endpoint, query) = match rest.split_once('?') {
+        Some((ep, q)) => (ep.to_string(), Some(q)),
+        None => (rest.to_string(), None),
+    };
+    if endpoint.is_empty() {
+        return Err(CatError::DpopValidationFailed(
+            "DPoP proof resource endpoint is empty".to_string(),
+        ));
+    }
+    let mut namespace = None;
+    let mut track = None;
+    if let Some(q) = query {
+        for pair in q.split('&') {
+            let (k, v) = pair.split_once('=').ok_or_else(|| {
+                CatError::DpopValidationFailed(
+                    "DPoP proof resource query segment has no '='".to_string(),
+                )
+            })?;
+            let decoded = URL_SAFE_NO_PAD.decode(v).map_err(|e| {
+                CatError::DpopValidationFailed(format!(
+                    "DPoP proof resource query segment '{k}' base64 decode: {e}"
+                ))
+            })?;
+            match k {
+                "tns" if namespace.is_none() => namespace = Some(decoded),
+                "tn" if track.is_none() => track = Some(decoded),
+                _ => {
+                    return Err(CatError::DpopValidationFailed(format!(
+                        "DPoP proof resource has unexpected or repeated query key '{k}'"
+                    )));
+                }
+            }
+        }
+    }
+    Ok(MoqtResourceUri {
+        endpoint,
+        namespace,
+        track,
+    })
 }
 
 #[cfg(test)]

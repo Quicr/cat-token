@@ -1011,7 +1011,7 @@ pub fn decode_token_with_limits(
     limits: &CwtLimits,
 ) -> Result<VerifiedToken, CatError> {
     let envelope = parse_cose_envelope(cose_bytes)?;
-    verify_and_decode(&envelope, algorithm, limits)
+    verify_and_decode(&envelope, algorithm, limits, cose_bytes.to_vec())
 }
 
 /// Decode a CatToken from a base64url-encoded COSE structure.
@@ -1058,6 +1058,9 @@ pub fn decode_encrypted_token_with_limits(
     )?;
     let verified = decode_token_with_limits(&inner_bytes, signing_algorithm, limits)?;
     let header = verified.header().clone();
+    // Preserve the *outer* Encrypt0 wire bytes so DPoP `ath` binds to what the
+    // client sent — the inner signed COSE is an implementation detail the peer
+    // never sees on the wire.
     Ok(VerifiedToken::new(
         verified.into_unvalidated_token(),
         TokenHeader {
@@ -1065,6 +1068,7 @@ pub fn decode_encrypted_token_with_limits(
             kid: header.kid,
         },
         TokenProvenance::Encrypted,
+        cose_bytes.to_vec(),
     ))
 }
 
@@ -1161,6 +1165,7 @@ fn verify_and_decode(
     envelope: &ParsedCoseEnvelope,
     algorithm: &dyn CryptographicAlgorithm,
     limits: &CwtLimits,
+    serialized: Vec<u8>,
 ) -> Result<VerifiedToken, CatError> {
     let alg_id = algorithm.algorithm_id();
     let correct_tag = if alg_id == crate::crypto::ALG_HMAC256_256 {
@@ -1188,7 +1193,12 @@ fn verify_and_decode(
         algorithm_id: envelope.header_alg,
         kid: envelope.header_kid.clone(),
     };
-    Ok(VerifiedToken::new(token, header, TokenProvenance::Signed))
+    Ok(VerifiedToken::new(
+        token,
+        header,
+        TokenProvenance::Signed,
+        serialized,
+    ))
 }
 
 pub fn decode_token_with_resolver_and_limits(
@@ -1212,7 +1222,7 @@ pub fn decode_token_with_resolver_and_limits(
     };
     let algorithm = resolver.resolve(&hint)?;
 
-    verify_and_decode(&envelope, algorithm, limits)
+    verify_and_decode(&envelope, algorithm, limits, cose_bytes.to_vec())
 }
 
 pub fn decode_token_with_admission(
@@ -1246,7 +1256,7 @@ pub fn decode_token_with_admission_and_limits(
     };
     let algorithm = resolver.resolve(&hint)?;
 
-    verify_and_decode(&envelope, algorithm, limits)
+    verify_and_decode(&envelope, algorithm, limits, cose_bytes.to_vec())
 }
 
 fn extract_header_info(header_cbor: &[u8]) -> Result<(i64, Option<Vec<u8>>), CatError> {

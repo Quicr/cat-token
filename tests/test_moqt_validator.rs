@@ -518,8 +518,9 @@ fn test_jti_cache_stats() {
     let jwk = Jwk::from_es256_verifying_key(alg.verifying_key()).unwrap();
     let thumbprint = jwk.thumbprint().unwrap();
 
-    // Insert 1000 unique JTIs (fills the cache)
-    for i in 0..1000 {
+    // Insert 2000 unique JTIs — more than capacity, so the LRU cache must
+    // evict rather than start rejecting valid new proofs.
+    for i in 0..2000 {
         let jti = format!("jti-stats-{}", i);
         let mut proof = DpopProof::create_for_moqt(
             MoqtAction::Publish,
@@ -532,12 +533,31 @@ fn test_jti_cache_stats() {
         proof.sign(&alg).unwrap();
 
         let result = validator.validate(&proof, MoqtAction::Publish, &thumbprint, None);
-        assert!(result.is_ok(), "Validation should succeed for unique JTI");
+        assert!(
+            result.is_ok(),
+            "Validation must not hard-fail once the cache is full (LRU eviction)"
+        );
     }
 
-    // Check cache stats
     let stats = validator.jti_cache_stats();
-    assert_eq!(stats.size, 1000);
+    // Sharded per-shard clamp may make the effective total slightly below
+    // the reported capacity; verify the store is at least reporting sane
+    // pressure and that premature evictions have been counted.
     assert_eq!(stats.capacity, 1000);
-    assert!(stats.under_pressure, "Cache should be at capacity (90%+)");
+    assert!(
+        stats.size <= stats.capacity,
+        "cache size {} exceeds capacity {}",
+        stats.size,
+        stats.capacity
+    );
+    assert!(
+        stats.under_pressure,
+        "Cache should register as under pressure after overfill: size={}, capacity={}",
+        stats.size,
+        stats.capacity
+    );
+    assert!(
+        stats.premature_evictions > 0,
+        "premature_evictions should be non-zero when overfilled inside the freshness window"
+    );
 }

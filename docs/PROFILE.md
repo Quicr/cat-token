@@ -50,7 +50,7 @@ Excluded from this profile:
 | `catalpn` | array of byte strings | text strings |
 | `cath` | array of `HeaderMatchRule` (name → matches) | integer header keys |
 | `catr` | map with `type`, `expadd`, `deadline`, `renewal-uri`, `cookie`, `header` per type | fractional numeric dates, unknown `type` |
-| `catpor` | map with `probability` (0..=1 f64), `id` (int or bstr), `expiration` (int?) | fractional `probability` out of range |
+| `catpor` | array `[probability (0..=1 f64), id (bstr), expiration? (int)]` | maps, text `id`, `probability` out of `[0.0, 1.0]`, non-integer `expiration` |
 | `catreplay` | `Permitted`, `Prohibited`, `ReuseDetection` | any other integer value |
 | `catif` action | `[status]`, `[status, headers]`, or `[status, headers, kid]` | any longer array, text-string keys, label-set keys |
 | `catif` header value | text string | integer, array, CWT-null |

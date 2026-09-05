@@ -155,7 +155,22 @@ let ro_scope = roles::read_only(b"example.com", b"/archive/");
 
 ## Standards Compliance
 
-Full compliance with CTA-5007-B and all referenced standards. See [`docs/std-compliance-req.md`](docs/std-compliance-req.md) for the detailed compliance matrix.
+This crate implements a **narrow, deterministic, fail-closed profile** of
+CTA-5007-B. It is not a full CTA-5007-B recipient: anywhere the base spec
+allows multiple representational forms for the same semantic content, this
+crate accepts exactly one form and rejects the rest. See
+[`docs/PROFILE.md`](docs/PROFILE.md) for the supported-forms matrix and
+per-claim rules.
+
+Note also that:
+
+- `cattpk` is a *pin* post-check that runs after a caller-supplied
+  `PathValidator` has authenticated the peer certificate. The crate does not
+  implement RFC 5280 path validation; deploy it downstream of a real
+  X.509 path validator.
+- Distributed replay coherence is out of scope. The bundled `ReplayGuard`
+  implementation is in-memory only; production deployments must supply a
+  distributed backend behind the `ReplayGuard` trait.
 
 ## License
 

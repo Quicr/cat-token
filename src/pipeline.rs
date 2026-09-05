@@ -21,14 +21,26 @@ pub struct VerifiedToken {
     token: CatToken,
     header: TokenHeader,
     provenance: TokenProvenance,
+    /// Original serialized COSE bytes as received from the wire. Retained
+    /// through validation so `MoqtValidator::authorize` can bind an
+    /// accompanying DPoP proof to *this specific token instance* via the
+    /// `ath` (access-token-hash) claim without re-encoding — reserializing
+    /// would change the byte sequence and defeat proof binding.
+    serialized: Vec<u8>,
 }
 
 impl VerifiedToken {
-    pub(crate) fn new(token: CatToken, header: TokenHeader, provenance: TokenProvenance) -> Self {
+    pub(crate) fn new(
+        token: CatToken,
+        header: TokenHeader,
+        provenance: TokenProvenance,
+        serialized: Vec<u8>,
+    ) -> Self {
         Self {
             token,
             header,
             provenance,
+            serialized,
         }
     }
 
@@ -48,12 +60,19 @@ impl VerifiedToken {
         self.provenance == TokenProvenance::Encrypted
     }
 
+    /// The original wire bytes this token was decoded from. See the field
+    /// documentation for why callers should not attempt to re-encode.
+    pub fn serialized(&self) -> &[u8] {
+        &self.serialized
+    }
+
     pub fn validate(self, validator: &CatTokenValidator) -> Result<ValidatedToken, CatError> {
         validator.validate_with_provenance(&self.token, self.provenance)?;
         Ok(ValidatedToken {
             token: self.token,
             header: self.header,
             provenance: self.provenance,
+            serialized: self.serialized,
         })
     }
 
@@ -67,6 +86,7 @@ pub struct ValidatedToken {
     token: CatToken,
     header: TokenHeader,
     provenance: TokenProvenance,
+    serialized: Vec<u8>,
 }
 
 impl ValidatedToken {
@@ -79,6 +99,7 @@ impl ValidatedToken {
                 kid: None,
             },
             provenance: TokenProvenance::Signed,
+            serialized: Vec::new(),
         }
     }
 
@@ -96,6 +117,13 @@ impl ValidatedToken {
 
     pub fn was_encrypted(&self) -> bool {
         self.provenance == TokenProvenance::Encrypted
+    }
+
+    /// The original wire bytes this token was decoded from. Used by
+    /// [`crate::MoqtValidator::authorize`] to compute the SHA-256 hash the
+    /// DPoP proof's `ath` claim must match.
+    pub fn serialized(&self) -> &[u8] {
+        &self.serialized
     }
 
     pub fn into_inner(self) -> CatToken {
