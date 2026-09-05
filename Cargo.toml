@@ -34,6 +34,9 @@ sfv = "0.9"
 # Optional qp-trie dependency
 qp-trie = { version = "0.8", optional = true }
 
+# Optional RFC 3986 compliant URL parser
+url = { version = "2", optional = true }
+
 [dependencies.regex]
 version = "1.10"
 
@@ -97,3 +100,4 @@ default = ["builtin-trie", "moqt"]
 builtin-trie = []
 qp-trie = ["dep:qp-trie"]
 moqt = []
+rfc3986-url = ["dep:url"]

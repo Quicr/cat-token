@@ -13,8 +13,7 @@ fn test_static_resolver_decodes_token() {
         .build();
     let encoded = encode_token(&token, &key).unwrap();
 
-    let resolver =
-        StaticKeyResolver::new(Es256Algorithm::new_verifier(*key.verifying_key()));
+    let resolver = StaticKeyResolver::new(Es256Algorithm::new_verifier(*key.verifying_key()));
 
     let verified = decode_token_with_resolver(&encoded, &resolver).unwrap();
     let decoded = verified.into_unvalidated_token();
@@ -66,9 +65,8 @@ fn test_keyring_resolver_with_default() {
         .build();
     let encoded = encode_token(&token, &key).unwrap();
 
-    let resolver = KeyRingResolver::new().with_default(Box::new(Es256Algorithm::new_verifier(
-        *key.verifying_key(),
-    )));
+    let resolver = KeyRingResolver::new()
+        .with_default(Box::new(Es256Algorithm::new_verifier(*key.verifying_key())));
 
     let verified = decode_token_with_resolver(&encoded, &resolver).unwrap();
     let decoded = verified.into_unvalidated_token();
@@ -148,13 +146,9 @@ fn test_keyring_default_used_when_kid_absent() {
     let resolver = KeyRingResolver::new()
         .with_key(
             b"some-kid".to_vec(),
-            Box::new(Es256Algorithm::new_verifier(
-                *other_key.verifying_key(),
-            )),
+            Box::new(Es256Algorithm::new_verifier(*other_key.verifying_key())),
         )
-        .with_default(Box::new(Es256Algorithm::new_verifier(
-            *key.verifying_key(),
-        )));
+        .with_default(Box::new(Es256Algorithm::new_verifier(*key.verifying_key())));
 
     let verified = decode_token_with_resolver(&encoded, &resolver).unwrap();
     let decoded = verified.into_unvalidated_token();
@@ -171,8 +165,7 @@ fn test_resolver_full_pipeline() {
         .build();
     let encoded = encode_token(&token, &key).unwrap();
 
-    let resolver =
-        StaticKeyResolver::new(Es256Algorithm::new_verifier(*key.verifying_key()));
+    let resolver = StaticKeyResolver::new(Es256Algorithm::new_verifier(*key.verifying_key()));
 
     let verified = decode_token_with_resolver(&encoded, &resolver).unwrap();
 

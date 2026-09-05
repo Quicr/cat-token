@@ -9,6 +9,7 @@ pub struct UriComponents {
     pub port: String,
     pub path: String,
     pub query: String,
+    pub fragment: Option<String>,
 }
 
 impl UriComponents {
@@ -69,7 +70,15 @@ pub fn decompose_uri(uri: &str) -> UriComponents {
 
 fn parse_uri(uri: &str) -> UriComponents {
     let mut components = UriComponents::default();
-    let mut rest = uri;
+
+    let (rest_no_frag, fragment) = if let Some(pos) = uri.find('#') {
+        (&uri[..pos], Some(uri[pos + 1..].to_string()))
+    } else {
+        (uri, None)
+    };
+    components.fragment = fragment;
+
+    let mut rest = rest_no_frag;
 
     // Extract scheme
     if let Some(pos) = rest.find("://") {
@@ -131,8 +140,14 @@ fn parse_uri(uri: &str) -> UriComponents {
 }
 
 pub fn normalize_uri(uri: &str) -> String {
-    let mut result = String::with_capacity(uri.len());
-    let mut rest = uri;
+    let (uri_no_frag, fragment) = if let Some(pos) = uri.find('#') {
+        (&uri[..pos], Some(&uri[pos..]))
+    } else {
+        (uri, None)
+    };
+
+    let mut result = String::with_capacity(uri_no_frag.len());
+    let mut rest = uri_no_frag;
 
     // §6.2.2.1 Case normalization: scheme to lowercase
     if let Some(pos) = rest.find("://") {
@@ -206,6 +221,10 @@ pub fn normalize_uri(uri: &str) -> String {
 
     if let Some(q) = query {
         result.push_str(q);
+    }
+
+    if let Some(frag) = fragment {
+        result.push_str(frag);
     }
 
     result
@@ -284,6 +303,28 @@ fn to_upper_hex(nibble: u8) -> char {
 // RFC 3986 §2.3: unreserved = ALPHA / DIGIT / "-" / "." / "_" / "~"
 fn is_unreserved(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'-' || b == b'.' || b == b'_' || b == b'~'
+}
+
+#[cfg(feature = "rfc3986-url")]
+pub fn decompose_uri_rfc3986(uri: &str) -> Result<UriComponents, crate::CatError> {
+    let parsed = url::Url::parse(uri)
+        .map_err(|e| crate::CatError::InvalidClaimValue(format!("invalid URI: {e}")))?;
+
+    Ok(UriComponents {
+        scheme: parsed.scheme().to_string(),
+        host: parsed.host_str().unwrap_or("").to_string(),
+        port: parsed.port().map(|p| p.to_string()).unwrap_or_default(),
+        path: parsed.path().to_string(),
+        query: parsed.query().unwrap_or("").to_string(),
+        fragment: parsed.fragment().map(String::from),
+    })
+}
+
+#[cfg(feature = "rfc3986-url")]
+pub fn normalize_uri_rfc3986(uri: &str) -> Result<String, crate::CatError> {
+    let parsed = url::Url::parse(uri)
+        .map_err(|e| crate::CatError::InvalidClaimValue(format!("invalid URI: {e}")))?;
+    Ok(parsed.to_string())
 }
 
 #[cfg(test)]
@@ -378,5 +419,48 @@ mod tests {
         assert_eq!(c.component(URI_COMPONENT_FILENAME), "data.json");
         assert_eq!(c.component(URI_COMPONENT_STEM), "data");
         assert_eq!(c.component(URI_COMPONENT_EXTENSION), "json");
+    }
+
+    #[test]
+    fn test_fragment_extraction() {
+        let c = decompose_uri("https://example.com/path#section1");
+        assert_eq!(c.path, "/path");
+        assert_eq!(c.fragment, Some("section1".to_string()));
+    }
+
+    #[test]
+    fn test_fragment_with_query() {
+        let c = decompose_uri("https://example.com/path?key=val#frag");
+        assert_eq!(c.path, "/path");
+        assert_eq!(c.query, "key=val");
+        assert_eq!(c.fragment, Some("frag".to_string()));
+    }
+
+    #[test]
+    fn test_no_fragment() {
+        let c = decompose_uri("https://example.com/path?key=val");
+        assert_eq!(c.fragment, None);
+    }
+
+    #[test]
+    fn test_empty_fragment() {
+        let c = decompose_uri("https://example.com/path#");
+        assert_eq!(c.fragment, Some(String::new()));
+    }
+
+    #[test]
+    fn test_normalize_preserves_fragment() {
+        assert_eq!(
+            normalize_uri("HTTP://Example.COM/path#section"),
+            "http://example.com/path#section"
+        );
+    }
+
+    #[test]
+    fn test_fragment_not_confused_with_query() {
+        let c = decompose_uri("https://example.com/path#frag?notquery");
+        assert_eq!(c.path, "/path");
+        assert_eq!(c.query, "");
+        assert_eq!(c.fragment, Some("frag?notquery".to_string()));
     }
 }
