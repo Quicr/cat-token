@@ -1,0 +1,27 @@
+[package]
+name = "cat-token-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+cat-token = { path = "..", features = ["moqt"] }
+
+[[bin]]
+name = "fuzz_decode_token"
+path = "fuzz_targets/fuzz_decode_token.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_cbor_payload"
+path = "fuzz_targets/fuzz_cbor_payload.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_uri_normalize"
+path = "fuzz_targets/fuzz_uri_normalize.rs"
+doc = false

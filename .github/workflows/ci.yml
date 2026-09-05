@@ -62,6 +62,43 @@ jobs:
     - name: Build CLI binary
       run: cargo build --bin cat-cli --verbose
 
+  feature-matrix:
+    name: Feature Matrix
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        features:
+          - ""
+          - "builtin-trie"
+          - "moqt"
+          - "builtin-trie,moqt"
+          - "qp-trie"
+          - "qp-trie,moqt"
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Build with features '${{ matrix.features }}'
+      run: cargo build --no-default-features --features "${{ matrix.features }}"
+
+    - name: Test with features '${{ matrix.features }}'
+      run: cargo test --no-default-features --features "${{ matrix.features }}"
+
+    - name: Clippy with features '${{ matrix.features }}'
+      run: cargo clippy --no-default-features --features "${{ matrix.features }}" -- -D warnings
+
+  cargo-deny:
+    name: Dependency Audit
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install cargo-deny
+      uses: EmbarkStudios/cargo-deny-action@v2
+
   coverage:
     name: Code Coverage
     runs-on: ubuntu-latest
