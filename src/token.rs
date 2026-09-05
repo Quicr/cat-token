@@ -1014,6 +1014,50 @@ pub fn decode_token_with_resolver_and_limits(
     Ok(VerifiedToken::new(token, header, TokenProvenance::Signed))
 }
 
+pub fn decode_token_with_admission(
+    cose_bytes: &[u8],
+    resolver: &dyn crate::key_resolver::KeyResolver,
+    policy: &crate::pipeline::AdmissionPolicy,
+) -> Result<VerifiedToken, CatError> {
+    decode_token_with_admission_and_limits(cose_bytes, resolver, policy, &CwtLimits::default())
+}
+
+pub fn decode_token_with_admission_and_limits(
+    cose_bytes: &[u8],
+    resolver: &dyn crate::key_resolver::KeyResolver,
+    policy: &crate::pipeline::AdmissionPolicy,
+    limits: &CwtLimits,
+) -> Result<VerifiedToken, CatError> {
+    let header = parse_cose_header(cose_bytes)?;
+    policy.check(cose_bytes, &header)?;
+    decode_token_with_resolver_and_limits(cose_bytes, resolver, limits)
+}
+
+fn parse_cose_header(cose_bytes: &[u8]) -> Result<TokenHeader, CatError> {
+    let mut cursor = std::io::Cursor::new(cose_bytes);
+    let value: ciborium::Value =
+        ciborium::de::from_reader(&mut cursor).map_err(|e| CatError::InvalidCbor(e.to_string()))?;
+
+    let arr = match value {
+        ciborium::Value::Tag(_, inner) => match *inner {
+            ciborium::Value::Array(a) if a.len() == 4 => a,
+            _ => return Err(CatError::InvalidTokenFormat),
+        },
+        _ => return Err(CatError::InvalidTokenFormat),
+    };
+
+    let header_cbor = match &arr[0] {
+        ciborium::Value::Bytes(b) => b.clone(),
+        _ => return Err(CatError::InvalidTokenFormat),
+    };
+
+    let (alg, kid) = extract_header_info(&header_cbor)?;
+    Ok(TokenHeader {
+        algorithm_id: alg,
+        kid,
+    })
+}
+
 fn extract_header_info(header_cbor: &[u8]) -> Result<(i64, Option<Vec<u8>>), CatError> {
     let value: ciborium::Value =
         ciborium::de::from_reader(header_cbor).map_err(|e| CatError::InvalidCbor(e.to_string()))?;
