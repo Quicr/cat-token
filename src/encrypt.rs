@@ -7,10 +7,12 @@ use aes_gcm::{
     aead::{Aead, AeadCore, OsRng},
 };
 use ciborium::Value;
+use std::io::Cursor;
 
 const COSE_TAG_ENCRYPT0: u64 = 16;
 const ALG_A128GCM: i64 = 1;
 const ALG_A256GCM: i64 = 3;
+const MAX_ENCRYPT0_SIZE: usize = 16 * 1024;
 
 pub enum EncryptionAlgorithm {
     A128Gcm,
@@ -124,8 +126,25 @@ pub fn cose_encrypt0(
 
 /// Decrypt a COSE_Encrypt0 structure.
 pub fn cose_decrypt0(cose_bytes: &[u8], key: &[u8]) -> Result<Vec<u8>, CatError> {
+    if cose_bytes.len() > MAX_ENCRYPT0_SIZE {
+        return Err(CatError::InvalidCbor(format!(
+            "COSE_Encrypt0 too large: {} bytes exceeds limit of {} bytes",
+            cose_bytes.len(),
+            MAX_ENCRYPT0_SIZE
+        )));
+    }
+
+    let mut cursor = Cursor::new(cose_bytes);
     let value: Value =
-        ciborium::de::from_reader(cose_bytes).map_err(|e| CatError::InvalidCbor(e.to_string()))?;
+        ciborium::de::from_reader(&mut cursor).map_err(|e| CatError::InvalidCbor(e.to_string()))?;
+
+    if (cursor.position() as usize) != cose_bytes.len() {
+        return Err(CatError::InvalidCbor(format!(
+            "trailing bytes after COSE_Encrypt0: {} bytes consumed out of {}",
+            cursor.position(),
+            cose_bytes.len()
+        )));
+    }
 
     let arr = match value {
         Value::Tag(tag, inner) if tag == COSE_TAG_ENCRYPT0 => match *inner {

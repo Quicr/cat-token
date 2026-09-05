@@ -943,6 +943,7 @@ pub(crate) const DEFAULT_MAX_NESTING_DEPTH: usize = 8;
 pub(crate) const DEFAULT_MAX_TOTAL_ITEMS: usize = 10_000;
 pub(crate) const DEFAULT_MAX_TOTAL_STRING_BYTES: usize = 512 * 1024;
 pub(crate) const DEFAULT_MAX_REGEX_COUNT: usize = 50;
+pub(crate) const DEFAULT_MAX_CATNIP_ENTRIES: usize = 1000;
 
 /// Configuration for CWT validation limits.
 ///
@@ -959,6 +960,7 @@ pub struct CwtLimits {
     pub max_total_items: usize,
     pub max_total_string_bytes: usize,
     pub max_regex_count: usize,
+    pub max_catnip_entries: usize,
 }
 
 impl Default for CwtLimits {
@@ -974,6 +976,7 @@ impl Default for CwtLimits {
             max_total_items: DEFAULT_MAX_TOTAL_ITEMS,
             max_total_string_bytes: DEFAULT_MAX_TOTAL_STRING_BYTES,
             max_regex_count: DEFAULT_MAX_REGEX_COUNT,
+            max_catnip_entries: DEFAULT_MAX_CATNIP_ENTRIES,
         }
     }
 }
@@ -1194,7 +1197,11 @@ impl Cwt {
 
             let claim_id = match key {
                 Value::Integer(i) => i.try_into().map_err(|_| CatError::InvalidTokenFormat)?,
-                _ => continue,
+                _ => {
+                    return Err(CatError::InvalidCbor(
+                        "non-integer claim label rejected".to_string(),
+                    ));
+                }
             };
 
             match claim_id {
@@ -1383,8 +1390,16 @@ impl Cwt {
                 CLAIM_CATNIP => {
                     reject_unexpected_tag(&value, "catnip")?;
                     if let Value::Array(arr) = value {
+                        if arr.len() > limits.max_catnip_entries {
+                            return Err(CatError::InvalidCbor(format!(
+                                "Too many catnip entries: {} exceeds limit of {}",
+                                arr.len(),
+                                limits.max_catnip_entries
+                            )));
+                        }
                         let mut nips = Vec::new();
                         for item in arr {
+                            counters.count_item(limits)?;
                             nips.push(decode_network_identifier(&item)?);
                         }
                         cat.catnip = Some(nips);
@@ -1446,6 +1461,7 @@ impl Cwt {
                         }
                         let mut methods = Vec::new();
                         for item in arr {
+                            counters.count_item(limits)?;
                             if let Value::Text(s) = item {
                                 methods.push(s);
                             } else {
@@ -1472,6 +1488,7 @@ impl Cwt {
                         }
                         let mut alpns = Vec::new();
                         for item in arr {
+                            counters.count_item(limits)?;
                             match item {
                                 Value::Bytes(b) => alpns.push(b),
                                 _ => {
@@ -1531,6 +1548,7 @@ impl Cwt {
                     if let Value::Array(arr) = value {
                         let mut countries = Vec::new();
                         for item in arr {
+                            counters.count_item(limits)?;
                             if let Value::Text(s) = item {
                                 countries.push(s);
                             } else {
@@ -1551,6 +1569,7 @@ impl Cwt {
                     if let Value::Array(zones) = value {
                         let mut coords = Vec::new();
                         for zone in zones {
+                            counters.count_item(limits)?;
                             if let Value::Array(elements) = zone {
                                 if elements.len() != 3 {
                                     return Err(CatError::InvalidClaimValue(format!(
@@ -1767,6 +1786,7 @@ impl Cwt {
                         Value::Array(arr) => {
                             let mut items = Vec::new();
                             for item in arr {
+                                counters.count_item(limits)?;
                                 if let Value::Text(s) = item {
                                     items.push(s);
                                 } else {
@@ -1936,6 +1956,7 @@ impl Cwt {
                     if let Value::Map(entries) = value {
                         let mut actions = Vec::new();
                         for (k, v) in entries {
+                            counters.count_item(limits)?;
                             let claim_key: i64 = match k {
                                 Value::Integer(i) => i.try_into().map_err(|_| {
                                     CatError::InvalidClaimValue("Invalid catif map key".to_string())
@@ -2039,6 +2060,7 @@ impl Cwt {
                         let mut status_code = None;
 
                         for (k, v) in entries {
+                            counters.count_item(limits)?;
                             let key: i64 = match k {
                                 Value::Integer(i) => i.try_into().map_err(|_| {
                                     CatError::InvalidClaimValue("Invalid catr map key".to_string())
