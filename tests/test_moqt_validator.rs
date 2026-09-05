@@ -478,7 +478,7 @@ fn test_dpop_validator_concurrent_jti() {
                     MoqtAction::Publish,
                     vec![b"namespace".to_vec()],
                     b"track",
-                    "ES256",
+                    ALG_ES256,
                     jwk_clone.clone(),
                 )
                 .with_jti(jti.clone());
@@ -526,7 +526,7 @@ fn test_jti_cache_stats() {
             MoqtAction::Publish,
             vec![b"namespace".to_vec()],
             b"track",
-            "ES256",
+            ALG_ES256,
             jwk.clone(),
         )
         .with_jti(jti);
@@ -553,8 +553,7 @@ fn test_jti_cache_stats() {
     assert!(
         stats.under_pressure,
         "Cache should register as under pressure after overfill: size={}, capacity={}",
-        stats.size,
-        stats.capacity
+        stats.size, stats.capacity
     );
     assert!(
         stats.premature_evictions > 0,

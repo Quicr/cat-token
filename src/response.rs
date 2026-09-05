@@ -13,16 +13,11 @@ use crate::pipeline::ValidatedToken;
 /// example, keying on the token's `sub` or on a derived pseudonymous
 /// identifier — may opt into [`CacheScope::Public`], which also emits an
 /// `s-maxage` for shared caches (RFC 9111 §5.2.2.10).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CacheScope {
+    #[default]
     Private,
     Public,
-}
-
-impl Default for CacheScope {
-    fn default() -> Self {
-        Self::Private
-    }
 }
 
 #[derive(Debug, Clone)]

@@ -7,9 +7,6 @@ use crate::{
     confirmation_matches_jwk, enforce_catnip, enforce_catpor, enforce_catreplay, enforce_catu,
     validate_all_headers, validate_method,
 };
-use base64::Engine;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-
 /// IANA-registered token type for C4M (CAT for MoQ) AUTHORIZATION TOKEN parameter.
 pub const C4M_TOKEN_TYPE: u64 = 0x01;
 
@@ -416,7 +413,7 @@ impl MoqtValidator {
             // different scopes). The hash covers the wire bytes exactly as
             // received — see [`crate::VerifiedToken::serialized`] for why we
             // do not re-encode.
-            let ath_expected = URL_SAFE_NO_PAD.encode(crate::crypto::hash_sha256(token.serialized()));
+            let ath_expected = crate::dpop::compute_access_token_hash(token.serialized());
             validator.validate_without_jti_commit(
                 proof,
                 ctx.action,
@@ -454,12 +451,21 @@ impl MoqtValidator {
             }
 
             // CAT-4-MOQT requires the resource URI, if present, to be
-            // consistent with the tns/tn fields of the same proof. A proof
-            // that carries `resource=moqt://a?tns=X&tn=Y` while actx.tns/tn
-            // point somewhere else would let a caller advertise one target
-            // to the audit log and prove possession against another.
+            // consistent with the tns/tn fields of the same proof AND with
+            // the relay endpoint handling this request. A proof carrying a
+            // resource for another relay endpoint must not authorize this
+            // one, even when tns/tn happen to match — otherwise a hostile
+            // holder could take a proof it obtained against relay A and
+            // replay it at relay B by presenting a token whose audience
+            // permits both.
             if let Some(resource) = proof.payload.actx.resource.as_deref() {
                 let parsed = parse_moqt_resource_uri(resource)?;
+                if parsed.endpoint != ctx.relay_endpoint {
+                    return Err(CatError::DpopValidationFailed(format!(
+                        "DPoP proof resource endpoint '{}' does not match relay '{}'",
+                        parsed.endpoint, ctx.relay_endpoint
+                    )));
+                }
                 if let Some(ref ns) = parsed.namespace
                     && (proof.payload.actx.tns.len() != 1 || &proof.payload.actx.tns[0] != ns)
                 {
@@ -752,7 +758,6 @@ pub mod roles {
 /// silently ignored, so a hostile proof cannot smuggle a mismatched target
 /// through fields the crate does not inspect.
 struct MoqtResourceUri {
-    #[allow(dead_code)]
     endpoint: String,
     namespace: Option<Vec<u8>>,
     track: Option<Vec<u8>>,

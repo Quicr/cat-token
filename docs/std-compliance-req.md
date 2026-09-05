@@ -281,7 +281,7 @@ Status legend:
 | Map with `jkt` member | CTA §4.8.1 | **PASS** | `ConfirmationClaim.jkt: Vec<u8>` |
 | `jkt` label = 323 | CTA §4.8.1, Annex E | **PASS** | `CNF_JKT = 323` per CTA-5007-B §4.8.1. Legacy label 3 accepted on decode for backward compatibility |
 | `jkt` value = bstr .size 32 (SHA-256 of JWK) | CTA §4.8.1 | **PASS** | 32-byte SHA-256 thumbprint |
-| MUST reject cnf without valid DPoP proof | CTA §4.8.1 | **PASS** | Enforced in `MoqtValidator.authorize_with_dpop()` |
+| MUST reject cnf without valid DPoP proof | CTA §4.8.1 | **PASS** | Enforced by `MoqtValidator::authorize` when a `cnf` claim is present — requires an accompanying DPoP proof on the `RelayRequestContext` |
 | ckt confirmation method (RFC 9679) MAY be supported | CTA §4.8.1 | **PASS** | `ConfirmationClaim.ckt: Option<Vec<u8>>` at cnf key 6 |
 
 ### RFC 7638 — JWK Thumbprint
@@ -357,7 +357,7 @@ Status legend:
 | Binary match types: exact, prefix, suffix | draft-ietf-moq-c4m | **PASS** | All three implemented |
 | Namespace tuple prefix semantics | draft-ietf-moq-c4m | **PASS** | Trailing elements allowed |
 | First-match-wins scope evaluation | draft-ietf-moq-c4m | **PASS** | Implemented |
-| DPoP integration with MOQT actions | draft-ietf-moq-c4m | **PASS** | `authorize_with_dpop()` |
+| DPoP integration with MOQT actions | draft-ietf-moq-c4m | **PARTIAL** | Uses the private CWT/COSE DPoP profile from draft-nandakumar-moq-generic-dpop-proof-00 with `typ=dpop-proof+cwt;profile=cta5007b-v1` (not the JWT DPoP form CAT-4-MOQT currently references). Interop with a peer requires that both sides adopt this profile. See §11 for the JWT plug-in slot. |
 | C4M token type `0x63346d` | draft-ietf-moq-c4m | **PASS** | Defined as `C4M_TOKEN_TYPE` |
 
 ---
@@ -369,7 +369,7 @@ Status legend:
 | Resource limits for processing (time, space) | CTA §4.10 | **PASS** | `CwtLimits` with configurable bounds. Regex size limits. Trie depth limits |
 | Constant-time signature comparison | Best practice | **PASS** | `constant_time_eq()` in crypto.rs |
 | Key zeroization on drop | Best practice | **PASS** | `Zeroize + ZeroizeOnDrop` for HMAC; p256/rsa crate internal zeroization |
-| DPoP replay detection | RFC 9449 §4 | **PASS** | LRU-based JTI cache with configurable capacity and window |
+| DPoP replay detection | RFC 9449 §4 | **PARTIAL** | Default in-process store is a sharded LRU that can evict live JTIs under pressure — suitable for single-node deployments only. CDN-scale deployments MUST plug a TTL-backed distributed store via `DpopValidator::with_jti_store_strict` per RFC 9449 §11.1. |
 | MUST use asymmetric algorithms when no established trust | CTA §4.10.1 | **N/A** | Policy concern for issuer |
 | COSE_Encrypt0 encryption | RFC 9052 §5 | **PASS** | AES-128-GCM and AES-256-GCM with `cose_encrypt0()` / `cose_decrypt0()` |
 
@@ -390,7 +390,7 @@ Status legend:
 | **RFC 3986** | URI Generic Syntax | **PASS** — `normalize_uri()` and `decompose_uri()` implement §6.2.2-6.2.3 |
 | **RFC 9110** | HTTP Semantics (URI normalization, header folding) | **PASS** — §4.2.3 normalization, §5.2 obs-fold removal implemented |
 | **RFC 6570** | URI Template | **N/A** — token location is app-layer |
-| **RFC 9449** | OAuth 2.0 DPoP | **PASS** |
+| **RFC 9449** | OAuth 2.0 DPoP | **PARTIAL** — default in-process JTI store is eviction-based (not strict). CDN deployments MUST plug a distributed TTL-backed store via `DpopValidator::with_jti_store_strict`. |
 | **RFC 6750** | OAuth 2.0 Bearer Token Usage | **N/A** — transport-layer |
 | **RFC 8747** | PoP Key Semantics for CWTs | **PASS** |
 | **RFC 7638** | JWK Thumbprint | **PASS** |
@@ -405,12 +405,27 @@ Status legend:
 | **ETSI TS 104 002** | DASH-IF watermarking token | **N/A** — out of scope |
 | **IEEE 1003.1-2017** | POSIX ERE for regex matching | **PASS** — `validate_posix_ere()` rejects non-ERE patterns |
 | **draft-lemmons-composite-claims** | Composite token claims | **PASS** |
-| **draft-ietf-moq-c4m** | CAT for MoQ Transport | **PASS** |
+| **draft-ietf-moq-c4m** | CAT for MoQ Transport | **PARTIAL** — token-side claims (scopes, moqt-reval, actions) implemented. DPoP proof format uses the CWT profile from draft-nandakumar-moq-generic-dpop-proof-00 (`typ=dpop-proof+cwt;profile=cta5007b-v1`), not the JWT form CAT-4-MOQT currently references. Both peers must adopt this profile for interop. |
 
 ---
 
 ## 11. Compliance Summary
 
-All CTA-5007-B MUST and SHOULD requirements are implemented. All referenced standards that are applicable to a library implementation are supported. Items marked N/A are transport-layer or application-layer concerns outside the scope of a token encoding/decoding library.
+All CTA-5007-B claim-side MUST and SHOULD requirements are implemented and tested. Items marked **N/A** are transport-layer or application-layer concerns. Items marked **PARTIAL** deviate from the referenced spec in ways that a deploying integrator MUST understand:
 
-**Test coverage:** 418+ tests covering all claim types, algorithms, encoding formats, validation rules, and edge cases.
+- **DPoP wire format (§5, §8, §10):** proofs use the CWT/COSE profile from
+  draft-nandakumar-moq-generic-dpop-proof-00, identified by the frozen
+  `typ` string `dpop-proof+cwt;profile=cta5007b-v1`. Label numbers 400/401/402
+  are private-use until IANA registration lands; a peer that speaks only the
+  JWT form referenced by CAT-4-MOQT cannot interoperate on the DPoP proof
+  without a JWT plug-in module (the crate's `dpop.rs` is structured so a
+  sibling `jwt` module can be added without touching validator logic).
+- **RFC 9449 §11.1 replay retention:** the default `LruJtiStore` evicts
+  under memory pressure. CDN-scale deployments MUST supply a strict
+  TTL-backed store via `DpopValidator::with_jti_store_strict`; the
+  constructor refuses non-strict stores.
+- **CAT-4-MOQT §DPoP integration:** action-name mapping and actx label
+  assignments follow the generic-DPoP draft, not the CAT-4-MOQT PUB_NS /
+  SUB_NS mnemonics. Update this section when either draft advances.
+
+**Test coverage:** 530+ tests covering claims, algorithms, encoding, validation, DPoP CWT strictness (duplicate keys, trailing data, cti byte-string enforcement), and cross-endpoint proof binding.

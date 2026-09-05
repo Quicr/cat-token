@@ -57,7 +57,7 @@ Excluded from this profile:
 | `cattpk` | SPKI DER bytes | any other encoding |
 | `catdpop` | map with `jkt` (bstr) and `window` (int, ≤ 3600) | window > 3600, negative window |
 | `moqt` | array of MOQT scopes with integer actions, namespace tuples, and byte-string track prefixes | non-array, non-integer actions |
-| `moqt-reval` | positive finite f64 seconds | non-finite, negative, zero |
+| `moqt-reval` | non-negative finite f64 seconds; `0` means no revalidation required | non-finite, negative |
 
 ## Authorization contract
 
