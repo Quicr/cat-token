@@ -106,7 +106,9 @@ fn test_integer_coords_roundtrip() {
         .build();
 
     let encoded = encode_token(&token, &alg).unwrap();
-    let decoded = decode_token(&encoded, &alg).unwrap();
+    let decoded = decode_token(&encoded, &alg)
+        .unwrap()
+        .into_unvalidated_token();
     let coords = decoded.cat.catgeocoord.unwrap();
     assert_eq!(coords[0].lat, 45.0);
     assert_eq!(coords[0].lon, -90.0);

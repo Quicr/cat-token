@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 use crate::cwt::CwtLimits;
+use crate::pipeline::{TokenHeader, TokenProvenance, VerifiedToken};
 use crate::{CatError, CatToken, CryptographicAlgorithm, Cwt, CwtHeader, NetworkIdentifier};
 use base64::{
     Engine as _,
@@ -82,6 +83,14 @@ impl CatTokenValidator {
     }
 
     pub fn validate(&self, token: &CatToken) -> Result<(), CatError> {
+        self.validate_with_provenance(token, TokenProvenance::Signed)
+    }
+
+    pub fn validate_with_provenance(
+        &self,
+        token: &CatToken,
+        provenance: TokenProvenance,
+    ) -> Result<(), CatError> {
         let now = Utc::now().timestamp();
 
         if let Some(exp) = token.core.exp
@@ -124,7 +133,7 @@ impl CatTokenValidator {
             )));
         }
 
-        self.validate_privacy_claims(token)?;
+        self.validate_privacy_claims(token, provenance)?;
         self.validate_geographic_restrictions(token)?;
         self.validate_usage_limits(token)?;
         self.validate_regex_ere(token)?;
@@ -133,8 +142,12 @@ impl CatTokenValidator {
         Ok(())
     }
 
-    fn validate_privacy_claims(&self, token: &CatToken) -> Result<(), CatError> {
-        if self.allow_unencrypted_privacy_claims || token.was_encrypted {
+    fn validate_privacy_claims(
+        &self,
+        token: &CatToken,
+        provenance: TokenProvenance,
+    ) -> Result<(), CatError> {
+        if self.allow_unencrypted_privacy_claims || provenance == TokenProvenance::Encrypted {
             return Ok(());
         }
         if token.informational.sub.is_some() {
@@ -769,10 +782,13 @@ pub fn encode_token_base64(
 const MAX_TOKEN_SIZE: usize = 1024 * 1024; // 1MB
 
 /// Decode a CatToken from COSE_Sign1 (tag 18) or COSE_Mac0 (tag 17) CBOR bytes.
+///
+/// Returns a `VerifiedToken` whose signature has been verified. Call
+/// `.validate()` on it to produce a `ValidatedToken` suitable for authorization.
 pub fn decode_token(
     cose_bytes: &[u8],
     algorithm: &dyn CryptographicAlgorithm,
-) -> Result<CatToken, CatError> {
+) -> Result<VerifiedToken, CatError> {
     decode_token_with_limits(cose_bytes, algorithm, &CwtLimits::default())
 }
 
@@ -780,7 +796,7 @@ pub fn decode_token_with_limits(
     cose_bytes: &[u8],
     algorithm: &dyn CryptographicAlgorithm,
     limits: &CwtLimits,
-) -> Result<CatToken, CatError> {
+) -> Result<VerifiedToken, CatError> {
     if cose_bytes.len() > MAX_TOKEN_SIZE {
         return Err(CatError::InvalidTokenFormat);
     }
@@ -840,7 +856,7 @@ pub fn decode_token_with_limits(
         return Err(CatError::InvalidTokenFormat);
     }
 
-    let header_alg = extract_algorithm_from_header(&header_cbor)?;
+    let (header_alg, header_kid) = extract_header_info(&header_cbor)?;
     if header_alg != alg_id {
         return Err(CatError::AlgorithmMismatch {
             expected: alg_id,
@@ -852,14 +868,19 @@ pub fn decode_token_with_limits(
 
     algorithm.verify(&signing_input, &signature)?;
 
-    Cwt::decode_payload_with_limits(&payload_cbor, limits)
+    let token = Cwt::decode_payload_with_limits(&payload_cbor, limits)?;
+    let header = TokenHeader {
+        algorithm_id: header_alg,
+        kid: header_kid,
+    };
+    Ok(VerifiedToken::new(token, header, TokenProvenance::Signed))
 }
 
 /// Decode a CatToken from a base64url-encoded COSE structure.
 pub fn decode_token_base64(
     token_str: &str,
     algorithm: &dyn CryptographicAlgorithm,
-) -> Result<CatToken, CatError> {
+) -> Result<VerifiedToken, CatError> {
     let bytes = URL_SAFE_NO_PAD
         .decode(token_str)
         .or_else(|_| URL_SAFE.decode(token_str))
@@ -872,11 +893,17 @@ pub fn decode_encrypted_token(
     cose_bytes: &[u8],
     encryption_key: &[u8],
     signing_algorithm: &dyn CryptographicAlgorithm,
-) -> Result<CatToken, CatError> {
+) -> Result<VerifiedToken, CatError> {
     let inner_bytes = crate::encrypt::cose_decrypt0(cose_bytes, encryption_key)?;
-    let mut token = decode_token(&inner_bytes, signing_algorithm)?;
-    token.was_encrypted = true;
-    Ok(token)
+    let verified = decode_token(&inner_bytes, signing_algorithm)?;
+    Ok(VerifiedToken::new(
+        verified.into_unvalidated_token(),
+        TokenHeader {
+            algorithm_id: signing_algorithm.algorithm_id(),
+            kid: None,
+        },
+        TokenProvenance::Encrypted,
+    ))
 }
 
 /// Encode a CatToken into a COSE_Encrypt0 envelope wrapping a signed/MACed token.
@@ -890,7 +917,7 @@ pub fn encode_encrypted_token(
     crate::encrypt::cose_encrypt0(&signed_bytes, encryption_key, encryption_algorithm)
 }
 
-fn extract_algorithm_from_header(header_cbor: &[u8]) -> Result<i64, CatError> {
+fn extract_header_info(header_cbor: &[u8]) -> Result<(i64, Option<Vec<u8>>), CatError> {
     let value: ciborium::Value =
         ciborium::de::from_reader(header_cbor).map_err(|e| CatError::InvalidCbor(e.to_string()))?;
 
@@ -900,29 +927,39 @@ fn extract_algorithm_from_header(header_cbor: &[u8]) -> Result<i64, CatError> {
     };
 
     let mut found_alg: Option<i64> = None;
+    let mut found_kid: Option<Vec<u8>> = None;
     for (key, val) in &map {
         if let ciborium::Value::Integer(k) = key {
             let k_i64: i64 = (*k).try_into().map_err(|_| CatError::InvalidTokenFormat)?;
-            if k_i64 == 1 {
-                if found_alg.is_some() {
-                    return Err(CatError::InvalidCbor(
-                        "Duplicate alg in protected header".to_string(),
-                    ));
+            match k_i64 {
+                1 => {
+                    if found_alg.is_some() {
+                        return Err(CatError::InvalidCbor(
+                            "Duplicate alg in protected header".to_string(),
+                        ));
+                    }
+                    if let ciborium::Value::Integer(alg) = val {
+                        found_alg = Some(
+                            (*alg)
+                                .try_into()
+                                .map_err(|_| CatError::InvalidTokenFormat)?,
+                        );
+                    } else {
+                        return Err(CatError::InvalidClaimValue(
+                            "alg must be an integer".to_string(),
+                        ));
+                    }
                 }
-                if let ciborium::Value::Integer(alg) = val {
-                    found_alg = Some(
-                        (*alg)
-                            .try_into()
-                            .map_err(|_| CatError::InvalidTokenFormat)?,
-                    );
-                } else {
-                    return Err(CatError::InvalidClaimValue(
-                        "alg must be an integer".to_string(),
-                    ));
-                }
+                4 => match val {
+                    ciborium::Value::Bytes(b) => found_kid = Some(b.clone()),
+                    ciborium::Value::Text(s) => found_kid = Some(s.as_bytes().to_vec()),
+                    _ => {}
+                },
+                _ => {}
             }
         }
     }
 
-    found_alg.ok_or_else(|| CatError::MissingRequiredClaim("alg".to_string()))
+    let alg = found_alg.ok_or_else(|| CatError::MissingRequiredClaim("alg".to_string()))?;
+    Ok((alg, found_kid))
 }

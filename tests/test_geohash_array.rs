@@ -10,7 +10,9 @@ fn test_single_geohash_roundtrip() {
     let token = CatToken::new().with_issuer("test").with_geohash("9q8yyk");
 
     let encoded = encode_token(&token, &algorithm).unwrap();
-    let decoded = decode_token(&encoded, &algorithm).unwrap();
+    let decoded = decode_token(&encoded, &algorithm)
+        .unwrap()
+        .into_unvalidated_token();
 
     assert_eq!(decoded.cat.geohash, Some(vec!["9q8yyk".to_string()]));
 }
@@ -27,7 +29,9 @@ fn test_multiple_geohashes_roundtrip() {
         .with_geohash("u4pruydqqv");
 
     let encoded = encode_token(&token, &algorithm).unwrap();
-    let decoded = decode_token(&encoded, &algorithm).unwrap();
+    let decoded = decode_token(&encoded, &algorithm)
+        .unwrap()
+        .into_unvalidated_token();
 
     assert_eq!(
         decoded.cat.geohash,

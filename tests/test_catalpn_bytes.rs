@@ -11,7 +11,9 @@ fn test_catalpn_utf8_roundtrip() {
     token.cat.catalpn = Some(vec![b"h2".to_vec(), b"h3".to_vec()]);
 
     let encoded = encode_token(&token, &algorithm).unwrap();
-    let decoded = decode_token(&encoded, &algorithm).unwrap();
+    let decoded = decode_token(&encoded, &algorithm)
+        .unwrap()
+        .into_unvalidated_token();
 
     assert_eq!(
         decoded.cat.catalpn,
@@ -28,7 +30,9 @@ fn test_catalpn_arbitrary_bytes() {
     token.cat.catalpn = Some(vec![vec![0x01, 0x02, 0xFF], vec![0x00]]);
 
     let encoded = encode_token(&token, &algorithm).unwrap();
-    let decoded = decode_token(&encoded, &algorithm).unwrap();
+    let decoded = decode_token(&encoded, &algorithm)
+        .unwrap()
+        .into_unvalidated_token();
 
     assert_eq!(
         decoded.cat.catalpn,

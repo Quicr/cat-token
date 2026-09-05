@@ -89,7 +89,9 @@ fn test_catnip_with_proper_tags_still_works() {
         .build();
 
     let encoded = encode_token(&token, &alg).unwrap();
-    let decoded = decode_token(&encoded, &alg).unwrap();
+    let decoded = decode_token(&encoded, &alg)
+        .unwrap()
+        .into_unvalidated_token();
     assert!(decoded.cat.catnip.is_some());
 }
 
@@ -103,6 +105,8 @@ fn test_catgeocoord_with_crs_wrapper_still_works() {
         .build();
 
     let encoded = encode_token(&token, &alg).unwrap();
-    let decoded = decode_token(&encoded, &alg).unwrap();
+    let decoded = decode_token(&encoded, &alg)
+        .unwrap()
+        .into_unvalidated_token();
     assert!(decoded.cat.catgeocoord.is_some());
 }

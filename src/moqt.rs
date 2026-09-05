@@ -3,7 +3,7 @@
 
 use crate::{
     BinaryMatch, CatDpopSettings, CatError, CatToken, DpopProof, DpopValidator, MoqtAction,
-    MoqtScope, NamespaceMatch, confirmation_matches_jwk,
+    MoqtScope, NamespaceMatch, ValidatedToken, confirmation_matches_jwk,
 };
 
 /// IANA-registered token type for C4M (CAT for MoQ) AUTHORIZATION TOKEN parameter.
@@ -153,36 +153,27 @@ impl MoqtValidator {
         Ok(())
     }
 
-    /// Validate MOQT claims and check if a specific action is authorized.
-    /// This is the recommended entry point: it ensures claim validation before authorization.
+    /// Check if a specific MOQT action is authorized.
+    /// Accepts a `ValidatedToken` to ensure claims have been validated at the type level.
     pub fn authorize(
         &self,
-        token: &CatToken,
+        token: &ValidatedToken,
         request: &MoqtAuthRequest,
     ) -> Result<MoqtAuthResult, CatError> {
-        self.validate_moqt_claims(token)?;
-        Ok(self.authorize_unchecked(token, request))
+        self.validate_moqt_claims(token.claims())?;
+        Ok(self.authorize_inner(token.claims(), request))
     }
 
-    /// Check if a specific MOQT action is authorized without validating claims first.
-    /// Caller must ensure `validate_moqt_claims` has already been called.
-    /// "Evaluation stops after the first acceptable result is discovered"
-    pub fn authorize_unchecked(
-        &self,
-        token: &CatToken,
-        request: &MoqtAuthRequest,
-    ) -> MoqtAuthResult {
+    fn authorize_inner(&self, token: &CatToken, request: &MoqtAuthRequest) -> MoqtAuthResult {
         let scopes = match &token.moqt.moqt {
             Some(s) => s,
-            None => return MoqtAuthResult::denied(), // No MOQT claims means blocked
+            None => return MoqtAuthResult::denied(),
         };
 
-        // Evaluate scopes in order, stop at first match
         for (index, scope) in scopes.iter().enumerate() {
             if self.scope_matches(scope, request) {
                 let mut result = MoqtAuthResult::allowed(index);
 
-                // Add revalidation info if present
                 if let Some(reval) = token.moqt.moqt_reval {
                     result = result.with_revalidation(reval);
                 }
@@ -191,28 +182,21 @@ impl MoqtValidator {
             }
         }
 
-        // "The default for all actions is 'Blocked'"
         MoqtAuthResult::denied()
     }
 
     /// Authorize with full DPoP proof validation including signature verification.
-    ///
-    /// Validates the DPoP proof using the embedded JWK (not a caller-supplied key),
-    /// verifies the proof is bound to the requested MOQT target (namespace/track),
-    /// and only commits the JTI to the replay cache after successful verification.
     pub fn authorize_with_dpop(
         &self,
-        token: &CatToken,
+        token: &ValidatedToken,
         request: &MoqtAuthRequest,
     ) -> Result<MoqtAuthResult, CatError> {
-        // Validate claims and check basic authorization
         let auth_result = self.authorize(token, request)?;
         if !auth_result.authorized {
             return Ok(auth_result);
         }
 
-        // If token has DPoP binding, validate the proof with full signature verification
-        if let Some(ref cnf) = token.dpop.cnf {
+        if let Some(ref cnf) = token.claims().dpop.cnf {
             let proof = request.dpop_proof.as_ref().ok_or_else(|| {
                 CatError::DpopValidationFailed(
                     "Token requires DPoP proof but none provided".to_string(),
@@ -456,7 +440,7 @@ pub mod roles {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::CatTokenBuilder;
+    use crate::{CatTokenBuilder, ValidatedToken};
 
     #[test]
     fn test_moqt_auth_request() {
@@ -492,7 +476,9 @@ mod tests {
             vec![b"example.com".to_vec()],
             b"/stream/video".to_vec(),
         );
-        let result = validator.authorize(&token, &request).unwrap();
+        let result = validator
+            .authorize(&ValidatedToken::from_unchecked(token.clone()), &request)
+            .unwrap();
         assert!(result.authorized);
 
         // Should deny (wrong action)
@@ -501,7 +487,9 @@ mod tests {
             vec![b"example.com".to_vec()],
             b"/stream/video".to_vec(),
         );
-        let result = validator.authorize(&token, &request).unwrap();
+        let result = validator
+            .authorize(&ValidatedToken::from_unchecked(token.clone()), &request)
+            .unwrap();
         assert!(!result.authorized);
 
         // Should deny (wrong namespace)
@@ -510,7 +498,9 @@ mod tests {
             vec![b"other.com".to_vec()],
             b"/stream/video".to_vec(),
         );
-        let result = validator.authorize(&token, &request).unwrap();
+        let result = validator
+            .authorize(&ValidatedToken::from_unchecked(token.clone()), &request)
+            .unwrap();
         assert!(!result.authorized);
 
         // Should deny (wrong track)
@@ -519,7 +509,9 @@ mod tests {
             vec![b"example.com".to_vec()],
             b"/other/video".to_vec(),
         );
-        let result = validator.authorize(&token, &request).unwrap();
+        let result = validator
+            .authorize(&ValidatedToken::from_unchecked(token.clone()), &request)
+            .unwrap();
         assert!(!result.authorized);
     }
 
@@ -543,7 +535,9 @@ mod tests {
             vec![b"example.com".to_vec()],
             b"/stream".to_vec(),
         );
-        let result = validator.authorize(&token, &request).unwrap();
+        let result = validator
+            .authorize(&ValidatedToken::from_unchecked(token.clone()), &request)
+            .unwrap();
 
         assert!(result.authorized);
         assert!(result.requires_revalidation);
@@ -637,7 +631,9 @@ mod tests {
             vec![b"example.com".to_vec()],
             b"/stream/1".to_vec(),
         );
-        let result = validator.authorize(&token, &request).unwrap();
+        let result = validator
+            .authorize(&ValidatedToken::from_unchecked(token.clone()), &request)
+            .unwrap();
         assert!(result.authorized);
         assert_eq!(result.matched_scope_index, Some(0));
 
@@ -647,7 +643,9 @@ mod tests {
             vec![b"example.com".to_vec()],
             b"/stream/1".to_vec(),
         );
-        let result = validator.authorize(&token, &request).unwrap();
+        let result = validator
+            .authorize(&ValidatedToken::from_unchecked(token.clone()), &request)
+            .unwrap();
         assert!(result.authorized);
         assert_eq!(result.matched_scope_index, Some(1));
     }

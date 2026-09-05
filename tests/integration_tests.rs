@@ -76,7 +76,9 @@ fn test_hmac_token_encoding_decoding() {
     assert!(!encoded.is_empty());
     assert!(encoded.len() > 10);
 
-    let decoded = decode_token(&encoded, &algorithm).unwrap();
+    let decoded = decode_token(&encoded, &algorithm)
+        .unwrap()
+        .into_unvalidated_token();
     assert_eq!(decoded.core.iss, token.core.iss);
     assert_eq!(decoded.core.aud, token.core.aud);
     assert_eq!(decoded.core.cti, token.core.cti);
@@ -102,7 +104,9 @@ fn test_es256_token_encoding_decoding() {
     assert!(!encoded.is_empty());
     assert!(encoded.len() > 10);
 
-    let decoded = decode_token(&encoded, &algorithm).unwrap();
+    let decoded = decode_token(&encoded, &algorithm)
+        .unwrap()
+        .into_unvalidated_token();
     assert_eq!(decoded.core.iss, token.core.iss);
     assert_eq!(decoded.core.aud, token.core.aud);
     assert_eq!(decoded.core.cti, token.core.cti);
@@ -128,7 +132,9 @@ fn test_ps256_token_encoding_decoding() {
     assert!(!encoded.is_empty());
     assert!(encoded.len() > 10);
 
-    let decoded = decode_token(&encoded, &algorithm).unwrap();
+    let decoded = decode_token(&encoded, &algorithm)
+        .unwrap()
+        .into_unvalidated_token();
     assert_eq!(decoded.core.iss, token.core.iss);
     assert_eq!(decoded.core.aud, token.core.aud);
     assert_eq!(decoded.core.cti, token.core.cti);
@@ -561,7 +567,9 @@ fn test_moqt_token_encoding_decoding() {
         .build();
 
     let encoded = encode_token(&token, &algorithm).unwrap();
-    let decoded = decode_token(&encoded, &algorithm).unwrap();
+    let decoded = decode_token(&encoded, &algorithm)
+        .unwrap()
+        .into_unvalidated_token();
 
     // Verify MOQT claims were preserved
     assert_eq!(decoded.moqt.moqt_reval, Some(600.0));

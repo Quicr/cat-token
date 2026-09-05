@@ -1134,7 +1134,6 @@ pub struct CatToken {
     #[cfg(feature = "moqt")]
     pub moqt: MoqtClaims,
     pub(crate) custom: HashMap<i64, ciborium::Value>,
-    pub(crate) was_encrypted: bool,
 }
 
 impl Default for CatToken {
@@ -1188,7 +1187,6 @@ impl CatToken {
                 moqt_reval: None,
             },
             custom: HashMap::new(),
-            was_encrypted: false,
         }
     }
 
@@ -1451,10 +1449,6 @@ impl CatToken {
         } else {
             false
         }
-    }
-
-    pub fn was_encrypted(&self) -> bool {
-        self.was_encrypted
     }
 
     pub fn custom_claims(&self) -> &HashMap<i64, ciborium::Value> {

@@ -102,7 +102,7 @@ fn test_dpop_namespace_mismatch_rejected() {
     )
     .with_dpop_proof(proof);
 
-    let result = validator.authorize_with_dpop(&token, &request);
+    let result = validator.authorize_with_dpop(&ValidatedToken::from_unchecked(token), &request);
     assert!(result.is_err(), "Should reject namespace mismatch");
     assert!(matches!(result, Err(CatError::DpopValidationFailed(_))));
 }
@@ -146,7 +146,7 @@ fn test_dpop_track_mismatch_rejected() {
     )
     .with_dpop_proof(proof);
 
-    let result = validator.authorize_with_dpop(&token, &request);
+    let result = validator.authorize_with_dpop(&ValidatedToken::from_unchecked(token), &request);
     assert!(result.is_err(), "Should reject track mismatch");
     assert!(matches!(result, Err(CatError::DpopValidationFailed(_))));
 }
@@ -182,7 +182,7 @@ fn test_dpop_matching_target_succeeds() {
     let request = cat_token::moqt::MoqtAuthRequest::new(MoqtAction::Publish, ns, track.to_vec())
         .with_dpop_proof(proof);
 
-    let result = validator.authorize_with_dpop(&token, &request);
+    let result = validator.authorize_with_dpop(&ValidatedToken::from_unchecked(token), &request);
     assert!(result.is_ok());
     assert!(result.unwrap().authorized);
 }

@@ -18,7 +18,9 @@ fn test_expires_in_creates_future_expiration() {
         .build();
 
     let encoded = encode_token(&token, &key).unwrap();
-    let decoded = decode_token(&encoded, &key).unwrap();
+    let decoded = decode_token(&encoded, &key)
+        .unwrap()
+        .into_unvalidated_token();
 
     // Token should be valid (exp is in the future)
     let validator = CatTokenValidator::new()
@@ -37,7 +39,9 @@ fn test_expires_in_negative_already_expired() {
         .build();
 
     let encoded = encode_token(&token, &key).unwrap();
-    let decoded = decode_token(&encoded, &key).unwrap();
+    let decoded = decode_token(&encoded, &key)
+        .unwrap()
+        .into_unvalidated_token();
 
     let validator = CatTokenValidator::new().with_clock_skew_tolerance(0);
     assert!(matches!(
@@ -58,7 +62,9 @@ fn test_single_audience_convenience() {
         .build();
 
     let encoded = encode_token(&token, &key).unwrap();
-    let decoded = decode_token(&encoded, &key).unwrap();
+    let decoded = decode_token(&encoded, &key)
+        .unwrap()
+        .into_unvalidated_token();
 
     let validator = CatTokenValidator::new().with_expected_audiences(vec!["my-relay".to_string()]);
     assert!(validator.validate(&decoded).is_ok());
@@ -84,7 +90,9 @@ fn test_decode_token_valid_cose() {
         .build();
 
     let encoded = encode_token(&token, &key).unwrap();
-    let decoded = decode_token(&encoded, &key).unwrap();
+    let decoded = decode_token(&encoded, &key)
+        .unwrap()
+        .into_unvalidated_token();
 
     assert_eq!(decoded.informational.sub.as_deref(), Some("user-1"));
 }
@@ -118,7 +126,9 @@ fn test_decode_token_base64_roundtrip() {
         .build();
 
     let encoded_b64 = encode_token_base64(&token, &key).unwrap();
-    let decoded = decode_token_base64(&encoded_b64, &key).unwrap();
+    let decoded = decode_token_base64(&encoded_b64, &key)
+        .unwrap()
+        .into_unvalidated_token();
     assert_eq!(decoded.core.iss.as_deref(), Some("b64-test"));
 }
 
@@ -143,7 +153,9 @@ fn test_from_public_key_pem_roundtrip() {
         .build();
 
     let encoded = encode_token(&token, &key_pair).unwrap();
-    let decoded = decode_token(&encoded, &verifier).unwrap();
+    let decoded = decode_token(&encoded, &verifier)
+        .unwrap()
+        .into_unvalidated_token();
     assert_eq!(decoded.core.iss.as_deref(), Some("pem-test"));
 }
 
@@ -168,7 +180,9 @@ fn test_from_public_key_der_roundtrip() {
         .build();
 
     let encoded = encode_token(&token, &key_pair).unwrap();
-    let decoded = decode_token(&encoded, &verifier).unwrap();
+    let decoded = decode_token(&encoded, &verifier)
+        .unwrap()
+        .into_unvalidated_token();
     assert_eq!(decoded.core.iss.as_deref(), Some("der-test"));
 }
 
@@ -219,7 +233,12 @@ fn test_namespace_path_splits_by_slash() {
         vec![b"sports".to_vec(), b"football".to_vec(), b"live".to_vec()],
         b"video".to_vec(),
     );
-    assert!(validator.authorize(&token, &request).unwrap().authorized);
+    assert!(
+        validator
+            .authorize(&ValidatedToken::from_unchecked(token.clone()), &request)
+            .unwrap()
+            .authorized
+    );
 
     // Wrong first element
     let request = MoqtAuthRequest::new(
@@ -227,7 +246,12 @@ fn test_namespace_path_splits_by_slash() {
         vec![b"music".to_vec(), b"football".to_vec(), b"live".to_vec()],
         b"video".to_vec(),
     );
-    assert!(!validator.authorize(&token, &request).unwrap().authorized);
+    assert!(
+        !validator
+            .authorize(&ValidatedToken::from_unchecked(token.clone()), &request)
+            .unwrap()
+            .authorized
+    );
 
     // Wrong second element
     let request = MoqtAuthRequest::new(
@@ -235,7 +259,12 @@ fn test_namespace_path_splits_by_slash() {
         vec![b"sports".to_vec(), b"basketball".to_vec(), b"live".to_vec()],
         b"video".to_vec(),
     );
-    assert!(!validator.authorize(&token, &request).unwrap().authorized);
+    assert!(
+        !validator
+            .authorize(&ValidatedToken::from_unchecked(token.clone()), &request)
+            .unwrap()
+            .authorized
+    );
 }
 
 #[test]
@@ -259,7 +288,12 @@ fn test_namespace_path_ignores_empty_segments() {
         vec![b"sports".to_vec(), b"football".to_vec()],
         b"video".to_vec(),
     );
-    assert!(validator.authorize(&token, &request).unwrap().authorized);
+    assert!(
+        validator
+            .authorize(&ValidatedToken::from_unchecked(token.clone()), &request)
+            .unwrap()
+            .authorized
+    );
 }
 
 // --- MoqtScopeBuilder::namespace_path tuple-prefix semantics ---
@@ -287,7 +321,12 @@ fn test_namespace_path_allows_additional_trailing_elements() {
         vec![b"sports".to_vec(), b"football".to_vec()],
         b"video".to_vec(),
     );
-    assert!(validator.authorize(&token, &request).unwrap().authorized);
+    assert!(
+        validator
+            .authorize(&ValidatedToken::from_unchecked(token.clone()), &request)
+            .unwrap()
+            .authorized
+    );
 
     // 3 elements — trailing "spain" is allowed (tuple-prefix semantics)
     let request = MoqtAuthRequest::new(
@@ -295,7 +334,12 @@ fn test_namespace_path_allows_additional_trailing_elements() {
         vec![b"sports".to_vec(), b"football".to_vec(), b"spain".to_vec()],
         b"video".to_vec(),
     );
-    assert!(validator.authorize(&token, &request).unwrap().authorized);
+    assert!(
+        validator
+            .authorize(&ValidatedToken::from_unchecked(token.clone()), &request)
+            .unwrap()
+            .authorized
+    );
 
     // Partial byte match on a tuple element must NOT work
     let request = MoqtAuthRequest::new(
@@ -303,7 +347,12 @@ fn test_namespace_path_allows_additional_trailing_elements() {
         vec![b"sports".to_vec(), b"foot".to_vec()],
         b"video".to_vec(),
     );
-    assert!(!validator.authorize(&token, &request).unwrap().authorized);
+    assert!(
+        !validator
+            .authorize(&ValidatedToken::from_unchecked(token.clone()), &request)
+            .unwrap()
+            .authorized
+    );
 }
 
 // --- C4M_TOKEN_TYPE constant ---
@@ -354,7 +403,9 @@ fn test_full_roundtrip_new_apis() {
 
     // Encode with signing key, decode with PEM-loaded verifier
     let encoded = encode_token(&token, &key_pair).unwrap();
-    let decoded = decode_token(&encoded, &verifier).unwrap();
+    let decoded = decode_token(&encoded, &verifier)
+        .unwrap()
+        .into_unvalidated_token();
 
     // Validate standard claims
     let validator = CatTokenValidator::new()
@@ -369,7 +420,7 @@ fn test_full_roundtrip_new_apis() {
     let setup_req = MoqtAuthRequest::new(MoqtAction::ClientSetup, vec![], vec![]);
     assert!(
         moqt_validator
-            .authorize(&decoded, &setup_req)
+            .authorize(&ValidatedToken::from_unchecked(decoded.clone()), &setup_req)
             .unwrap()
             .authorized
     );
@@ -381,7 +432,10 @@ fn test_full_roundtrip_new_apis() {
     );
     assert!(
         moqt_validator
-            .authorize(&decoded, &publish_req)
+            .authorize(
+                &ValidatedToken::from_unchecked(decoded.clone()),
+                &publish_req
+            )
             .unwrap()
             .authorized
     );
@@ -394,7 +448,7 @@ fn test_full_roundtrip_new_apis() {
     );
     assert!(
         !moqt_validator
-            .authorize(&decoded, &sub_req)
+            .authorize(&ValidatedToken::from_unchecked(decoded.clone()), &sub_req)
             .unwrap()
             .authorized
     );

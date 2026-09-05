@@ -14,7 +14,9 @@ fn test_default_validator_has_zero_tolerance() {
         .build();
 
     let encoded = encode_token(&token, &key).unwrap();
-    let decoded = decode_token(&encoded, &key).unwrap();
+    let decoded = decode_token(&encoded, &key)
+        .unwrap()
+        .into_unvalidated_token();
 
     assert!(matches!(
         validator.validate(&decoded),
@@ -36,7 +38,9 @@ fn test_default_validator_rejects_nbf_in_future() {
         .build();
 
     let encoded = encode_token(&token, &key).unwrap();
-    let decoded = decode_token(&encoded, &key).unwrap();
+    let decoded = decode_token(&encoded, &key)
+        .unwrap()
+        .into_unvalidated_token();
 
     assert!(matches!(
         validator.validate(&decoded),
@@ -56,7 +60,9 @@ fn test_explicit_tolerance_allows_skew() {
         .build();
 
     let encoded = encode_token(&token, &key).unwrap();
-    let decoded = decode_token(&encoded, &key).unwrap();
+    let decoded = decode_token(&encoded, &key)
+        .unwrap()
+        .into_unvalidated_token();
 
     assert!(validator.validate(&decoded).is_ok());
 }
@@ -73,7 +79,9 @@ fn test_separate_tolerances() {
         .build();
 
     let encoded = encode_token(&token, &key).unwrap();
-    let decoded = decode_token(&encoded, &key).unwrap();
+    let decoded = decode_token(&encoded, &key)
+        .unwrap()
+        .into_unvalidated_token();
 
     assert!(validator.validate(&decoded).is_ok());
 }

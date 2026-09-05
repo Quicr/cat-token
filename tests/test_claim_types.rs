@@ -232,7 +232,9 @@ fn test_full_roundtrip_with_all_fixed_claim_types() {
         .build();
 
     let encoded = encode_token(&token, &alg).unwrap();
-    let decoded = decode_token(&encoded, &alg).unwrap();
+    let decoded = decode_token(&encoded, &alg)
+        .unwrap()
+        .into_unvalidated_token();
 
     assert_eq!(decoded.cat.catv, Some(1));
     assert_eq!(

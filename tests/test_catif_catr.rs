@@ -128,7 +128,9 @@ fn test_catif_roundtrip() {
         );
 
     let encoded = encode_token(&token, &algorithm).unwrap();
-    let decoded = decode_token(&encoded, &algorithm).unwrap();
+    let decoded = decode_token(&encoded, &algorithm)
+        .unwrap()
+        .into_unvalidated_token();
 
     let actions = decoded.request.catif.unwrap();
     assert_eq!(actions.len(), 2);
@@ -235,7 +237,9 @@ fn test_catr_roundtrip() {
     );
 
     let encoded = encode_token(&token, &algorithm).unwrap();
-    let decoded = decode_token(&encoded, &algorithm).unwrap();
+    let decoded = decode_token(&encoded, &algorithm)
+        .unwrap()
+        .into_unvalidated_token();
 
     let catr = decoded.request.catr.unwrap();
     assert_eq!(catr.renewal_type, CatRenewalType::Cookie);
@@ -255,7 +259,9 @@ fn test_catr_redirect_roundtrip() {
         .with_renewal(CatRenewal::redirect(307).with_expadd(1800));
 
     let encoded = encode_token(&token, &algorithm).unwrap();
-    let decoded = decode_token(&encoded, &algorithm).unwrap();
+    let decoded = decode_token(&encoded, &algorithm)
+        .unwrap()
+        .into_unvalidated_token();
 
     let catr = decoded.request.catr.unwrap();
     assert_eq!(catr.renewal_type, CatRenewalType::Redirect);
@@ -305,7 +311,9 @@ fn test_catif_and_catr_together_roundtrip() {
         .with_renewal(CatRenewal::automatic().with_expadd(3600));
 
     let encoded = encode_token(&token, &algorithm).unwrap();
-    let decoded = decode_token(&encoded, &algorithm).unwrap();
+    let decoded = decode_token(&encoded, &algorithm)
+        .unwrap()
+        .into_unvalidated_token();
 
     assert!(decoded.request.catif.is_some());
     assert!(decoded.request.catr.is_some());

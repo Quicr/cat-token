@@ -12,7 +12,9 @@ fn test_single_zone_roundtrip() {
         .with_geo_coordinate(37.7749, -122.4194, 500);
 
     let encoded = encode_token(&token, &algorithm).unwrap();
-    let decoded = decode_token(&encoded, &algorithm).unwrap();
+    let decoded = decode_token(&encoded, &algorithm)
+        .unwrap()
+        .into_unvalidated_token();
 
     let coords = decoded.cat.catgeocoord.unwrap();
     assert_eq!(coords.len(), 1);
@@ -32,7 +34,9 @@ fn test_multiple_zones() {
         .with_geo_coordinate(40.7128, -74.0060, 2000);
 
     let encoded = encode_token(&token, &algorithm).unwrap();
-    let decoded = decode_token(&encoded, &algorithm).unwrap();
+    let decoded = decode_token(&encoded, &algorithm)
+        .unwrap()
+        .into_unvalidated_token();
 
     let coords = decoded.cat.catgeocoord.unwrap();
     assert_eq!(coords.len(), 2);
@@ -78,7 +82,9 @@ fn test_radius_is_unsigned_integer() {
         .with_geo_coordinate(0.0, 0.0, u32::MAX);
 
     let encoded = encode_token(&token, &algorithm).unwrap();
-    let decoded = decode_token(&encoded, &algorithm).unwrap();
+    let decoded = decode_token(&encoded, &algorithm)
+        .unwrap()
+        .into_unvalidated_token();
 
     let coords = decoded.cat.catgeocoord.unwrap();
     assert_eq!(coords[0].radius, u32::MAX);

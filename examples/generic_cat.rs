@@ -98,7 +98,9 @@ fn main() {
 
     // Validation example
     println!("\n4. Token Validation");
-    let decoded = decode_token(&encoded, &key).unwrap();
+    let decoded = decode_token(&encoded, &key)
+        .unwrap()
+        .into_unvalidated_token();
 
     let validator = CatTokenValidator::new()
         .with_expected_issuers(vec!["https://auth.streaming.com".to_string()])

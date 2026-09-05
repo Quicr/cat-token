@@ -164,7 +164,9 @@ fn test_full_catnip_roundtrip() {
         .build();
 
     let encoded = encode_token(&token, &alg).unwrap();
-    let decoded = decode_token(&encoded, &alg).unwrap();
+    let decoded = decode_token(&encoded, &alg)
+        .unwrap()
+        .into_unvalidated_token();
 
     let nips = decoded.cat.catnip.unwrap();
     assert_eq!(nips.len(), 6);

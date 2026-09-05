@@ -22,6 +22,7 @@ pub use crate::dpop::{
 pub use crate::encrypt::{EncryptionAlgorithm, cose_decrypt0, cose_encrypt0};
 pub use crate::error::CatError;
 pub use crate::jwk::Jwk;
+pub use crate::pipeline::{TokenHeader, TokenProvenance, ValidatedToken, VerifiedToken};
 pub use crate::structured_header::{
     get_sf_dictionary_member, normalize_sf_value, parse_sf_dictionary, parse_sf_item, parse_sf_list,
 };

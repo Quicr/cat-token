@@ -47,7 +47,9 @@ fn test_float_exp_decoded() {
     ciborium::ser::into_writer(&ciborium::Value::Map(cbor_map), &mut payload_buf).unwrap();
 
     let cose_bytes = build_cose_mac0_with_payload(&payload_buf, &alg);
-    let decoded = decode_token(&cose_bytes, &alg).unwrap();
+    let decoded = decode_token(&cose_bytes, &alg)
+        .unwrap()
+        .into_unvalidated_token();
     assert_eq!(decoded.core.exp, Some(1700000000));
 }
 
@@ -68,7 +70,9 @@ fn test_float_nbf_decoded() {
     ciborium::ser::into_writer(&ciborium::Value::Map(cbor_map), &mut payload_buf).unwrap();
 
     let cose_bytes = build_cose_mac0_with_payload(&payload_buf, &alg);
-    let decoded = decode_token(&cose_bytes, &alg).unwrap();
+    let decoded = decode_token(&cose_bytes, &alg)
+        .unwrap()
+        .into_unvalidated_token();
     assert_eq!(decoded.core.nbf, Some(1700000000));
 }
 
@@ -89,7 +93,9 @@ fn test_float_iat_decoded() {
     ciborium::ser::into_writer(&ciborium::Value::Map(cbor_map), &mut payload_buf).unwrap();
 
     let cose_bytes = build_cose_mac0_with_payload(&payload_buf, &alg);
-    let decoded = decode_token(&cose_bytes, &alg).unwrap();
+    let decoded = decode_token(&cose_bytes, &alg)
+        .unwrap()
+        .into_unvalidated_token();
     assert_eq!(decoded.informational.iat, Some(1700000000));
 }
 

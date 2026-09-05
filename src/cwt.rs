@@ -2275,7 +2275,6 @@ impl Cwt {
             #[cfg(feature = "moqt")]
             moqt,
             custom,
-            was_encrypted: false,
         })
     }
 }

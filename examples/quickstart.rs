@@ -36,23 +36,23 @@ fn main() -> Result<(), CatError> {
         encoded.len()
     );
 
-    // 4. Decode and verify (relay does this)
-    let decoded = decode_token(&encoded, &key)?;
+    // 4. Decode and verify signature (relay does this)
+    let verified = decode_token(&encoded, &key)?;
 
-    // 5. Validate claims
+    // 5. Validate claims (produces ValidatedToken)
     let validator = CatTokenValidator::new()
         .with_expected_issuers(vec!["https://auth.example.com".to_string()])
         .with_expected_audiences(vec!["relay.example.com".to_string()]);
-    validator.validate(&decoded)?;
+    let validated = verified.validate(&validator)?;
 
-    // 6. Authorize MOQT action
+    // 6. Authorize MOQT action (requires ValidatedToken)
     let moqt_validator = MoqtValidator::new();
     let request = MoqtAuthRequest::new(
         MoqtAction::Publish,
         vec![b"live.example.com".to_vec(), b"streaming-123".to_vec()],
         b"/video".to_vec(),
     );
-    let result = moqt_validator.authorize(&decoded, &request).unwrap();
+    let result = moqt_validator.authorize(&validated, &request).unwrap();
 
     println!("Authorized: {}", result.authorized);
     Ok(())

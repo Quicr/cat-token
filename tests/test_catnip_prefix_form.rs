@@ -14,7 +14,9 @@ fn test_valid_prefix_form_accepted() {
         .build();
 
     let encoded = encode_token(&token, &alg).unwrap();
-    let decoded = decode_token(&encoded, &alg).unwrap();
+    let decoded = decode_token(&encoded, &alg)
+        .unwrap()
+        .into_unvalidated_token();
     assert!(decoded.cat.catnip.is_some());
 }
 

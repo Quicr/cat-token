@@ -45,7 +45,9 @@ fn test_crit_roundtrip_encode_decode() {
         .with_dpop_settings(settings);
 
     let encoded = encode_token(&token, &algorithm).unwrap();
-    let decoded = decode_token(&encoded, &algorithm).unwrap();
+    let decoded = decode_token(&encoded, &algorithm)
+        .unwrap()
+        .into_unvalidated_token();
 
     let dpop = decoded.dpop.catdpop.unwrap();
     assert_eq!(dpop.crit, Some(vec![99]));

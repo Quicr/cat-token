@@ -10,6 +10,7 @@ pub mod error;
 pub mod jwk;
 #[cfg(feature = "moqt")]
 pub mod moqt;
+pub mod pipeline;
 pub mod prelude;
 pub mod structured_header;
 pub mod token;
@@ -37,6 +38,7 @@ pub use error::*;
 pub use jwk::*;
 #[cfg(feature = "moqt")]
 pub use moqt::*;
+pub use pipeline::*;
 pub use structured_header::*;
 pub use token::*;
 pub use uri::*;

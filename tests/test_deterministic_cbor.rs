@@ -188,7 +188,9 @@ fn test_roundtrip_produces_sorted_keys() {
 
     let encoded = encode_token(&token, &algorithm).unwrap();
     // If our encoding produces unsorted keys, decode would reject it
-    let decoded = decode_token(&encoded, &algorithm).unwrap();
+    let decoded = decode_token(&encoded, &algorithm)
+        .unwrap()
+        .into_unvalidated_token();
     assert_eq!(decoded.core.iss, Some("test-issuer".to_string()));
     assert_eq!(decoded.cat.catv, Some(1));
 }

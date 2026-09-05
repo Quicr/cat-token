@@ -151,7 +151,10 @@ fn bench_moqt_authorization(c: &mut Criterion) {
         b.iter(|| {
             black_box(
                 validator
-                    .authorize(&single_scope_token, &matching_request)
+                    .authorize(
+                        &ValidatedToken::from_unchecked(single_scope_token.clone()),
+                        &matching_request,
+                    )
                     .unwrap(),
             )
         })
@@ -168,7 +171,10 @@ fn bench_moqt_authorization(c: &mut Criterion) {
         b.iter(|| {
             black_box(
                 validator
-                    .authorize(&single_scope_token, &non_matching_request)
+                    .authorize(
+                        &ValidatedToken::from_unchecked(single_scope_token.clone()),
+                        &non_matching_request,
+                    )
                     .unwrap(),
             )
         })
@@ -185,7 +191,10 @@ fn bench_moqt_authorization(c: &mut Criterion) {
         b.iter(|| {
             black_box(
                 validator
-                    .authorize(&multi_scope_token, &first_match_request)
+                    .authorize(
+                        &ValidatedToken::from_unchecked(multi_scope_token.clone()),
+                        &first_match_request,
+                    )
                     .unwrap(),
             )
         })
@@ -202,7 +211,10 @@ fn bench_moqt_authorization(c: &mut Criterion) {
         b.iter(|| {
             black_box(
                 validator
-                    .authorize(&multi_scope_token, &last_match_request)
+                    .authorize(
+                        &ValidatedToken::from_unchecked(multi_scope_token.clone()),
+                        &last_match_request,
+                    )
                     .unwrap(),
             )
         })
@@ -219,7 +231,10 @@ fn bench_moqt_authorization(c: &mut Criterion) {
         b.iter(|| {
             black_box(
                 validator
-                    .authorize(&multi_scope_token, &no_match_request)
+                    .authorize(
+                        &ValidatedToken::from_unchecked(multi_scope_token.clone()),
+                        &no_match_request,
+                    )
                     .unwrap(),
             )
         })
@@ -262,7 +277,11 @@ fn bench_moqt_throughput(c: &mut Criterion) {
                 b.iter(|| {
                     let mut authorized = 0;
                     for req in &requests {
-                        if validator.authorize(&token, req).unwrap().authorized {
+                        if validator
+                            .authorize(&ValidatedToken::from_unchecked(token.clone()), req)
+                            .unwrap()
+                            .authorized
+                        {
                             authorized += 1;
                         }
                     }

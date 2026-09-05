@@ -75,7 +75,7 @@ fn generate_hmac_example() -> Result<(), Box<dyn std::error::Error>> {
         encode_token_base64(&token, &algorithm)?
     );
 
-    let decoded = decode_token(&encoded, &algorithm)?;
+    let decoded = decode_token(&encoded, &algorithm)?.into_unvalidated_token();
     println!("Token verified and decoded successfully!");
     println!("Issuer: {:?}", decoded.core.iss);
     println!("Audience: {:?}", decoded.core.aud);
@@ -101,7 +101,7 @@ fn generate_es256_example() -> Result<(), Box<dyn std::error::Error>> {
         encode_token_base64(&token, &algorithm)?
     );
 
-    let decoded = decode_token(&encoded, &algorithm)?;
+    let decoded = decode_token(&encoded, &algorithm)?.into_unvalidated_token();
     println!("Token verified and decoded successfully!");
     println!("Issuer: {:?}", decoded.core.iss);
     println!("Audience: {:?}", decoded.core.aud);
@@ -127,7 +127,7 @@ fn generate_ps256_example() -> Result<(), Box<dyn std::error::Error>> {
         encode_token_base64(&token, &algorithm)?
     );
 
-    let decoded = decode_token(&encoded, &algorithm)?;
+    let decoded = decode_token(&encoded, &algorithm)?.into_unvalidated_token();
     println!("Token verified and decoded successfully!");
     println!("Issuer: {:?}", decoded.core.iss);
     println!("Audience: {:?}", decoded.core.aud);

@@ -117,22 +117,19 @@ fn validate_and_authorize(
     namespace: &[u8],
     track: &[u8],
 ) -> Result<MoqtAuthResult, String> {
-    // Step 1: Decode and verify COSE structure
-    let token = decode_token(token_bytes, key).map_err(|e| e.to_string())?;
+    // Step 1: Decode and verify COSE signature
+    let verified = decode_token(token_bytes, key).map_err(|e| e.to_string())?;
 
-    // Step 2: Validate standard claims
-    token_validator
-        .validate(&token)
+    // Step 2: Validate claims (produces ValidatedToken)
+    let validated = verified
+        .validate(token_validator)
         .map_err(|e| e.to_string())?;
 
-    // Step 3: Validate MOQT claims
-    moqt_validator
-        .validate_moqt_claims(&token)
-        .map_err(|e| e.to_string())?;
-
-    // Step 4: Authorize the action
+    // Step 3: Authorize the action (requires ValidatedToken)
     let request = MoqtAuthRequest::new(action, vec![namespace.to_vec()], track.to_vec());
-    let result = moqt_validator.authorize(&token, &request).unwrap();
+    let result = moqt_validator
+        .authorize(&validated, &request)
+        .map_err(|e| e.to_string())?;
 
     if result.authorized {
         Ok(result)
