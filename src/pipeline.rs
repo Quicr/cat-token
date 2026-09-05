@@ -70,20 +70,8 @@ pub struct ValidatedToken {
 }
 
 impl ValidatedToken {
-    #[cfg(not(any(test, feature = "test-util")))]
+    #[cfg(test)]
     pub(crate) fn from_unchecked(token: CatToken) -> Self {
-        Self {
-            token,
-            header: TokenHeader {
-                algorithm_id: 0,
-                kid: None,
-            },
-            provenance: TokenProvenance::Signed,
-        }
-    }
-
-    #[cfg(any(test, feature = "test-util"))]
-    pub fn from_unchecked(token: CatToken) -> Self {
         Self {
             token,
             header: TokenHeader {

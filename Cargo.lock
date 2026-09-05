@@ -209,7 +209,6 @@ version = "0.2.0"
 dependencies = [
  "aes-gcm",
  "base64",
- "cat-token",
  "chrono",
  "ciborium",
  "criterion",

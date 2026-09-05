@@ -9,6 +9,16 @@ use chrono::{Duration, Utc};
 use std::sync::Arc;
 use std::thread;
 
+fn make_validated(token: &CatToken) -> ValidatedToken {
+    let key = HmacSha256Algorithm::new(b"test-key-for-roundtrip-000000000");
+    let encoded = encode_token(token, &key).unwrap();
+    let validator = CatTokenValidator::new().allow_unencrypted_privacy_claims();
+    decode_token(&encoded, &key)
+        .unwrap()
+        .validate(&validator)
+        .unwrap()
+}
+
 #[test]
 fn test_moqt_validator_spec_example_exact_match() {
     // Example from spec: Allow with an exact match "example.com/bob"
@@ -38,7 +48,7 @@ fn test_moqt_validator_spec_example_exact_match() {
     );
     assert!(
         validator
-            .authorize(&ValidatedToken::from_unchecked(token.clone()), &request)
+            .authorize(&make_validated(&token), &request)
             .unwrap()
             .authorized
     );
@@ -60,7 +70,7 @@ fn test_moqt_validator_spec_example_exact_match() {
         );
         assert!(
             !validator
-                .authorize(&ValidatedToken::from_unchecked(token.clone()), &request)
+                .authorize(&make_validated(&token), &request)
                 .unwrap()
                 .authorized,
             "Should deny ns={:?} track={:?}",
@@ -107,7 +117,7 @@ fn test_moqt_validator_spec_example_prefix_match() {
         );
         assert!(
             validator
-                .authorize(&ValidatedToken::from_unchecked(token.clone()), &request)
+                .authorize(&make_validated(&token), &request)
                 .unwrap()
                 .authorized,
             "Should permit ns={:?} track={:?}",
@@ -128,7 +138,7 @@ fn test_moqt_validator_spec_example_prefix_match() {
         );
         assert!(
             !validator
-                .authorize(&ValidatedToken::from_unchecked(token.clone()), &request)
+                .authorize(&make_validated(&token), &request)
                 .unwrap()
                 .authorized,
             "Should deny ns={:?} track={:?}",
@@ -160,7 +170,7 @@ fn test_moqt_validator_multiple_scopes() {
         b"/live/stream1".to_vec(),
     );
     let result = validator
-        .authorize(&ValidatedToken::from_unchecked(token.clone()), &request)
+        .authorize(&make_validated(&token), &request)
         .unwrap();
     assert!(result.authorized);
     assert_eq!(result.matched_scope_index, Some(0));
@@ -173,7 +183,7 @@ fn test_moqt_validator_multiple_scopes() {
     );
     assert!(
         !validator
-            .authorize(&ValidatedToken::from_unchecked(token.clone()), &request)
+            .authorize(&make_validated(&token), &request)
             .unwrap()
             .authorized
     );
@@ -185,7 +195,7 @@ fn test_moqt_validator_multiple_scopes() {
         b"/vod/movie1".to_vec(),
     );
     let result = validator
-        .authorize(&ValidatedToken::from_unchecked(token.clone()), &request)
+        .authorize(&make_validated(&token), &request)
         .unwrap();
     assert!(result.authorized);
     assert_eq!(result.matched_scope_index, Some(1));
@@ -198,7 +208,7 @@ fn test_moqt_validator_multiple_scopes() {
     );
     assert!(
         !validator
-            .authorize(&ValidatedToken::from_unchecked(token.clone()), &request)
+            .authorize(&make_validated(&token), &request)
             .unwrap()
             .authorized
     );
@@ -225,7 +235,7 @@ fn test_moqt_validator_revalidation_required() {
         b"/stream".to_vec(),
     );
     let result = validator
-        .authorize(&ValidatedToken::from_unchecked(token.clone()), &request)
+        .authorize(&make_validated(&token), &request)
         .unwrap();
 
     assert!(result.authorized);
@@ -255,7 +265,7 @@ fn test_moqt_validator_revalidation_zero() {
         b"/stream".to_vec(),
     );
     let result = validator
-        .authorize(&ValidatedToken::from_unchecked(token.clone()), &request)
+        .authorize(&make_validated(&token), &request)
         .unwrap();
 
     assert!(result.authorized);
@@ -374,7 +384,7 @@ fn test_moqt_default_blocked() {
         b"/stream".to_vec(),
     );
     let result = validator
-        .authorize(&ValidatedToken::from_unchecked(token.clone()), &request)
+        .authorize(&make_validated(&token), &request)
         .unwrap();
 
     assert!(!result.authorized);
@@ -396,7 +406,7 @@ fn test_moqt_empty_scopes() {
         b"/stream".to_vec(),
     );
     let result = validator
-        .authorize(&ValidatedToken::from_unchecked(token.clone()), &request)
+        .authorize(&make_validated(&token), &request)
         .unwrap();
 
     assert!(!result.authorized);
@@ -433,7 +443,7 @@ fn test_moqt_validator_concurrent_access() {
                     track.as_bytes().to_vec(),
                 );
                 let result = validator
-                    .authorize(&ValidatedToken::from_unchecked((*token).clone()), &request)
+                    .authorize(&make_validated(&token), &request)
                     .unwrap();
                 assert!(
                     result.authorized,

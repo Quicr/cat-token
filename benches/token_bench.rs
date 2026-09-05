@@ -6,6 +6,16 @@ use cat_token::*;
 use chrono::{Duration, Utc};
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 
+fn make_validated(token: &CatToken) -> ValidatedToken {
+    let key = HmacSha256Algorithm::new(b"test-key-for-roundtrip-000000000");
+    let encoded = encode_token(token, &key).unwrap();
+    let validator = CatTokenValidator::new().allow_unencrypted_privacy_claims();
+    decode_token(&encoded, &key)
+        .unwrap()
+        .validate(&validator)
+        .unwrap()
+}
+
 fn create_simple_token() -> CatToken {
     let now = Utc::now();
     let exp = now + Duration::hours(1);
@@ -140,6 +150,9 @@ fn bench_moqt_authorization(c: &mut Criterion) {
 
     let validator = MoqtValidator::new();
 
+    let single_validated = make_validated(&single_scope_token);
+    let multi_validated = make_validated(&multi_scope_token);
+
     // Matching request (single scope)
     let matching_request = MoqtAuthRequest::new(
         MoqtAction::Publish,
@@ -151,10 +164,7 @@ fn bench_moqt_authorization(c: &mut Criterion) {
         b.iter(|| {
             black_box(
                 validator
-                    .authorize(
-                        &ValidatedToken::from_unchecked(single_scope_token.clone()),
-                        &matching_request,
-                    )
+                    .authorize(&single_validated, &matching_request)
                     .unwrap(),
             )
         })
@@ -171,10 +181,7 @@ fn bench_moqt_authorization(c: &mut Criterion) {
         b.iter(|| {
             black_box(
                 validator
-                    .authorize(
-                        &ValidatedToken::from_unchecked(single_scope_token.clone()),
-                        &non_matching_request,
-                    )
+                    .authorize(&single_validated, &non_matching_request)
                     .unwrap(),
             )
         })
@@ -191,10 +198,7 @@ fn bench_moqt_authorization(c: &mut Criterion) {
         b.iter(|| {
             black_box(
                 validator
-                    .authorize(
-                        &ValidatedToken::from_unchecked(multi_scope_token.clone()),
-                        &first_match_request,
-                    )
+                    .authorize(&multi_validated, &first_match_request)
                     .unwrap(),
             )
         })
@@ -211,10 +215,7 @@ fn bench_moqt_authorization(c: &mut Criterion) {
         b.iter(|| {
             black_box(
                 validator
-                    .authorize(
-                        &ValidatedToken::from_unchecked(multi_scope_token.clone()),
-                        &last_match_request,
-                    )
+                    .authorize(&multi_validated, &last_match_request)
                     .unwrap(),
             )
         })
@@ -231,10 +232,7 @@ fn bench_moqt_authorization(c: &mut Criterion) {
         b.iter(|| {
             black_box(
                 validator
-                    .authorize(
-                        &ValidatedToken::from_unchecked(multi_scope_token.clone()),
-                        &no_match_request,
-                    )
+                    .authorize(&multi_validated, &no_match_request)
                     .unwrap(),
             )
         })
@@ -257,6 +255,7 @@ fn bench_moqt_throughput(c: &mut Criterion) {
         .build();
 
     let validator = MoqtValidator::new();
+    let validated = make_validated(&token);
 
     // Simulate batch authorization (100K ops target)
     for batch_size in [1000, 10000, 100000].iter() {
@@ -277,11 +276,7 @@ fn bench_moqt_throughput(c: &mut Criterion) {
                 b.iter(|| {
                     let mut authorized = 0;
                     for req in &requests {
-                        if validator
-                            .authorize(&ValidatedToken::from_unchecked(token.clone()), req)
-                            .unwrap()
-                            .authorized
-                        {
+                        if validator.authorize(&validated, req).unwrap().authorized {
                             authorized += 1;
                         }
                     }

@@ -6,6 +6,16 @@
 use cat_token::moqt::{C4M_TOKEN_TYPE, MoqtAuthRequest, MoqtScopeBuilder, MoqtValidator};
 use cat_token::*;
 
+fn make_validated(token: &CatToken) -> ValidatedToken {
+    let key = HmacSha256Algorithm::new(b"test-key-for-roundtrip-000000000");
+    let encoded = encode_token(token, &key).unwrap();
+    let validator = CatTokenValidator::new().allow_unencrypted_privacy_claims();
+    decode_token(&encoded, &key)
+        .unwrap()
+        .validate(&validator)
+        .unwrap()
+}
+
 // --- CatTokenBuilder::expires_in ---
 
 #[test]
@@ -235,7 +245,7 @@ fn test_namespace_path_splits_by_slash() {
     );
     assert!(
         validator
-            .authorize(&ValidatedToken::from_unchecked(token.clone()), &request)
+            .authorize(&make_validated(&token), &request)
             .unwrap()
             .authorized
     );
@@ -248,7 +258,7 @@ fn test_namespace_path_splits_by_slash() {
     );
     assert!(
         !validator
-            .authorize(&ValidatedToken::from_unchecked(token.clone()), &request)
+            .authorize(&make_validated(&token), &request)
             .unwrap()
             .authorized
     );
@@ -261,7 +271,7 @@ fn test_namespace_path_splits_by_slash() {
     );
     assert!(
         !validator
-            .authorize(&ValidatedToken::from_unchecked(token.clone()), &request)
+            .authorize(&make_validated(&token), &request)
             .unwrap()
             .authorized
     );
@@ -290,7 +300,7 @@ fn test_namespace_path_ignores_empty_segments() {
     );
     assert!(
         validator
-            .authorize(&ValidatedToken::from_unchecked(token.clone()), &request)
+            .authorize(&make_validated(&token), &request)
             .unwrap()
             .authorized
     );
@@ -323,7 +333,7 @@ fn test_namespace_path_allows_additional_trailing_elements() {
     );
     assert!(
         validator
-            .authorize(&ValidatedToken::from_unchecked(token.clone()), &request)
+            .authorize(&make_validated(&token), &request)
             .unwrap()
             .authorized
     );
@@ -336,7 +346,7 @@ fn test_namespace_path_allows_additional_trailing_elements() {
     );
     assert!(
         validator
-            .authorize(&ValidatedToken::from_unchecked(token.clone()), &request)
+            .authorize(&make_validated(&token), &request)
             .unwrap()
             .authorized
     );
@@ -349,7 +359,7 @@ fn test_namespace_path_allows_additional_trailing_elements() {
     );
     assert!(
         !validator
-            .authorize(&ValidatedToken::from_unchecked(token.clone()), &request)
+            .authorize(&make_validated(&token), &request)
             .unwrap()
             .authorized
     );
@@ -415,7 +425,7 @@ fn test_full_roundtrip_new_apis() {
     let setup_req = MoqtAuthRequest::new(MoqtAction::ClientSetup, vec![], vec![]);
     assert!(
         moqt_validator
-            .authorize(&ValidatedToken::from_unchecked(decoded.clone()), &setup_req)
+            .authorize(&make_validated(&decoded), &setup_req)
             .unwrap()
             .authorized
     );
@@ -427,10 +437,7 @@ fn test_full_roundtrip_new_apis() {
     );
     assert!(
         moqt_validator
-            .authorize(
-                &ValidatedToken::from_unchecked(decoded.clone()),
-                &publish_req
-            )
+            .authorize(&make_validated(&decoded), &publish_req)
             .unwrap()
             .authorized
     );
@@ -443,7 +450,7 @@ fn test_full_roundtrip_new_apis() {
     );
     assert!(
         !moqt_validator
-            .authorize(&ValidatedToken::from_unchecked(decoded.clone()), &sub_req)
+            .authorize(&make_validated(&decoded), &sub_req)
             .unwrap()
             .authorized
     );

@@ -7,6 +7,16 @@ use cat_token::dpop::{DpopProof, DpopValidator, generate_jti};
 use cat_token::jwk::Jwk;
 use cat_token::*;
 
+fn make_validated(token: &CatToken) -> ValidatedToken {
+    let key = HmacSha256Algorithm::new(b"test-key-for-roundtrip-000000000");
+    let encoded = encode_token(token, &key).unwrap();
+    let validator = CatTokenValidator::new().allow_unencrypted_privacy_claims();
+    decode_token(&encoded, &key)
+        .unwrap()
+        .validate(&validator)
+        .unwrap()
+}
+
 #[test]
 fn test_dpop_uses_embedded_key() {
     let alg = Es256Algorithm::new_with_key_pair().unwrap();
@@ -102,7 +112,7 @@ fn test_dpop_namespace_mismatch_rejected() {
     )
     .with_dpop_proof(proof);
 
-    let result = validator.authorize_with_dpop(&ValidatedToken::from_unchecked(token), &request);
+    let result = validator.authorize_with_dpop(&make_validated(&token), &request);
     assert!(result.is_err(), "Should reject namespace mismatch");
     assert!(matches!(result, Err(CatError::DpopValidationFailed(_))));
 }
@@ -146,7 +156,7 @@ fn test_dpop_track_mismatch_rejected() {
     )
     .with_dpop_proof(proof);
 
-    let result = validator.authorize_with_dpop(&ValidatedToken::from_unchecked(token), &request);
+    let result = validator.authorize_with_dpop(&make_validated(&token), &request);
     assert!(result.is_err(), "Should reject track mismatch");
     assert!(matches!(result, Err(CatError::DpopValidationFailed(_))));
 }
@@ -182,7 +192,7 @@ fn test_dpop_matching_target_succeeds() {
     let request = cat_token::moqt::MoqtAuthRequest::new(MoqtAction::Publish, ns, track.to_vec())
         .with_dpop_proof(proof);
 
-    let result = validator.authorize_with_dpop(&ValidatedToken::from_unchecked(token), &request);
+    let result = validator.authorize_with_dpop(&make_validated(&token), &request);
     assert!(result.is_ok());
     assert!(result.unwrap().authorized);
 }
