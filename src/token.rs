@@ -863,83 +863,8 @@ pub fn decode_token_with_limits(
     algorithm: &dyn CryptographicAlgorithm,
     limits: &CwtLimits,
 ) -> Result<VerifiedToken, CatError> {
-    if cose_bytes.len() > MAX_TOKEN_SIZE {
-        return Err(CatError::InvalidTokenFormat);
-    }
-
-    let mut cursor = std::io::Cursor::new(cose_bytes);
-    let value: ciborium::Value =
-        ciborium::de::from_reader(&mut cursor).map_err(|e| CatError::InvalidCbor(e.to_string()))?;
-    if (cursor.position() as usize) < cose_bytes.len() {
-        return Err(CatError::InvalidCbor(format!(
-            "Trailing bytes after COSE envelope: {} unconsumed bytes",
-            cose_bytes.len() - cursor.position() as usize
-        )));
-    }
-
-    let (expected_tag, arr) = match value {
-        ciborium::Value::Tag(tag, inner) => {
-            if tag != COSE_TAG_SIGN1 && tag != COSE_TAG_MAC0 {
-                return Err(CatError::InvalidTokenFormat);
-            }
-            match *inner {
-                ciborium::Value::Array(a) if a.len() == 4 => (tag, a),
-                _ => return Err(CatError::InvalidTokenFormat),
-            }
-        }
-        _ => return Err(CatError::InvalidTokenFormat),
-    };
-
-    let header_cbor = match &arr[0] {
-        ciborium::Value::Bytes(b) => b.clone(),
-        _ => return Err(CatError::InvalidTokenFormat),
-    };
-
-    match &arr[1] {
-        ciborium::Value::Map(m) if m.is_empty() => {}
-        ciborium::Value::Bytes(b) if b.is_empty() => {}
-        _ => {
-            return Err(CatError::InvalidTokenFormat);
-        }
-    }
-
-    let payload_cbor = match &arr[2] {
-        ciborium::Value::Bytes(b) => b.clone(),
-        _ => return Err(CatError::InvalidTokenFormat),
-    };
-    let signature = match &arr[3] {
-        ciborium::Value::Bytes(b) => b.clone(),
-        _ => return Err(CatError::InvalidTokenFormat),
-    };
-
-    let alg_id = algorithm.algorithm_id();
-    let correct_tag = if alg_id == crate::crypto::ALG_HMAC256_256 {
-        COSE_TAG_MAC0
-    } else {
-        COSE_TAG_SIGN1
-    };
-    if expected_tag != correct_tag {
-        return Err(CatError::InvalidTokenFormat);
-    }
-
-    let (header_alg, header_kid) = extract_header_info(&header_cbor)?;
-    if header_alg != alg_id {
-        return Err(CatError::AlgorithmMismatch {
-            expected: alg_id,
-            found: header_alg,
-        });
-    }
-
-    let signing_input = crate::crypto::create_signing_input(&header_cbor, &payload_cbor, alg_id)?;
-
-    algorithm.verify(&signing_input, &signature)?;
-
-    let token = Cwt::decode_payload_with_limits(&payload_cbor, limits)?;
-    let header = TokenHeader {
-        algorithm_id: header_alg,
-        kid: header_kid,
-    };
-    Ok(VerifiedToken::new(token, header, TokenProvenance::Signed))
+    let envelope = parse_cose_envelope(cose_bytes)?;
+    verify_and_decode(&envelope, algorithm, limits)
 }
 
 /// Decode a CatToken from a base64url-encoded COSE structure.
@@ -1005,11 +930,16 @@ pub fn decode_token_with_resolver(
     decode_token_with_resolver_and_limits(cose_bytes, resolver, &CwtLimits::default())
 }
 
-pub fn decode_token_with_resolver_and_limits(
-    cose_bytes: &[u8],
-    resolver: &dyn crate::key_resolver::KeyResolver,
-    limits: &CwtLimits,
-) -> Result<VerifiedToken, CatError> {
+struct ParsedCoseEnvelope {
+    tag: u64,
+    header_cbor: Vec<u8>,
+    payload_cbor: Vec<u8>,
+    signature: Vec<u8>,
+    header_alg: i64,
+    header_kid: Option<Vec<u8>>,
+}
+
+fn parse_cose_envelope(cose_bytes: &[u8]) -> Result<ParsedCoseEnvelope, CatError> {
     if cose_bytes.len() > MAX_TOKEN_SIZE {
         return Err(CatError::InvalidTokenFormat);
     }
@@ -1024,7 +954,7 @@ pub fn decode_token_with_resolver_and_limits(
         )));
     }
 
-    let (expected_tag, arr) = match value {
+    let (tag, arr) = match value {
         ciborium::Value::Tag(tag, inner) => {
             if tag != COSE_TAG_SIGN1 && tag != COSE_TAG_MAC0 {
                 return Err(CatError::InvalidTokenFormat);
@@ -1061,39 +991,65 @@ pub fn decode_token_with_resolver_and_limits(
 
     let (header_alg, header_kid) = extract_header_info(&header_cbor)?;
 
-    let hint = crate::key_resolver::KeyHint {
-        algorithm_id: header_alg,
-        kid: header_kid.clone(),
-        issuer: None,
-    };
-    let algorithm = resolver.resolve(&hint)?;
+    Ok(ParsedCoseEnvelope {
+        tag,
+        header_cbor,
+        payload_cbor,
+        signature,
+        header_alg,
+        header_kid,
+    })
+}
 
+fn verify_and_decode(
+    envelope: &ParsedCoseEnvelope,
+    algorithm: &dyn CryptographicAlgorithm,
+    limits: &CwtLimits,
+) -> Result<VerifiedToken, CatError> {
     let alg_id = algorithm.algorithm_id();
     let correct_tag = if alg_id == crate::crypto::ALG_HMAC256_256 {
         COSE_TAG_MAC0
     } else {
         COSE_TAG_SIGN1
     };
-    if expected_tag != correct_tag {
+    if envelope.tag != correct_tag {
         return Err(CatError::InvalidTokenFormat);
     }
 
-    if header_alg != alg_id {
+    if envelope.header_alg != alg_id {
         return Err(CatError::AlgorithmMismatch {
             expected: alg_id,
-            found: header_alg,
+            found: envelope.header_alg,
         });
     }
 
-    let signing_input = crate::crypto::create_signing_input(&header_cbor, &payload_cbor, alg_id)?;
-    algorithm.verify(&signing_input, &signature)?;
+    let signing_input =
+        crate::crypto::create_signing_input(&envelope.header_cbor, &envelope.payload_cbor, alg_id)?;
+    algorithm.verify(&signing_input, &envelope.signature)?;
 
-    let token = Cwt::decode_payload_with_limits(&payload_cbor, limits)?;
+    let token = Cwt::decode_payload_with_limits(&envelope.payload_cbor, limits)?;
     let header = TokenHeader {
-        algorithm_id: header_alg,
-        kid: header_kid,
+        algorithm_id: envelope.header_alg,
+        kid: envelope.header_kid.clone(),
     };
     Ok(VerifiedToken::new(token, header, TokenProvenance::Signed))
+}
+
+pub fn decode_token_with_resolver_and_limits(
+    cose_bytes: &[u8],
+    resolver: &dyn crate::key_resolver::KeyResolver,
+    limits: &CwtLimits,
+) -> Result<VerifiedToken, CatError> {
+    let envelope = parse_cose_envelope(cose_bytes)?;
+
+    let hint = crate::key_resolver::KeyHint {
+        algorithm_id: envelope.header_alg,
+        kid: envelope.header_kid.clone(),
+        issuer: None,
+    };
+    let algorithm = resolver.resolve(&hint)?;
+
+    verify_and_decode(&envelope, algorithm, limits)
 }
 
 pub fn decode_token_with_admission(
@@ -1110,34 +1066,22 @@ pub fn decode_token_with_admission_and_limits(
     policy: &crate::pipeline::AdmissionPolicy,
     limits: &CwtLimits,
 ) -> Result<VerifiedToken, CatError> {
-    let header = parse_cose_header(cose_bytes)?;
+    let envelope = parse_cose_envelope(cose_bytes)?;
+
+    let header = TokenHeader {
+        algorithm_id: envelope.header_alg,
+        kid: envelope.header_kid.clone(),
+    };
     policy.check(cose_bytes, &header)?;
-    decode_token_with_resolver_and_limits(cose_bytes, resolver, limits)
-}
 
-fn parse_cose_header(cose_bytes: &[u8]) -> Result<TokenHeader, CatError> {
-    let mut cursor = std::io::Cursor::new(cose_bytes);
-    let value: ciborium::Value =
-        ciborium::de::from_reader(&mut cursor).map_err(|e| CatError::InvalidCbor(e.to_string()))?;
-
-    let arr = match value {
-        ciborium::Value::Tag(_, inner) => match *inner {
-            ciborium::Value::Array(a) if a.len() == 4 => a,
-            _ => return Err(CatError::InvalidTokenFormat),
-        },
-        _ => return Err(CatError::InvalidTokenFormat),
+    let hint = crate::key_resolver::KeyHint {
+        algorithm_id: envelope.header_alg,
+        kid: envelope.header_kid.clone(),
+        issuer: None,
     };
+    let algorithm = resolver.resolve(&hint)?;
 
-    let header_cbor = match &arr[0] {
-        ciborium::Value::Bytes(b) => b.clone(),
-        _ => return Err(CatError::InvalidTokenFormat),
-    };
-
-    let (alg, kid) = extract_header_info(&header_cbor)?;
-    Ok(TokenHeader {
-        algorithm_id: alg,
-        kid,
-    })
+    verify_and_decode(&envelope, algorithm, limits)
 }
 
 fn extract_header_info(header_cbor: &[u8]) -> Result<(i64, Option<Vec<u8>>), CatError> {

@@ -19,27 +19,27 @@ jobs:
         rust: [stable]
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
     - name: Install Rust
-      uses: dtolnay/rust-toolchain@stable
+      uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
       with:
         toolchain: ${{ matrix.rust }}
 
     - name: Cache cargo registry
-      uses: actions/cache@v4
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
       with:
         path: ~/.cargo/registry
         key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
 
     - name: Cache cargo index
-      uses: actions/cache@v4
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
       with:
         path: ~/.cargo/git
         key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
 
     - name: Cache cargo build
-      uses: actions/cache@v4
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
       with:
         path: target
         key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
@@ -76,10 +76,10 @@ jobs:
           - "qp-trie,moqt"
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
     - name: Install Rust
-      uses: dtolnay/rust-toolchain@stable
+      uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
 
     - name: Build with features '${{ matrix.features }}'
       run: cargo build --locked --no-default-features --features "${{ matrix.features }}"
@@ -90,23 +90,78 @@ jobs:
     - name: Clippy with features '${{ matrix.features }}'
       run: cargo clippy --locked --no-default-features --features "${{ matrix.features }}" -- -D warnings
 
+  clippy-no-features:
+    name: Clippy (no default features)
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+
+    - name: Clippy --lib --no-default-features
+      run: cargo clippy --locked --lib --no-default-features -- -D warnings
+
+  cargo-audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+
+    - name: Install cargo-audit
+      run: cargo install cargo-audit
+
+    - name: Run cargo audit
+      run: cargo audit
+
   cargo-deny:
     name: Dependency Audit
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
     - name: Install cargo-deny
-      uses: EmbarkStudios/cargo-deny-action@v2
+      uses: EmbarkStudios/cargo-deny-action@b66acf5e9fe20f8aba065be86778a8a4c846f902 # v2
+
+  miri:
+    name: Miri (undefined behavior check)
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+    - name: Install Rust nightly with Miri
+      uses: dtolnay/rust-toolchain@be39649afda95dbf70f87cce95f68b8d5797b296 # nightly
+      with:
+        components: miri
+
+    - name: Run Miri on unit tests
+      run: cargo +nightly miri test --lib --all-features
+      env:
+        MIRIFLAGS: -Zmiri-strict-provenance
+
+  doc-test:
+    name: Documentation Tests
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+
+    - name: Run doc tests
+      run: cargo test --locked --doc --all-features
 
   coverage:
     name: Code Coverage
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
     - name: Install Rust
-      uses: dtolnay/rust-toolchain@stable
+      uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
 
     - name: Install cargo-tarpaulin
       run: cargo install cargo-tarpaulin
@@ -115,6 +170,6 @@ jobs:
       run: cargo tarpaulin --locked --verbose --all-features --workspace --timeout 120 --out xml
 
     - name: Upload to codecov.io
-      uses: codecov/codecov-action@v5
+      uses: codecov/codecov-action@04b047e8bb82a0c002c8312c1c880fbc6a999d45 # v5
       with:
         fail_ci_if_error: false
