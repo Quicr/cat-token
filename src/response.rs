@@ -26,7 +26,10 @@ impl CatResponsePolicy {
         let mut additional_headers = Vec::new();
 
         if let Some(ref catifdata) = token.claims().informational.catifdata {
-            additional_headers.push(("X-CAT-Interface".to_string(), catifdata.join(", ")));
+            additional_headers.push((
+                "X-CAT-Interface".to_string(),
+                sanitize_header_value(&catifdata.join(", ")),
+            ));
         }
 
         Self {
@@ -48,6 +51,13 @@ impl CatResponsePolicy {
             additional_headers: Vec::new(),
         }
     }
+}
+
+pub fn sanitize_header_value(value: &str) -> String {
+    value
+        .chars()
+        .filter(|c| !c.is_control() || *c == '\t')
+        .collect()
 }
 
 pub fn sanitize_uri_for_cache(uri: &str) -> String {

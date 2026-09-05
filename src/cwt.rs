@@ -364,6 +364,20 @@ fn prefix_byte_count(prefix_len: u8) -> usize {
     (prefix_len as usize).div_ceil(8)
 }
 
+fn validate_host_bits_zero(prefix_bytes: &[u8], prefix_len: u8) -> Result<(), CatError> {
+    let bits_in_last_byte = prefix_len % 8;
+    if bits_in_last_byte != 0 && !prefix_bytes.is_empty() {
+        let last = prefix_bytes[prefix_bytes.len() - 1];
+        let host_mask = 0xFFu8 >> bits_in_last_byte;
+        if last & host_mask != 0 {
+            return Err(CatError::InvalidClaimValue(format!(
+                "catnip: non-zero host bits in prefix /{prefix_len}"
+            )));
+        }
+    }
+    Ok(())
+}
+
 fn decode_network_identifier(value: &Value) -> Result<NetworkIdentifier, CatError> {
     match value {
         Value::Tag(tag, inner) => match inner.as_ref() {
@@ -419,6 +433,7 @@ fn decode_network_identifier(value: &Value) -> Result<NetworkIdentifier, CatErro
                         expected_byte_count
                     )));
                 }
+                validate_host_bits_zero(prefix_bytes, prefix_len)?;
                 match *tag {
                     CBOR_TAG_IPV4 => {
                         let mut octets = [0u8; 4];
@@ -1992,16 +2007,32 @@ impl Cwt {
                                         } else {
                                             let mut hdrs = Vec::new();
                                             for (hk, hv) in hmap {
-                                                match (hk, hv) {
-                                                    (Value::Text(k), Value::Text(v)) => {
-                                                        hdrs.push((k.clone(), v.clone()));
+                                                let key = match hk {
+                                                    Value::Text(k) => k.clone(),
+                                                    _ => {
+                                                        return Err(CatError::InvalidClaimValue(
+                                                            "catif header keys must be text"
+                                                                .to_string(),
+                                                        ));
+                                                    }
+                                                };
+                                                let val = match hv {
+                                                    Value::Text(v) => v.clone(),
+                                                    Value::Bytes(b) => hex::encode(b),
+                                                    Value::Integer(i) => {
+                                                        let v: i64 =
+                                                            (*i).try_into().map_err(|_| {
+                                                                CatError::InvalidTokenFormat
+                                                            })?;
+                                                        v.to_string()
                                                     }
                                                     _ => {
                                                         return Err(CatError::InvalidClaimValue(
-                                                            "catif headers must be text key-value pairs".to_string(),
+                                                            "catif header values must be text, bytes, or integer".to_string(),
                                                         ));
                                                     }
-                                                }
+                                                };
+                                                hdrs.push((key, val));
                                             }
                                             Some(hdrs)
                                         }
