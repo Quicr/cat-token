@@ -25,3 +25,13 @@ doc = false
 name = "fuzz_uri_normalize"
 path = "fuzz_targets/fuzz_uri_normalize.rs"
 doc = false
+
+[[bin]]
+name = "fuzz_dpop_decode"
+path = "fuzz_targets/fuzz_dpop_decode.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_x509_spki"
+path = "fuzz_targets/fuzz_x509_spki.rs"
+doc = false

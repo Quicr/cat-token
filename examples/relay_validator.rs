@@ -24,7 +24,8 @@ fn main() {
         .with_expected_issuers(vec!["https://auth.example.com".to_string()])
         .with_expected_audiences(vec!["moqt-relay.example.com".to_string()])
         .with_clock_skew_tolerance(60)
-        .unwrap();
+        .unwrap()
+        .allow_unencrypted_privacy_claims();
 
     let moqt_validator = MoqtValidator::new().with_min_revalidation_interval(60.0);
 
@@ -41,7 +42,7 @@ fn main() {
         b"live.sports.example.com",
         b"/football/match123",
     ) {
-        Ok(result) => println!("ALLOWED (scope {})", result.matched_scope_index.unwrap()),
+        Ok(result) => println!("ALLOWED (scope {})", result.matched_scope_index),
         Err(e) => println!("DENIED - {}", e),
     }
 
@@ -117,7 +118,7 @@ fn validate_and_authorize(
     action: MoqtAction,
     namespace: &[u8],
     track: &[u8],
-) -> Result<MoqtAuthResult, String> {
+) -> Result<AuthorizedRequest, String> {
     // Step 1: Decode and verify COSE signature
     let verified = decode_token(token_bytes, key).map_err(|e| e.to_string())?;
 
@@ -126,17 +127,18 @@ fn validate_and_authorize(
         .validate(token_validator)
         .map_err(|e| e.to_string())?;
 
-    // Step 3: Authorize the action (requires ValidatedToken)
-    let request = MoqtAuthRequest::new(action, vec![namespace.to_vec()], track.to_vec());
-    let result = moqt_validator
-        .authorize(&validated, &request)
-        .map_err(|e| e.to_string())?;
-
-    if result.authorized {
-        Ok(result)
-    } else {
-        Err("Action not permitted by token scopes".to_string())
-    }
+    // Step 3: Authorize the action against a request context. `authorize`
+    // enforces every signed CAT claim; a mismatched scope or missing context
+    // yields an Err rather than a silent allow.
+    let request = RelayRequestContext::new(
+        "moqt-relay.example.com",
+        action,
+        vec![namespace.to_vec()],
+        track.to_vec(),
+    );
+    moqt_validator
+        .authorize::<dyn ReplayGuard>(&validated, &request, None, None)
+        .map_err(|e| e.to_string())
 }
 
 fn create_test_token(key: &Es256Algorithm) -> Vec<u8> {

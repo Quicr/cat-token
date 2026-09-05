@@ -898,6 +898,7 @@ fn generate_dpop_vectors() -> JsonValue {
             .with_dpop_settings(
                 CatDpopSettings::new()
                     .with_window(60)
+                    .unwrap()
                     .with_jti_processing(true),
             );
         let mut token = token;
@@ -931,6 +932,7 @@ fn generate_dpop_vectors() -> JsonValue {
             .with_dpop_settings(
                 CatDpopSettings::new()
                     .with_window(300)
+                    .unwrap()
                     .with_jti_processing(false),
             );
         let mut token = token;
@@ -973,7 +975,7 @@ fn generate_dpop_vectors() -> JsonValue {
             .with_issuer("https://auth.example.com")
             .with_audience(vec!["https://relay.example.com".to_string()])
             .with_confirmation(jkt.clone())
-            .with_dpop_settings(CatDpopSettings::new().with_window(120));
+            .with_dpop_settings(CatDpopSettings::new().with_window(120).unwrap());
         let mut token = token;
         token.core.exp = Some(FIXED_EXP);
 

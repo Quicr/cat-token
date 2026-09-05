@@ -206,6 +206,13 @@ pub struct DpopProof {
     pub(crate) header: DpopHeader,
     pub(crate) payload: DpopPayload,
     pub(crate) signature: Vec<u8>,
+    /// Exact bytes covered by the JWS signature: `header_b64 "." payload_b64`.
+    /// Preserved verbatim on decode so that whitespace, key order, and escape
+    /// choices the remote signer committed to survive round-tripping. RFC 7515
+    /// §5.2 requires verification against the received input; a reserialized
+    /// form is a different byte sequence and would reject valid external
+    /// proofs. Populated on `sign()` for locally-built proofs.
+    pub(crate) signing_input: Vec<u8>,
 }
 
 #[cfg(feature = "moqt")]
@@ -215,8 +222,23 @@ impl std::fmt::Debug for DpopProof {
             .field("header", &self.header)
             .field("payload", &self.payload)
             .field("signature", &format!("[{} bytes]", self.signature.len()))
+            .field(
+                "signing_input",
+                &format!("[{} bytes]", self.signing_input.len()),
+            )
             .finish()
     }
+}
+
+#[cfg(feature = "moqt")]
+fn build_signing_input(header: &DpopHeader, payload: &DpopPayload) -> Result<Vec<u8>, CatError> {
+    let header_json =
+        serde_json::to_string(header).map_err(|e| CatError::InvalidClaimValue(e.to_string()))?;
+    let payload_json =
+        serde_json::to_string(payload).map_err(|e| CatError::InvalidClaimValue(e.to_string()))?;
+    let header_b64 = URL_SAFE_NO_PAD.encode(header_json.as_bytes());
+    let payload_b64 = URL_SAFE_NO_PAD.encode(payload_json.as_bytes());
+    Ok(format!("{header_b64}.{payload_b64}").into_bytes())
 }
 
 #[cfg(feature = "moqt")]
@@ -226,6 +248,7 @@ impl DpopProof {
             header,
             payload,
             signature,
+            signing_input: Vec::new(),
         }
     }
 
@@ -256,48 +279,51 @@ impl DpopProof {
             header,
             payload,
             signature: Vec::new(),
+            signing_input: Vec::new(),
         }
     }
 
     pub fn with_jti(mut self, jti: String) -> Self {
         self.payload.jti = Some(jti);
+        self.signing_input.clear();
         self
     }
 
     pub fn with_resource(mut self, resource: String) -> Self {
         self.payload.actx.resource = Some(resource);
+        self.signing_input.clear();
         self
     }
 
+    /// Returns the exact JWS signing input this proof was verified against
+    /// (for decoded proofs) or will be signed as (for locally-built proofs).
+    /// For decoded proofs this is the received `header_b64.payload_b64` byte
+    /// sequence and is the value that must be passed to the verifier.
     pub fn signing_input(&self) -> Result<Vec<u8>, CatError> {
-        let header_json = serde_json::to_string(&self.header)
-            .map_err(|e| CatError::InvalidClaimValue(e.to_string()))?;
-        let payload_json = serde_json::to_string(&self.payload)
-            .map_err(|e| CatError::InvalidClaimValue(e.to_string()))?;
-
-        let header_b64 = URL_SAFE_NO_PAD.encode(header_json.as_bytes());
-        let payload_b64 = URL_SAFE_NO_PAD.encode(payload_json.as_bytes());
-
-        Ok(format!("{}.{}", header_b64, payload_b64).into_bytes())
+        if !self.signing_input.is_empty() {
+            return Ok(self.signing_input.clone());
+        }
+        build_signing_input(&self.header, &self.payload)
     }
 
     pub fn sign(&mut self, algorithm: &dyn CryptographicAlgorithm) -> Result<(), CatError> {
-        let signing_input = self.signing_input()?;
-        self.signature = algorithm.sign(&signing_input)?;
+        self.signing_input = build_signing_input(&self.header, &self.payload)?;
+        self.signature = algorithm.sign(&self.signing_input)?;
         Ok(())
     }
 
     pub fn encode(&self) -> Result<String, CatError> {
-        let header_json = serde_json::to_string(&self.header)
-            .map_err(|e| CatError::InvalidClaimValue(e.to_string()))?;
-        let payload_json = serde_json::to_string(&self.payload)
-            .map_err(|e| CatError::InvalidClaimValue(e.to_string()))?;
-
-        let header_b64 = URL_SAFE_NO_PAD.encode(header_json.as_bytes());
-        let payload_b64 = URL_SAFE_NO_PAD.encode(payload_json.as_bytes());
         let signature_b64 = URL_SAFE_NO_PAD.encode(&self.signature);
-
-        Ok(format!("{}.{}.{}", header_b64, payload_b64, signature_b64))
+        if !self.signing_input.is_empty() {
+            // Emit the exact bytes we signed, so that verifying the encoded
+            // form reproduces the same signing input we used.
+            let signing_str = std::str::from_utf8(&self.signing_input)
+                .map_err(|_| CatError::InvalidTokenFormat)?;
+            return Ok(format!("{signing_str}.{signature_b64}"));
+        }
+        let bytes = build_signing_input(&self.header, &self.payload)?;
+        let signing_str = std::str::from_utf8(&bytes).map_err(|_| CatError::InvalidTokenFormat)?;
+        Ok(format!("{signing_str}.{signature_b64}"))
     }
 
     pub fn decode(token: &str) -> Result<Self, CatError> {
@@ -336,10 +362,16 @@ impl DpopProof {
         let payload: DpopPayload = serde_json::from_slice(&payload_json)
             .map_err(|e| CatError::InvalidClaimValue(e.to_string()))?;
 
+        // Preserve the received signing input exactly. `parts[0]` and `parts[1]`
+        // are borrowed from `token`, so `format!` reconstructs the byte slice
+        // between them (which is a single ASCII '.').
+        let signing_input = format!("{}.{}", parts[0], parts[1]).into_bytes();
+
         Ok(Self {
             header,
             payload,
             signature,
+            signing_input,
         })
     }
 
@@ -800,7 +832,7 @@ mod tests {
 
         proof.sign(&alg).unwrap();
 
-        let settings = CatDpopSettings::new().with_window(300);
+        let settings = CatDpopSettings::new().with_window(300).unwrap();
         let validator = DpopValidator::new(settings);
 
         // Use new validate() which derives the key from the embedded JWK

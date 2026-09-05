@@ -1,7 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2022 Quicr
 // SPDX-License-Identifier: BSD-2-Clause
 
-use cat_token::encrypt::{EncryptionAlgorithm, cose_decrypt0, cose_encrypt0};
+use cat_token::encrypt::{
+    EncryptionAlgorithm, cose_decrypt0, cose_decrypt0_with_max_plaintext, cose_encrypt0,
+};
 
 #[test]
 fn test_a128gcm_roundtrip() {
@@ -83,5 +85,21 @@ fn test_large_plaintext_roundtrip() {
     let plaintext = vec![0xBB; 10_000];
     let ciphertext = cose_encrypt0(&plaintext, &key, &EncryptionAlgorithm::A256Gcm).unwrap();
     let decrypted = cose_decrypt0(&ciphertext, &key).unwrap();
+    assert_eq!(decrypted, plaintext);
+}
+
+#[test]
+fn test_plaintext_budget_rejects_before_decrypt() {
+    // Caller may impose a tighter plaintext budget than the outer envelope
+    // cap. An oversized inner plaintext must be rejected before we allocate
+    // a buffer for it.
+    let key = [0x42u8; 32];
+    let plaintext = vec![0xAAu8; 4096];
+    let ciphertext = cose_encrypt0(&plaintext, &key, &EncryptionAlgorithm::A256Gcm).unwrap();
+
+    // Tight budget: reject.
+    assert!(cose_decrypt0_with_max_plaintext(&ciphertext, &key, 1024).is_err());
+    // Loose budget: accept.
+    let decrypted = cose_decrypt0_with_max_plaintext(&ciphertext, &key, 8192).unwrap();
     assert_eq!(decrypted, plaintext);
 }

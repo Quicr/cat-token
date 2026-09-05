@@ -69,6 +69,32 @@ fn cbor_canonical_key_cmp(a: i64, b: i64) -> std::cmp::Ordering {
     }
 }
 
+/// Canonical fingerprint for a CBOR key, used only for duplicate detection.
+/// Integers are represented natively; text/byte strings are tagged with major
+/// type; other types (float, bool, null) get their own bucket. This is
+/// intentionally distinct from any wire representation — its only job is to
+/// make "the same key twice" observable at every nesting level.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum KeyFingerprint {
+    Int(i128),
+    Text(String),
+    Bytes(Vec<u8>),
+    Other(&'static str),
+}
+
+fn key_fingerprint(v: &Value) -> Option<KeyFingerprint> {
+    match v {
+        Value::Integer(i) => Some(KeyFingerprint::Int(i128::from(*i))),
+        Value::Text(s) => Some(KeyFingerprint::Text(s.clone())),
+        Value::Bytes(b) => Some(KeyFingerprint::Bytes(b.clone())),
+        Value::Bool(_) => Some(KeyFingerprint::Other("bool")),
+        Value::Null => Some(KeyFingerprint::Other("null")),
+        Value::Float(_) => Some(KeyFingerprint::Other("float")),
+        // Arrays/maps/tags are not valid CBOR map keys in CTA-5007-B's profile
+        _ => None,
+    }
+}
+
 fn validate_cbor_map_ordering_with_depth(
     map: &[(Value, Value)],
     depth: usize,
@@ -80,18 +106,27 @@ fn validate_cbor_map_ordering_with_depth(
         )));
     }
     let mut prev_key: Option<i64> = None;
+    let mut seen: std::collections::HashSet<KeyFingerprint> =
+        std::collections::HashSet::with_capacity(map.len());
     for (key, value) in map {
+        // Detect duplicate map keys at every nesting depth, regardless of key type.
+        // RFC 8949 §4.2.2 forbids duplicate map keys in a validity-critical profile.
+        if let Some(fp) = key_fingerprint(key)
+            && !seen.insert(fp)
+        {
+            return Err(CatError::InvalidCbor("Duplicate map key".to_string()));
+        }
+        // Only enforce deterministic ordering on integer-keyed top-level maps.
+        // Nested claim structures (catif, catr, catnip, catdpop) may use
+        // arbitrary orderings.
         if let Value::Integer(i) = key {
             let k: i64 = (*i).try_into().unwrap_or(i64::MAX);
-            if let Some(prev) = prev_key {
-                if k == prev {
-                    return Err(CatError::InvalidCbor(format!("Duplicate map key: {k}")));
-                }
-                if cbor_canonical_key_cmp(k, prev) != std::cmp::Ordering::Greater {
-                    return Err(CatError::InvalidCbor(
-                        "Map keys not in deterministic order per RFC 8949 §4.2.1".to_string(),
-                    ));
-                }
+            if let Some(prev) = prev_key
+                && cbor_canonical_key_cmp(k, prev) != std::cmp::Ordering::Greater
+            {
+                return Err(CatError::InvalidCbor(
+                    "Map keys not in deterministic order per RFC 8949 §4.2.1".to_string(),
+                ));
             }
             prev_key = Some(k);
         }
@@ -146,9 +181,20 @@ fn validate_float(f: f64, claim_name: &str) -> Result<(), CatError> {
     Ok(())
 }
 
+/// Convert a float claim value to `i64`, rejecting fractional or out-of-range
+/// values. This is the strict profile: an authorization decision must never
+/// silently change semantics through truncation. Callers that need fractional
+/// preservation should keep the value as `f64` (see `catr.expadd`).
 fn safe_float_to_i64(f: f64, claim_name: &str) -> Result<i64, CatError> {
     validate_float(f, claim_name)?;
-    if f.abs() > i64::MAX as f64 {
+    if f != f.trunc() {
+        return Err(CatError::InvalidClaimValue(format!(
+            "{claim_name}: fractional numeric dates are not permitted in this profile"
+        )));
+    }
+    // f.trunc() equals f, and |f| <= 2^63 — use a strict comparison since
+    // (i64::MAX as f64) rounds up to 2^63, which is NOT representable in i64.
+    if f >= (i64::MAX as f64) || f <= (i64::MIN as f64) {
         return Err(CatError::InvalidClaimValue(format!(
             "{claim_name}: float magnitude {f} exceeds i64 range"
         )));
@@ -163,7 +209,12 @@ fn safe_float_to_u32(f: f64, claim_name: &str) -> Result<u32, CatError> {
             "{claim_name}: value must not be negative"
         )));
     }
-    if f > u32::MAX as f64 {
+    if f != f.trunc() {
+        return Err(CatError::InvalidClaimValue(format!(
+            "{claim_name}: fractional values are not permitted in this profile"
+        )));
+    }
+    if f > (u32::MAX as f64) {
         return Err(CatError::InvalidClaimValue(format!(
             "{claim_name}: float magnitude {f} exceeds u32 range"
         )));
@@ -960,22 +1011,36 @@ pub(crate) const DEFAULT_MAX_TOTAL_STRING_BYTES: usize = 512 * 1024;
 pub(crate) const DEFAULT_MAX_REGEX_COUNT: usize = 50;
 pub(crate) const DEFAULT_MAX_CATNIP_ENTRIES: usize = 1000;
 
+// Upper caps to protect against configurations that would defeat the purpose of the limits.
+const MAX_CBOR_PAYLOAD_CAP: usize = 4 * 1024 * 1024; // 4 MiB
+const MAX_NESTING_DEPTH_CAP: usize = 32;
+const MAX_TOTAL_ITEMS_CAP: usize = 1_000_000;
+const MAX_TOTAL_STRING_BYTES_CAP: usize = 16 * 1024 * 1024; // 16 MiB
+const MAX_STRING_CLAIM_LENGTH_CAP: usize = 1024 * 1024; // 1 MiB
+const MAX_SCOPES_CAP: usize = 100_000;
+const MAX_CUSTOM_CLAIMS_CAP: usize = 10_000;
+const MAX_NAMESPACE_MATCHES_CAP: usize = 10_000;
+const MAX_URI_PATTERNS_CAP: usize = 100_000;
+const MAX_REGEX_COUNT_CAP: usize = 10_000;
+const MAX_CATNIP_ENTRIES_CAP: usize = 100_000;
+
 /// Configuration for CWT validation limits.
 ///
-/// All limits have sensible defaults but can be customized for specific use cases.
+/// All limits have sensible defaults. Custom limits must be built via [`CwtLimitsBuilder`]
+/// so that policy-invalid values (zero, absurd upper bounds) are rejected at construction.
 #[derive(Debug, Clone)]
 pub struct CwtLimits {
-    pub max_cbor_payload_size: usize,
-    pub max_moqt_scopes: usize,
-    pub max_custom_claims: usize,
-    pub max_string_claim_length: usize,
-    pub max_namespace_matches_per_scope: usize,
-    pub max_uri_patterns: usize,
-    pub max_nesting_depth: usize,
-    pub max_total_items: usize,
-    pub max_total_string_bytes: usize,
-    pub max_regex_count: usize,
-    pub max_catnip_entries: usize,
+    pub(crate) max_cbor_payload_size: usize,
+    pub(crate) max_moqt_scopes: usize,
+    pub(crate) max_custom_claims: usize,
+    pub(crate) max_string_claim_length: usize,
+    pub(crate) max_namespace_matches_per_scope: usize,
+    pub(crate) max_uri_patterns: usize,
+    pub(crate) max_nesting_depth: usize,
+    pub(crate) max_total_items: usize,
+    pub(crate) max_total_string_bytes: usize,
+    pub(crate) max_regex_count: usize,
+    pub(crate) max_catnip_entries: usize,
 }
 
 impl Default for CwtLimits {
@@ -997,48 +1062,162 @@ impl Default for CwtLimits {
 }
 
 impl CwtLimits {
+    /// Returns the default limits (equivalent to `CwtLimits::default()`).
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn with_max_cbor_payload_size(mut self, size: usize) -> Self {
-        self.max_cbor_payload_size = size;
-        self
+    /// Start building customized limits from the defaults.
+    pub fn builder() -> CwtLimitsBuilder {
+        CwtLimitsBuilder::new()
     }
 
-    pub fn with_max_moqt_scopes(mut self, count: usize) -> Self {
-        self.max_moqt_scopes = count;
-        self
+    pub fn max_cbor_payload_size(&self) -> usize {
+        self.max_cbor_payload_size
+    }
+    pub fn max_moqt_scopes(&self) -> usize {
+        self.max_moqt_scopes
+    }
+    pub fn max_custom_claims(&self) -> usize {
+        self.max_custom_claims
+    }
+    pub fn max_string_claim_length(&self) -> usize {
+        self.max_string_claim_length
+    }
+    pub fn max_namespace_matches_per_scope(&self) -> usize {
+        self.max_namespace_matches_per_scope
+    }
+    pub fn max_uri_patterns(&self) -> usize {
+        self.max_uri_patterns
+    }
+    pub fn max_nesting_depth(&self) -> usize {
+        self.max_nesting_depth
+    }
+    pub fn max_total_items(&self) -> usize {
+        self.max_total_items
+    }
+    pub fn max_total_string_bytes(&self) -> usize {
+        self.max_total_string_bytes
+    }
+    pub fn max_regex_count(&self) -> usize {
+        self.max_regex_count
+    }
+    pub fn max_catnip_entries(&self) -> usize {
+        self.max_catnip_entries
+    }
+}
+
+/// Fallible builder for [`CwtLimits`]. All setters enforce that values are non-zero
+/// and within a policy-safe upper cap. Building returns an error if any value is invalid.
+#[derive(Debug, Clone)]
+pub struct CwtLimitsBuilder {
+    inner: CwtLimits,
+}
+
+impl Default for CwtLimitsBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+fn check_range(name: &'static str, value: usize, cap: usize) -> Result<usize, CatError> {
+    if value == 0 {
+        return Err(CatError::InvalidClaimValue(format!(
+            "{name}: limit must be > 0"
+        )));
+    }
+    if value > cap {
+        return Err(CatError::InvalidClaimValue(format!(
+            "{name}: {value} exceeds policy cap {cap}"
+        )));
+    }
+    Ok(value)
+}
+
+impl CwtLimitsBuilder {
+    pub fn new() -> Self {
+        Self {
+            inner: CwtLimits::default(),
+        }
     }
 
-    pub fn with_max_custom_claims(mut self, count: usize) -> Self {
-        self.max_custom_claims = count;
-        self
+    pub fn max_cbor_payload_size(mut self, size: usize) -> Result<Self, CatError> {
+        self.inner.max_cbor_payload_size =
+            check_range("max_cbor_payload_size", size, MAX_CBOR_PAYLOAD_CAP)?;
+        Ok(self)
     }
 
-    pub fn with_max_string_claim_length(mut self, length: usize) -> Self {
-        self.max_string_claim_length = length;
-        self
+    pub fn max_moqt_scopes(mut self, count: usize) -> Result<Self, CatError> {
+        self.inner.max_moqt_scopes = check_range("max_moqt_scopes", count, MAX_SCOPES_CAP)?;
+        Ok(self)
     }
 
-    pub fn with_max_nesting_depth(mut self, depth: usize) -> Self {
-        self.max_nesting_depth = depth;
-        self
+    pub fn max_custom_claims(mut self, count: usize) -> Result<Self, CatError> {
+        self.inner.max_custom_claims =
+            check_range("max_custom_claims", count, MAX_CUSTOM_CLAIMS_CAP)?;
+        Ok(self)
     }
 
-    pub fn with_max_total_items(mut self, count: usize) -> Self {
-        self.max_total_items = count;
-        self
+    pub fn max_string_claim_length(mut self, length: usize) -> Result<Self, CatError> {
+        self.inner.max_string_claim_length = check_range(
+            "max_string_claim_length",
+            length,
+            MAX_STRING_CLAIM_LENGTH_CAP,
+        )?;
+        Ok(self)
     }
 
-    pub fn with_max_total_string_bytes(mut self, bytes: usize) -> Self {
-        self.max_total_string_bytes = bytes;
-        self
+    pub fn max_namespace_matches_per_scope(mut self, count: usize) -> Result<Self, CatError> {
+        self.inner.max_namespace_matches_per_scope = check_range(
+            "max_namespace_matches_per_scope",
+            count,
+            MAX_NAMESPACE_MATCHES_CAP,
+        )?;
+        Ok(self)
     }
 
-    pub fn with_max_regex_count(mut self, count: usize) -> Self {
-        self.max_regex_count = count;
-        self
+    pub fn max_uri_patterns(mut self, count: usize) -> Result<Self, CatError> {
+        self.inner.max_uri_patterns = check_range("max_uri_patterns", count, MAX_URI_PATTERNS_CAP)?;
+        Ok(self)
+    }
+
+    pub fn max_nesting_depth(mut self, depth: usize) -> Result<Self, CatError> {
+        self.inner.max_nesting_depth =
+            check_range("max_nesting_depth", depth, MAX_NESTING_DEPTH_CAP)?;
+        Ok(self)
+    }
+
+    pub fn max_total_items(mut self, count: usize) -> Result<Self, CatError> {
+        self.inner.max_total_items = check_range("max_total_items", count, MAX_TOTAL_ITEMS_CAP)?;
+        Ok(self)
+    }
+
+    pub fn max_total_string_bytes(mut self, bytes: usize) -> Result<Self, CatError> {
+        self.inner.max_total_string_bytes =
+            check_range("max_total_string_bytes", bytes, MAX_TOTAL_STRING_BYTES_CAP)?;
+        Ok(self)
+    }
+
+    pub fn max_regex_count(mut self, count: usize) -> Result<Self, CatError> {
+        self.inner.max_regex_count = check_range("max_regex_count", count, MAX_REGEX_COUNT_CAP)?;
+        Ok(self)
+    }
+
+    pub fn max_catnip_entries(mut self, count: usize) -> Result<Self, CatError> {
+        self.inner.max_catnip_entries =
+            check_range("max_catnip_entries", count, MAX_CATNIP_ENTRIES_CAP)?;
+        Ok(self)
+    }
+
+    /// Finalize the builder. Cross-field consistency checks run here.
+    pub fn build(self) -> Result<CwtLimits, CatError> {
+        // The single string claim length must not exceed the aggregate string budget.
+        if self.inner.max_string_claim_length > self.inner.max_total_string_bytes {
+            return Err(CatError::InvalidClaimValue(
+                "max_string_claim_length must not exceed max_total_string_bytes".to_string(),
+            ));
+        }
+        Ok(self.inner)
     }
 }
 
@@ -1637,7 +1816,11 @@ impl Cwt {
                                                     .to_string(),
                                             ));
                                         }
-                                        v as u32
+                                        u32::try_from(v).map_err(|_| {
+                                            CatError::InvalidClaimValue(
+                                                "catgeocoord radius exceeds u32 range".to_string(),
+                                            )
+                                        })?
                                     }
                                     Value::Float(f) => safe_float_to_u32(*f, "catgeocoord radius")?,
                                     _ => {
@@ -1902,7 +2085,7 @@ impl Cwt {
                                                 ));
                                             }
                                         }
-                                        settings.crit = Some(crit_keys);
+                                        settings.set_crit_from_decode(crit_keys);
                                     } else {
                                         return Err(CatError::InvalidClaimValue(
                                             "catdpop crit must be an array".to_string(),
@@ -1916,13 +2099,15 @@ impl Cwt {
                                                 "Invalid DPoP window value".to_string(),
                                             )
                                         })?;
-                                        if window_val < 0 {
-                                            return Err(CatError::InvalidClaimValue(
-                                                "catdpop window must be a non-negative integer"
-                                                    .to_string(),
-                                            ));
+                                        if !(1..=crate::claims::CATDPOP_MAX_WINDOW_SECS)
+                                            .contains(&window_val)
+                                        {
+                                            return Err(CatError::InvalidClaimValue(format!(
+                                                "catdpop window must be in 1..={} seconds (got {window_val})",
+                                                crate::claims::CATDPOP_MAX_WINDOW_SECS
+                                            )));
                                         }
-                                        settings.window = Some(window_val);
+                                        settings.set_window_from_decode(window_val);
                                     } else {
                                         return Err(CatError::InvalidClaimValue(
                                             "catdpop window must be an integer".to_string(),
@@ -1937,8 +2122,8 @@ impl Cwt {
                                             )
                                         })?;
                                         match jti_i64 {
-                                            0 => settings.honor_jti = Some(false),
-                                            1 => settings.honor_jti = Some(true),
+                                            0 => settings.set_honor_jti_from_decode(false),
+                                            1 => settings.set_honor_jti_from_decode(true),
                                             _ => {
                                                 return Err(CatError::InvalidClaimValue(
                                                     "catdpop honor_jti must be 0 or 1".to_string(),
@@ -1988,6 +2173,11 @@ impl Cwt {
                                         "catif action array must not be empty".to_string(),
                                     ));
                                 }
+                                if arr.len() > 3 {
+                                    return Err(CatError::InvalidClaimValue(
+                                        "catif action array must have at most 3 members (status, headers, kid)".to_string(),
+                                    ));
+                                }
                                 let status: u32 = match &arr[0] {
                                     Value::Integer(i) => (*i).try_into().map_err(|_| {
                                         CatError::InvalidClaimValue(
@@ -2018,17 +2208,9 @@ impl Cwt {
                                                 };
                                                 let val = match hv {
                                                     Value::Text(v) => v.clone(),
-                                                    Value::Bytes(b) => hex::encode(b),
-                                                    Value::Integer(i) => {
-                                                        let v: i64 =
-                                                            (*i).try_into().map_err(|_| {
-                                                                CatError::InvalidTokenFormat
-                                                            })?;
-                                                        v.to_string()
-                                                    }
                                                     _ => {
                                                         return Err(CatError::InvalidClaimValue(
-                                                            "catif header values must be text, bytes, or integer".to_string(),
+                                                            "catif header values must be text strings".to_string(),
                                                         ));
                                                     }
                                                 };
@@ -2055,14 +2237,14 @@ impl Cwt {
                                 } else {
                                     None
                                 };
-                                actions.push((
-                                    claim_key,
-                                    CatIfAction {
-                                        status,
-                                        headers,
-                                        kid,
-                                    },
-                                ));
+                                let mut action = CatIfAction::new(status)?;
+                                if let Some(hdrs) = headers {
+                                    action = action.with_headers(hdrs)?;
+                                }
+                                if let Some(k) = kid {
+                                    action = action.with_kid(k);
+                                }
+                                actions.push((claim_key, action));
                             } else {
                                 return Err(CatError::InvalidClaimValue(
                                     "catif action values must be arrays".to_string(),
@@ -2219,8 +2401,8 @@ impl Cwt {
                                         .to_string(),
                                 ));
                             }
-                            request.catr = Some(CatRenewal {
-                                renewal_type: rt,
+                            request.catr = Some(CatRenewal::from_parts_unchecked(
+                                rt,
                                 expadd,
                                 deadline,
                                 cookie_name,
@@ -2228,7 +2410,7 @@ impl Cwt {
                                 cookie_params,
                                 header_params,
                                 status_code,
-                            });
+                            ));
                         }
                     } else {
                         return Err(CatError::InvalidClaimValue(
@@ -2417,6 +2599,44 @@ impl Cwt {
             custom,
         })
     }
+}
+
+/// Extract only the `iss` claim from a CWT payload without running the full
+/// decoder. Called before signature verification so the resolver contract sees
+/// the same `iss` that the (yet-unverified) token asserts; the peeked value is
+/// only trusted for key selection. If the payload later verifies, the same
+/// `iss` is re-parsed by the real decoder and enforced by the validator.
+///
+/// Returns `Ok(None)` if the payload is well-formed CBOR but has no `iss`.
+/// Returns `Err` only if the outer structure is not a CBOR map or an `iss`
+/// entry is present but not a text string — a hostile issuer must not be able
+/// to smuggle bytes/integer-typed `iss` past the resolver.
+pub fn peek_issuer(cbor_payload: &[u8]) -> Result<Option<String>, CatError> {
+    let value: Value = ciborium::de::from_reader(cbor_payload)
+        .map_err(|e| CatError::InvalidCbor(e.to_string()))?;
+    let map = match value {
+        Value::Map(m) => m,
+        _ => return Err(CatError::InvalidTokenFormat),
+    };
+    for (k, v) in map {
+        if let Value::Integer(i) = k {
+            let key: i64 = match i.try_into() {
+                Ok(k) => k,
+                Err(_) => continue,
+            };
+            if key == CLAIM_ISS {
+                match v {
+                    Value::Text(s) => return Ok(Some(s)),
+                    _ => {
+                        return Err(CatError::InvalidClaimValue(
+                            "iss must be a text string".to_string(),
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    Ok(None)
 }
 
 fn decode_composite_claim_with_counters(

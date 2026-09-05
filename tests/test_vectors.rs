@@ -724,8 +724,8 @@ fn test_vector_dpop_jwk_binding() {
     assert_eq!(cnf.jkt, expected_jkt);
 
     let settings = decoded.dpop.catdpop.as_ref().unwrap();
-    assert_eq!(settings.window, Some(60));
-    assert_eq!(settings.honor_jti, Some(true));
+    assert_eq!(settings.window(), Some(60));
+    assert_eq!(settings.honor_jti(), Some(true));
 }
 
 #[test]
@@ -743,8 +743,8 @@ fn test_vector_dpop_no_jti() {
         .into_unvalidated_token();
 
     let settings = decoded.dpop.catdpop.as_ref().unwrap();
-    assert_eq!(settings.window, Some(300));
-    assert_eq!(settings.honor_jti, Some(false));
+    assert_eq!(settings.window(), Some(300));
+    assert_eq!(settings.honor_jti(), Some(false));
     assert!(!settings.should_honor_jti());
 }
 

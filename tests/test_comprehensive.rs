@@ -56,17 +56,10 @@ fn test_comprehensive_token_creation() {
         .interface_data("mobile-interface-v2")
         // DPoP claims
         .confirmation(b"jwk-thumbprint-xyz".to_vec())
-        .dpop_settings(cat_token::CatDpopSettings::new().with_window(300))
+        .dpop_settings(cat_token::CatDpopSettings::new().with_window(300).unwrap())
         // Request claims
-        .if_action(
-            CLAIM_EXP,
-            CatIfAction {
-                status: 401,
-                headers: None,
-                kid: None,
-            },
-        )
-        .renewal(CatRenewal::automatic().with_expadd(3600.0))
+        .if_action(CLAIM_EXP, CatIfAction::new(401).unwrap())
+        .renewal(CatRenewal::automatic().with_expadd(3600.0).unwrap())
         .build()
         .unwrap();
 
@@ -114,14 +107,14 @@ fn test_comprehensive_token_creation() {
         b"jwk-thumbprint-xyz".to_vec()
     );
     assert!(token.dpop.catdpop.is_some());
-    assert_eq!(token.dpop.catdpop.as_ref().unwrap().window, Some(300));
+    assert_eq!(token.dpop.catdpop.as_ref().unwrap().window(), Some(300));
 
     let catif = token.request.catif.as_ref().unwrap();
     assert_eq!(catif[0].0, CLAIM_EXP);
-    assert_eq!(catif[0].1.status, 401);
+    assert_eq!(catif[0].1.status(), 401);
     let catr = token.request.catr.as_ref().unwrap();
-    assert_eq!(catr.renewal_type, CatRenewalType::Automatic);
-    assert_eq!(catr.expadd, Some(3600.0));
+    assert_eq!(catr.renewal_type(), CatRenewalType::Automatic);
+    assert_eq!(catr.expadd(), Some(3600.0));
 }
 
 #[test]
@@ -243,14 +236,7 @@ fn test_cwt_encoding_decoding() {
         .with_version(1)
         .with_subject("test-user")
         .with_confirmation(b"test-confirmation".to_vec())
-        .with_if_action(
-            CLAIM_EXP,
-            CatIfAction {
-                status: 403,
-                headers: None,
-                kid: None,
-            },
-        );
+        .with_if_action(CLAIM_EXP, CatIfAction::new(403).unwrap());
 
     let cwt = Cwt::new(-7, original_token.clone()); // ES256 algorithm
 
@@ -449,18 +435,12 @@ fn test_maximal_token() {
         .with_dpop_settings(
             cat_token::CatDpopSettings::new()
                 .with_window(600)
+                .unwrap()
                 .with_jti_processing(true),
         )
         // All request claims
-        .with_if_action(
-            CLAIM_EXP,
-            CatIfAction {
-                status: 401,
-                headers: None,
-                kid: None,
-            },
-        )
-        .with_renewal(CatRenewal::cookie("token").with_expadd(7200.0));
+        .with_if_action(CLAIM_EXP, CatIfAction::new(401).unwrap())
+        .with_renewal(CatRenewal::cookie("token").with_expadd(7200.0).unwrap());
 
     // Verify all claims are set
     assert!(token.core.iss.is_some());

@@ -59,7 +59,7 @@ fn create_complex_token() -> CatToken {
         .with_issued_at(iat)
         .with_interface_data("mobile-interface-v2")
         .with_confirmation(b"jwk-thumbprint-xyz-padded-to-32b".to_vec())
-        .with_dpop_settings(cat_token::CatDpopSettings::new().with_window(300))
+        .with_dpop_settings(cat_token::CatDpopSettings::new().with_window(300).unwrap())
         .with_ip_address("192.168.1.100")
         .unwrap()
         .with_ip_range("10.0.0.0/8")

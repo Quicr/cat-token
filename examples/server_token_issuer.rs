@@ -48,6 +48,7 @@ fn issue_publisher_token(
         builder = builder.confirmation(cnf.jkt).dpop_settings(
             CatDpopSettings::new()
                 .with_window(300)
+                .unwrap()
                 .with_jti_processing(true),
         );
     }
@@ -116,6 +117,7 @@ fn issue_admin_token(
         .dpop_settings(
             CatDpopSettings::new()
                 .with_window(60)
+                .unwrap()
                 .with_jti_processing(true),
         )
         .build()?;

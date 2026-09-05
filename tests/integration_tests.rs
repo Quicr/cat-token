@@ -337,7 +337,7 @@ fn test_all_cat_claims() {
                 matches: vec![MatchValue::Exact("api.example.com".to_string())],
             },
             HeaderMatchRule {
-                name: "Host".to_string(),
+                name: "X-Forwarded-Host".to_string(),
                 matches: vec![MatchValue::Suffix(".example.org".to_string())],
             },
         ]),

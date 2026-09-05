@@ -3,8 +3,10 @@
 
 #![cfg(feature = "moqt")]
 
-use cat_token::moqt::{C4M_TOKEN_TYPE, MoqtAuthRequest, MoqtScopeBuilder, MoqtValidator};
+use cat_token::moqt::{C4M_TOKEN_TYPE, MoqtScopeBuilder, MoqtValidator, RelayRequestContext};
 use cat_token::*;
+
+const RELAY: &str = "relay";
 
 fn make_validated(token: &CatToken) -> ValidatedToken {
     let key = HmacSha256Algorithm::new(b"test-key-for-roundtrip-000000000");
@@ -14,6 +16,22 @@ fn make_validated(token: &CatToken) -> ValidatedToken {
         .unwrap()
         .validate(&validator)
         .unwrap()
+}
+
+fn ctx(action: MoqtAction, ns: Vec<Vec<u8>>, track: Vec<u8>) -> RelayRequestContext {
+    RelayRequestContext::new(RELAY, action, ns, track)
+}
+
+fn moqt_validator_permissive() -> MoqtValidator {
+    MoqtValidator::new().allow_missing_audience()
+}
+
+fn authorize(
+    v: &MoqtValidator,
+    token: &ValidatedToken,
+    req: &RelayRequestContext,
+) -> Result<cat_token::moqt::AuthorizedRequest, CatError> {
+    v.authorize::<dyn ReplayGuard>(token, req, None, None)
 }
 
 // --- CatTokenBuilder::expires_in ---
@@ -246,46 +264,31 @@ fn test_namespace_path_splits_by_slash() {
         .build()
         .unwrap();
 
-    let validator = MoqtValidator::new();
+    let v = moqt_validator_permissive();
 
     // Exact match on all 3 elements
-    let request = MoqtAuthRequest::new(
+    let request = ctx(
         MoqtAction::Publish,
         vec![b"sports".to_vec(), b"football".to_vec(), b"live".to_vec()],
         b"video".to_vec(),
     );
-    assert!(
-        validator
-            .authorize(&make_validated(&token), &request)
-            .unwrap()
-            .authorized
-    );
+    assert!(authorize(&v, &make_validated(&token), &request).is_ok());
 
     // Wrong first element
-    let request = MoqtAuthRequest::new(
+    let request = ctx(
         MoqtAction::Publish,
         vec![b"music".to_vec(), b"football".to_vec(), b"live".to_vec()],
         b"video".to_vec(),
     );
-    assert!(
-        !validator
-            .authorize(&make_validated(&token), &request)
-            .unwrap()
-            .authorized
-    );
+    assert!(authorize(&v, &make_validated(&token), &request).is_err());
 
     // Wrong second element
-    let request = MoqtAuthRequest::new(
+    let request = ctx(
         MoqtAction::Publish,
         vec![b"sports".to_vec(), b"basketball".to_vec(), b"live".to_vec()],
         b"video".to_vec(),
     );
-    assert!(
-        !validator
-            .authorize(&make_validated(&token), &request)
-            .unwrap()
-            .authorized
-    );
+    assert!(authorize(&v, &make_validated(&token), &request).is_err());
 }
 
 #[test]
@@ -302,20 +305,15 @@ fn test_namespace_path_ignores_empty_segments() {
         .build()
         .unwrap();
 
-    let validator = MoqtValidator::new();
+    let v = moqt_validator_permissive();
 
     // Should only match ["sports", "football"] (empty segments ignored)
-    let request = MoqtAuthRequest::new(
+    let request = ctx(
         MoqtAction::Publish,
         vec![b"sports".to_vec(), b"football".to_vec()],
         b"video".to_vec(),
     );
-    assert!(
-        validator
-            .authorize(&make_validated(&token), &request)
-            .unwrap()
-            .authorized
-    );
+    assert!(authorize(&v, &make_validated(&token), &request).is_ok());
 }
 
 // --- MoqtScopeBuilder::namespace_path tuple-prefix semantics ---
@@ -336,46 +334,31 @@ fn test_namespace_path_allows_additional_trailing_elements() {
         .build()
         .unwrap();
 
-    let validator = MoqtValidator::new();
+    let v = moqt_validator_permissive();
 
     // Exact 2-element match
-    let request = MoqtAuthRequest::new(
+    let request = ctx(
         MoqtAction::Publish,
         vec![b"sports".to_vec(), b"football".to_vec()],
         b"video".to_vec(),
     );
-    assert!(
-        validator
-            .authorize(&make_validated(&token), &request)
-            .unwrap()
-            .authorized
-    );
+    assert!(authorize(&v, &make_validated(&token), &request).is_ok());
 
     // 3 elements — trailing "spain" is allowed (tuple-prefix semantics)
-    let request = MoqtAuthRequest::new(
+    let request = ctx(
         MoqtAction::Publish,
         vec![b"sports".to_vec(), b"football".to_vec(), b"spain".to_vec()],
         b"video".to_vec(),
     );
-    assert!(
-        validator
-            .authorize(&make_validated(&token), &request)
-            .unwrap()
-            .authorized
-    );
+    assert!(authorize(&v, &make_validated(&token), &request).is_ok());
 
     // Partial byte match on a tuple element must NOT work
-    let request = MoqtAuthRequest::new(
+    let request = ctx(
         MoqtAction::Publish,
         vec![b"sports".to_vec(), b"foot".to_vec()],
         b"video".to_vec(),
     );
-    assert!(
-        !validator
-            .authorize(&make_validated(&token), &request)
-            .unwrap()
-            .authorized
-    );
+    assert!(authorize(&v, &make_validated(&token), &request).is_err());
 }
 
 // --- C4M_TOKEN_TYPE constant ---
@@ -433,39 +416,26 @@ fn test_full_roundtrip_new_apis() {
         .allow_unencrypted_privacy_claims();
     assert!(validator.validate(&decoded).is_ok());
 
-    // Authorize operations
+    // Authorize operations — token audience is "relay-01"
     let moqt_validator = MoqtValidator::new();
 
-    let setup_req = MoqtAuthRequest::new(MoqtAction::ClientSetup, vec![], vec![]);
-    assert!(
-        moqt_validator
-            .authorize(&make_validated(&decoded), &setup_req)
-            .unwrap()
-            .authorized
-    );
+    let setup_req = RelayRequestContext::new("relay-01", MoqtAction::ClientSetup, vec![], vec![]);
+    assert!(authorize(&moqt_validator, &make_validated(&decoded), &setup_req).is_ok());
 
-    let publish_req = MoqtAuthRequest::new(
+    let publish_req = RelayRequestContext::new(
+        "relay-01",
         MoqtAction::Publish,
         vec![b"live".to_vec(), b"sports".to_vec(), b"football".to_vec()],
         b"video-1080p".to_vec(),
     );
-    assert!(
-        moqt_validator
-            .authorize(&make_validated(&decoded), &publish_req)
-            .unwrap()
-            .authorized
-    );
+    assert!(authorize(&moqt_validator, &make_validated(&decoded), &publish_req).is_ok());
 
     // Subscribe should be denied (publisher token)
-    let sub_req = MoqtAuthRequest::new(
+    let sub_req = RelayRequestContext::new(
+        "relay-01",
         MoqtAction::Subscribe,
         vec![b"live".to_vec(), b"sports".to_vec(), b"football".to_vec()],
         b"video-1080p".to_vec(),
     );
-    assert!(
-        !moqt_validator
-            .authorize(&make_validated(&decoded), &sub_req)
-            .unwrap()
-            .authorized
-    );
+    assert!(authorize(&moqt_validator, &make_validated(&decoded), &sub_req).is_err());
 }

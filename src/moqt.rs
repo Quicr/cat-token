@@ -2,82 +2,85 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 use crate::{
-    BinaryMatch, CatDpopSettings, CatError, CatToken, DpopProof, DpopValidator, MoqtAction,
-    MoqtScope, NamespaceMatch, ValidatedToken, confirmation_matches_jwk,
+    BinaryMatch, CatDpopSettings, CatError, CatIfAction, CatPorBlockList, CatRenewal, CatToken,
+    DpopProof, DpopValidator, MoqtAction, MoqtScope, NamespaceMatch, ReplayGuard, ValidatedToken,
+    confirmation_matches_jwk, enforce_catnip, enforce_catpor, enforce_catreplay, enforce_catu,
+    validate_all_headers, validate_method,
 };
 
 /// IANA-registered token type for C4M (CAT for MoQ) AUTHORIZATION TOKEN parameter.
 pub const C4M_TOKEN_TYPE: u64 = 0x01;
 
-/// MOQT authorization request
+/// Authorization outcome for a single request. Produced only when every
+/// signed CAT claim on the token was satisfied by the request context.
+/// Carries derived data the caller needs to construct the response:
+/// revalidation policy, the token's `catr` renewal instructions (if any),
+/// and whether the token's `catreplay` mode observed a duplicate cti
+/// (`Prohibited` fails hard; `ReuseDetection` sets this flag for the caller
+/// to log/audit).
 #[derive(Debug, Clone)]
-pub struct MoqtAuthRequest {
-    pub action: MoqtAction,
-    pub namespace: Vec<Vec<u8>>, // Namespace tuple elements
-    pub track: Vec<u8>,
-    pub dpop_proof: Option<DpopProof>,
-}
-
-impl MoqtAuthRequest {
-    pub fn new(action: MoqtAction, namespace: Vec<Vec<u8>>, track: Vec<u8>) -> Self {
-        Self {
-            action,
-            namespace,
-            track,
-            dpop_proof: None,
-        }
-    }
-
-    pub fn with_dpop_proof(mut self, proof: DpopProof) -> Self {
-        self.dpop_proof = Some(proof);
-        self
-    }
-}
-
-/// Result of MOQT authorization check
-#[derive(Debug, Clone)]
-pub struct MoqtAuthResult {
-    pub authorized: bool,
-    pub matched_scope_index: Option<usize>,
+pub struct AuthorizedRequest {
+    pub matched_scope_index: usize,
     pub requires_revalidation: bool,
     pub revalidation_interval: Option<f64>,
+    pub renewal: Option<CatRenewal>,
+    pub reuse_detected: bool,
 }
 
-impl MoqtAuthResult {
-    pub fn denied() -> Self {
+impl AuthorizedRequest {
+    fn allowed(scope_index: usize) -> Self {
         Self {
-            authorized: false,
-            matched_scope_index: None,
+            matched_scope_index: scope_index,
             requires_revalidation: false,
             revalidation_interval: None,
+            renewal: None,
+            reuse_detected: false,
         }
-    }
-
-    pub fn allowed(scope_index: usize) -> Self {
-        Self {
-            authorized: true,
-            matched_scope_index: Some(scope_index),
-            requires_revalidation: false,
-            revalidation_interval: None,
-        }
-    }
-
-    pub fn with_revalidation(mut self, interval: f64) -> Self {
-        self.requires_revalidation = interval > 0.0;
-        self.revalidation_interval = Some(interval);
-        self
     }
 }
 
-/// Context for a relay authorization request, used with `MoqtValidator::authorize_request`.
+/// Context for a relay authorization request, used with
+/// [`MoqtValidator::authorize`].
+///
+/// This is the only supported entry point for authorization. Fields describe the
+/// full request context — a missing field represents an unknown value, not a
+/// wildcard, and will cause authorization to fail closed when a token claim
+/// requires that context (e.g. `catalpn` requires `peer_tls_alpn`).
 #[derive(Debug, Clone)]
 pub struct RelayRequestContext {
+    /// Canonical relay endpoint the client connected to. Matched against the
+    /// token's `aud` claim (if present).
     pub relay_endpoint: String,
+    /// The MOQT action being requested.
     pub action: MoqtAction,
+    /// The full track name namespace tuple.
     pub namespace: Vec<Vec<u8>>,
+    /// The track name.
     pub track: Vec<u8>,
+    /// TLS ALPN identifier negotiated with the peer. Required if the token has
+    /// a `catalpn` claim.
     pub peer_tls_alpn: Option<Vec<u8>>,
+    /// Optional tenant/connection identity carried from a trusted upstream.
+    /// Not enforced by the library — passed through to metrics/audit hooks by
+    /// the caller. Present for callers that partition replay state by tenant.
+    pub tenant_id: Option<String>,
+    /// DPoP proof of possession. Required if the token has a `cnf` claim.
     pub dpop_proof: Option<DpopProof>,
+    /// Fully-qualified request URI. Required if the token has a `catu` claim.
+    pub request_uri: Option<String>,
+    /// HTTP method (or equivalent transport verb). Required if the token has
+    /// a `catm` claim.
+    pub request_method: Option<String>,
+    /// Complete request header set (name, value pairs). Every rule in the
+    /// token's `cath` claim must be satisfied by some header in this list.
+    /// Case-insensitive on name per RFC 9110 §5.1.
+    pub request_headers: Vec<(String, String)>,
+    /// Peer IP address. Required if the token's `catnip` claim contains any
+    /// IP-typed identifier.
+    pub peer_ip: Option<std::net::IpAddr>,
+    /// Peer autonomous system number. Required if the token's `catnip`
+    /// contains any ASN-typed identifier.
+    pub peer_asn: Option<u32>,
 }
 
 impl RelayRequestContext {
@@ -93,7 +96,13 @@ impl RelayRequestContext {
             namespace,
             track,
             peer_tls_alpn: None,
+            tenant_id: None,
             dpop_proof: None,
+            request_uri: None,
+            request_method: None,
+            request_headers: Vec::new(),
+            peer_ip: None,
+            peer_asn: None,
         }
     }
 
@@ -102,8 +111,38 @@ impl RelayRequestContext {
         self
     }
 
+    pub fn with_tenant_id(mut self, tenant: impl Into<String>) -> Self {
+        self.tenant_id = Some(tenant.into());
+        self
+    }
+
     pub fn with_dpop_proof(mut self, proof: DpopProof) -> Self {
         self.dpop_proof = Some(proof);
+        self
+    }
+
+    pub fn with_request_uri(mut self, uri: impl Into<String>) -> Self {
+        self.request_uri = Some(uri.into());
+        self
+    }
+
+    pub fn with_request_method(mut self, method: impl Into<String>) -> Self {
+        self.request_method = Some(method.into());
+        self
+    }
+
+    pub fn with_request_headers(mut self, headers: Vec<(String, String)>) -> Self {
+        self.request_headers = headers;
+        self
+    }
+
+    pub fn with_peer_ip(mut self, ip: std::net::IpAddr) -> Self {
+        self.peer_ip = Some(ip);
+        self
+    }
+
+    pub fn with_peer_asn(mut self, asn: u32) -> Self {
+        self.peer_asn = Some(asn);
         self
     }
 }
@@ -119,6 +158,9 @@ pub struct MoqtValidator {
     dpop_validator: Option<DpopValidator>,
     /// Expected resource URI for DPoP binding (e.g. "moqt://relay.example.com")
     expected_resource: Option<String>,
+    /// Whether to require the relay endpoint to appear in the token's `aud` claim.
+    /// Defaults to true — the audit's fail-closed posture demands this.
+    require_audience_binding: bool,
 }
 
 impl Default for MoqtValidator {
@@ -134,6 +176,7 @@ impl MoqtValidator {
             supports_revalidation: true,
             dpop_validator: None,
             expected_resource: None,
+            require_audience_binding: true,
         }
     }
 
@@ -158,6 +201,14 @@ impl MoqtValidator {
     /// Set the expected resource URI for DPoP binding validation
     pub fn with_expected_resource(mut self, resource: impl Into<String>) -> Self {
         self.expected_resource = Some(resource.into());
+        self
+    }
+
+    /// Allow tokens without an `aud` claim. Tokens that DO carry `aud` are still
+    /// checked against the relay endpoint. Use only if the deployment intentionally
+    /// issues audience-less tokens; the default (audience required) is fail-closed.
+    pub fn allow_missing_audience(mut self) -> Self {
+        self.require_audience_binding = false;
         self
     }
 
@@ -200,155 +251,148 @@ impl MoqtValidator {
         Ok(())
     }
 
-    /// Check if a specific MOQT action is authorized.
-    /// Accepts a `ValidatedToken` to ensure claims have been validated at the type level.
-    pub fn authorize(
-        &self,
-        token: &ValidatedToken,
-        request: &MoqtAuthRequest,
-    ) -> Result<MoqtAuthResult, CatError> {
-        self.validate_moqt_claims(token.claims())?;
-        Ok(self.authorize_inner(token.claims(), request))
-    }
-
-    fn authorize_inner(&self, token: &CatToken, request: &MoqtAuthRequest) -> MoqtAuthResult {
-        let scopes = match &token.moqt.moqt {
-            Some(s) => s,
-            None => return MoqtAuthResult::denied(),
-        };
-
-        for (index, scope) in scopes.iter().enumerate() {
-            if self.scope_matches(scope, request) {
-                let mut result = MoqtAuthResult::allowed(index);
-
-                if let Some(reval) = token.moqt.moqt_reval {
-                    result = result.with_revalidation(reval);
-                }
-
-                return result;
-            }
-        }
-
-        MoqtAuthResult::denied()
-    }
-
-    /// Authorize with full DPoP proof validation including signature verification.
-    pub fn authorize_with_dpop(
-        &self,
-        token: &ValidatedToken,
-        request: &MoqtAuthRequest,
-    ) -> Result<MoqtAuthResult, CatError> {
-        let auth_result = self.authorize(token, request)?;
-        if !auth_result.authorized {
-            return Ok(auth_result);
-        }
-
-        if let Some(ref cnf) = token.claims().dpop.cnf {
-            let proof = request.dpop_proof.as_ref().ok_or_else(|| {
-                CatError::DpopValidationFailed(
-                    "Token requires DPoP proof but none provided".to_string(),
-                )
-            })?;
-
-            let validator = self.dpop_validator.as_ref().ok_or_else(|| {
-                CatError::DpopValidationFailed("DPoP validation not configured".to_string())
-            })?;
-
-            // Check key binding
-            if !confirmation_matches_jwk(cnf, &proof.header.jwk)? {
-                return Err(CatError::InvalidDpopBinding);
-            }
-
-            let issuer = token.claims().core.iss.as_deref();
-
-            // Validate proof without committing JTI — target checks must pass first
-            validator.validate_without_jti_commit(proof, request.action, &cnf.jkt, issuer)?;
-
-            // Verify proof is bound to the requested target before committing JTI
-            if proof.payload.actx.tns != request.namespace {
-                return Err(CatError::DpopValidationFailed(
-                    "DPoP proof namespace does not match request".to_string(),
-                ));
-            }
-            if proof.payload.actx.tn != request.track {
-                return Err(CatError::DpopValidationFailed(
-                    "DPoP proof track does not match request".to_string(),
-                ));
-            }
-
-            // Validate resource binding when expected resource is configured
-            if let Some(ref expected) = self.expected_resource {
-                match &proof.payload.actx.resource {
-                    Some(resource) if resource != expected => {
-                        return Err(CatError::DpopValidationFailed(format!(
-                            "DPoP proof resource '{}' does not match expected '{}'",
-                            resource, expected
-                        )));
-                    }
-                    None => {
-                        return Err(CatError::DpopValidationFailed(
-                            "DPoP proof missing required resource binding".to_string(),
-                        ));
-                    }
-                    _ => {}
-                }
-            }
-
-            // All checks passed — commit JTI to replay cache
-            validator.commit_jti(proof, &cnf.jkt, issuer)?;
-        }
-
-        Ok(auth_result)
-    }
-
-    /// Fail-closed authorization entry point for relay implementations.
+    /// Full fail-closed authorization: enforces every signed CAT claim on the
+    /// token against the supplied `RelayRequestContext`, threading through the
+    /// optional caller-supplied `catpor` block list and `catreplay` guard.
     ///
-    /// Validates MOQT claims, checks audience, checks ALPN binding, performs scope
-    /// matching, and validates DPoP proof (if present) in a single call.
-    pub fn authorize_request(
+    /// A missing piece of request context that a token claim requires (e.g.
+    /// `catu` with no request_uri) is a hard failure — the authorization path
+    /// does not silently allow.
+    ///
+    /// On success, returns an `AuthorizedRequest` carrying:
+    /// - the matched MOQT scope index,
+    /// - the token's revalidation policy (if any),
+    /// - the token's `catr` renewal instructions for the response builder,
+    /// - a `reuse_detected` flag when `catreplay == ReuseDetection` observed
+    ///   a duplicate cti (the request is still authorized in that mode).
+    ///
+    /// Callers who want to surface `catif` action mappings on failure should
+    /// consult `token.claims().request.catif` after mapping the returned
+    /// error to a claim key.
+    pub fn authorize<G: ReplayGuard + ?Sized>(
         &self,
         token: &ValidatedToken,
         ctx: &RelayRequestContext,
-    ) -> Result<MoqtAuthResult, CatError> {
-        self.validate_moqt_claims(token.claims())?;
+        replay_guard: Option<&G>,
+        catpor_block_list: Option<&CatPorBlockList>,
+    ) -> Result<AuthorizedRequest, CatError> {
+        let claims = token.claims();
 
-        if let Some(ref audiences) = token.claims().core.aud
-            && !audiences.contains(&ctx.relay_endpoint)
+        // 1. Structural MOQT validation (scope actions, moqt-reval policy).
+        self.validate_moqt_claims(claims)?;
+
+        // 2. catv version acceptance: unknown non-zero versions must be
+        //    rejected rather than silently accepted.
+        if let Some(v) = claims.cat.catv
+            && v > 1
         {
-            return Err(CatError::InvalidAudience);
+            return Err(CatError::InvalidClaimValue(format!(
+                "catv: unsupported token version {v}"
+            )));
         }
 
-        if let Some(ref token_alpns) = token.claims().cat.catalpn {
-            match &ctx.peer_tls_alpn {
-                Some(peer_alpn) => {
-                    if !token_alpns.iter().any(|a| a == peer_alpn) {
-                        return Err(CatError::InvalidClaimValue(
-                            "peer TLS ALPN does not match token catalpn".to_string(),
-                        ));
-                    }
+        // 3. Audience binding.
+        match &claims.core.aud {
+            Some(audiences) => {
+                if !audiences.contains(&ctx.relay_endpoint) {
+                    return Err(CatError::InvalidAudience);
                 }
-                None => {
-                    return Err(CatError::InvalidClaimValue(
-                        "token requires ALPN binding but no peer ALPN provided".to_string(),
-                    ));
+            }
+            None => {
+                if self.require_audience_binding {
+                    return Err(CatError::MissingRequiredClaim("aud".to_string()));
                 }
             }
         }
 
-        let auth_request = MoqtAuthRequest {
-            action: ctx.action,
-            namespace: ctx.namespace.clone(),
-            track: ctx.track.clone(),
-            dpop_proof: ctx.dpop_proof.clone(),
-        };
-
-        let auth_result = self.authorize_inner(token.claims(), &auth_request);
-        if !auth_result.authorized {
-            return Ok(auth_result);
+        // 4. ALPN.
+        if let Some(ref token_alpns) = claims.cat.catalpn {
+            let peer_alpn = ctx.peer_tls_alpn.as_ref().ok_or_else(|| {
+                CatError::InvalidClaimValue(
+                    "token requires ALPN binding but no peer ALPN provided".to_string(),
+                )
+            })?;
+            if !token_alpns.iter().any(|a| a == peer_alpn) {
+                return Err(CatError::InvalidClaimValue(
+                    "peer TLS ALPN does not match token catalpn".to_string(),
+                ));
+            }
         }
 
-        if let Some(ref cnf) = token.claims().dpop.cnf {
-            let proof = auth_request.dpop_proof.as_ref().ok_or_else(|| {
+        // 5. catu — URI-component restrictions.
+        if claims.cat.catu.is_some() {
+            let uri = ctx.request_uri.as_deref().ok_or_else(|| {
+                CatError::InvalidClaimValue(
+                    "token asserts catu but request context has no request_uri".to_string(),
+                )
+            })?;
+            enforce_catu(claims, uri)?;
+        }
+
+        // 6. catm — HTTP method restrictions.
+        if claims.cat.catm.is_some() {
+            let method = ctx.request_method.as_deref().ok_or_else(|| {
+                CatError::InvalidClaimValue(
+                    "token asserts catm but request context has no request_method".to_string(),
+                )
+            })?;
+            validate_method(claims, method)?;
+        }
+
+        // 7. cath — header restrictions.
+        if claims.cat.cath.is_some() {
+            let headers: Vec<(&str, &str)> = ctx
+                .request_headers
+                .iter()
+                .map(|(k, v)| (k.as_str(), v.as_str()))
+                .collect();
+            validate_all_headers(claims, &headers)?;
+        }
+
+        // 8. catnip — peer network identity restrictions.
+        enforce_catnip(claims, ctx.peer_ip, ctx.peer_asn)?;
+
+        // 9. catpor — probability of rejection. Fail-closed: if the token
+        //    carries catpor and no block list is provided, the caller has
+        //    misconfigured the relay; refuse rather than skip.
+        if claims.cat.catpor.is_some() {
+            let block_list = catpor_block_list.ok_or_else(|| {
+                CatError::InvalidClaimValue(
+                    "token asserts catpor but no block list configured on relay".to_string(),
+                )
+            })?;
+            enforce_catpor(claims, block_list)?;
+        }
+
+        // 10. catreplay — verify the guard is configured when the token
+        //     demands one. The commit is deferred to the end of the pipeline
+        //     so that a request that fails downstream checks does not consume
+        //     the token's cti.
+        let replay_mode = claims.cat.catreplay;
+        let replay_guard_for_commit = match replay_mode {
+            Some(crate::ReplayProtection::Prohibited)
+            | Some(crate::ReplayProtection::ReuseDetection) => {
+                Some(replay_guard.ok_or_else(|| {
+                    CatError::InvalidClaimValue(
+                        "token asserts catreplay but no replay guard configured".to_string(),
+                    )
+                })?)
+            }
+            _ => None,
+        };
+
+        // 11. MOQT scope match.
+        let scope_index = self.match_scope_index(claims, ctx).ok_or_else(|| {
+            CatError::MoqtActionNotAuthorized(format!(
+                "no MOQT scope matches action {:?}",
+                ctx.action
+            ))
+        })?;
+
+        // 12. DPoP proof of possession — verify only; jti commit is deferred
+        //     until after all authorization checks succeed.
+        let dpop_commit = if let Some(ref cnf) = claims.dpop.cnf {
+            let proof = ctx.dpop_proof.as_ref().ok_or_else(|| {
                 CatError::DpopValidationFailed(
                     "Token requires DPoP proof but none provided".to_string(),
                 )
@@ -362,7 +406,7 @@ impl MoqtValidator {
                 return Err(CatError::InvalidDpopBinding);
             }
 
-            let issuer = token.claims().core.iss.as_deref();
+            let issuer = claims.core.iss.as_deref();
             validator.validate_without_jti_commit(proof, ctx.action, &cnf.jkt, issuer)?;
 
             if proof.payload.actx.tns != ctx.namespace {
@@ -393,33 +437,72 @@ impl MoqtValidator {
                 }
             }
 
+            Some((validator, proof, cnf, issuer))
+        } else {
+            None
+        };
+
+        // 13. Commit phase. All authorization checks above have passed; only
+        //     now do we consume replay-state resources so an unauthorized
+        //     request cannot burn a legitimate token's cti.
+        let reuse_detected = if let Some(guard) = replay_guard_for_commit {
+            enforce_catreplay(claims, guard)?
+        } else {
+            false
+        };
+
+        if let Some((validator, proof, cnf, issuer)) = dpop_commit {
             validator.commit_jti(proof, &cnf.jkt, issuer)?;
         }
 
-        Ok(auth_result)
+        let mut authorized = AuthorizedRequest::allowed(scope_index);
+        authorized.reuse_detected = reuse_detected;
+        authorized.renewal = claims.request.catr.clone();
+        if let Some(reval) = claims.moqt.moqt_reval
+            && reval > 0.0
+        {
+            authorized.requires_revalidation = true;
+            authorized.revalidation_interval = Some(reval);
+        }
+        Ok(authorized)
     }
 
-    /// Check if a scope matches the request
-    fn scope_matches(&self, scope: &MoqtScope, request: &MoqtAuthRequest) -> bool {
-        // Check if action is allowed
-        if !scope.allows_action(&request.action) {
+    /// Look up the `catif` action associated with a given claim key. Callers
+    /// can consult this on error to construct a client response consistent
+    /// with the token's `catif` directives.
+    pub fn catif_action_for(token: &CatToken, claim_key: i64) -> Option<&CatIfAction> {
+        token.request.catif.as_ref().and_then(|actions| {
+            actions
+                .iter()
+                .find(|(k, _)| *k == claim_key)
+                .map(|(_, a)| a)
+        })
+    }
+
+    fn match_scope_index(&self, token: &CatToken, ctx: &RelayRequestContext) -> Option<usize> {
+        let scopes = token.moqt.moqt.as_ref()?;
+        scopes
+            .iter()
+            .position(|scope| self.scope_matches(scope, ctx))
+    }
+
+    fn scope_matches(&self, scope: &MoqtScope, ctx: &RelayRequestContext) -> bool {
+        if !scope.allows_action(&ctx.action) {
             return false;
         }
 
-        // Check namespace matches
         // "Matches are performed bytewise against the corresponding field of the Full Track Name"
         if !scope.namespace_matches.is_empty() {
             for (i, ns_match) in scope.namespace_matches.iter().enumerate() {
-                let tuple_elem = request.namespace.get(i).map(|v| v.as_slice());
+                let tuple_elem = ctx.namespace.get(i).map(|v| v.as_slice());
                 if !ns_match.matches(tuple_elem) {
                     return false;
                 }
             }
         }
 
-        // Check track match
         if let Some(ref track_match) = scope.track_match
-            && !track_match.matches(&request.track)
+            && !track_match.matches(&ctx.track)
         {
             return false;
         }
@@ -607,17 +690,33 @@ mod tests {
     use super::*;
     use crate::{CatTokenBuilder, ValidatedToken};
 
+    fn ctx(action: MoqtAction, ns: Vec<Vec<u8>>, track: Vec<u8>) -> RelayRequestContext {
+        RelayRequestContext::new("relay", action, ns, track)
+    }
+
     #[test]
-    fn test_moqt_auth_request() {
-        let request = MoqtAuthRequest::new(
+    fn test_relay_request_context() {
+        let request = ctx(
             MoqtAction::Publish,
             vec![b"example.com".to_vec()],
             b"/stream/video".to_vec(),
         );
-
         assert_eq!(request.action, MoqtAction::Publish);
         assert_eq!(request.namespace, vec![b"example.com".to_vec()]);
         assert_eq!(request.track, b"/stream/video".to_vec());
+    }
+
+    fn authorize_no_guard(
+        validator: &MoqtValidator,
+        token: &CatToken,
+        request: &RelayRequestContext,
+    ) -> Result<AuthorizedRequest, CatError> {
+        validator.authorize::<dyn ReplayGuard>(
+            &ValidatedToken::from_unchecked(token.clone()),
+            request,
+            None,
+            None,
+        )
     }
 
     #[test]
@@ -630,55 +729,49 @@ mod tests {
 
         let token = CatTokenBuilder::new()
             .issuer("https://test.com")
+            .single_audience("relay")
             .moqt_scope(scope)
             .build()
             .unwrap();
 
         let validator = MoqtValidator::new();
 
-        // Should allow
-        let request = MoqtAuthRequest::new(
+        let request = ctx(
             MoqtAction::Publish,
             vec![b"example.com".to_vec()],
             b"/stream/video".to_vec(),
         );
-        let result = validator
-            .authorize(&ValidatedToken::from_unchecked(token.clone()), &request)
-            .unwrap();
-        assert!(result.authorized);
+        assert!(authorize_no_guard(&validator, &token, &request).is_ok());
 
-        // Should deny (wrong action)
-        let request = MoqtAuthRequest::new(
+        let request = ctx(
             MoqtAction::Fetch,
             vec![b"example.com".to_vec()],
             b"/stream/video".to_vec(),
         );
-        let result = validator
-            .authorize(&ValidatedToken::from_unchecked(token.clone()), &request)
-            .unwrap();
-        assert!(!result.authorized);
+        assert!(matches!(
+            authorize_no_guard(&validator, &token, &request),
+            Err(CatError::MoqtActionNotAuthorized(_))
+        ));
 
-        // Should deny (wrong namespace)
-        let request = MoqtAuthRequest::new(
+        let request = ctx(
             MoqtAction::Publish,
             vec![b"other.com".to_vec()],
             b"/stream/video".to_vec(),
         );
-        let result = validator
-            .authorize(&ValidatedToken::from_unchecked(token.clone()), &request)
-            .unwrap();
-        assert!(!result.authorized);
+        assert!(matches!(
+            authorize_no_guard(&validator, &token, &request),
+            Err(CatError::MoqtActionNotAuthorized(_))
+        ));
 
-        // Should deny (wrong track)
-        let request = MoqtAuthRequest::new(
+        let request = ctx(
             MoqtAction::Publish,
             vec![b"example.com".to_vec()],
             b"/other/video".to_vec(),
         );
-        let result = validator
-            .authorize(&ValidatedToken::from_unchecked(token.clone()), &request)
-            .unwrap();
-        assert!(!result.authorized);
+        assert!(matches!(
+            authorize_no_guard(&validator, &token, &request),
+            Err(CatError::MoqtActionNotAuthorized(_))
+        ));
     }
 
     #[test]
@@ -690,6 +783,7 @@ mod tests {
 
         let token = CatTokenBuilder::new()
             .issuer("https://test.com")
+            .single_audience("relay")
             .moqt_scope(scope)
             .moqt_reval(300.0)
             .build()
@@ -697,16 +791,13 @@ mod tests {
 
         let validator = MoqtValidator::new();
 
-        let request = MoqtAuthRequest::new(
+        let request = ctx(
             MoqtAction::Publish,
             vec![b"example.com".to_vec()],
             b"/stream".to_vec(),
         );
-        let result = validator
-            .authorize(&ValidatedToken::from_unchecked(token.clone()), &request)
-            .unwrap();
+        let result = authorize_no_guard(&validator, &token, &request).unwrap();
 
-        assert!(result.authorized);
         assert!(result.requires_revalidation);
         assert_eq!(result.revalidation_interval, Some(300.0));
     }
@@ -755,6 +846,32 @@ mod tests {
     }
 
     #[test]
+    fn test_missing_audience_rejected_by_default() {
+        let scope = MoqtScopeBuilder::new()
+            .publisher()
+            .namespace_exact(b"example.com")
+            .build();
+
+        let token = CatTokenBuilder::new()
+            .issuer("https://test.com")
+            .moqt_scope(scope)
+            .build()
+            .unwrap();
+
+        let validator = MoqtValidator::new();
+        let request = ctx(
+            MoqtAction::Publish,
+            vec![b"example.com".to_vec()],
+            b"/stream".to_vec(),
+        );
+        let result = authorize_no_guard(&validator, &token, &request);
+        assert!(matches!(
+            result,
+            Err(CatError::MissingRequiredClaim(ref c)) if c == "aud"
+        ));
+    }
+
+    #[test]
     fn test_scope_builder_roles() {
         let pub_scope = roles::publisher(b"cdn.example.com", b"/live/");
         assert!(pub_scope.allows_action(&MoqtAction::Publish));
@@ -774,7 +891,6 @@ mod tests {
 
     #[test]
     fn test_first_match_wins() {
-        // Create two scopes - first denies Fetch, second allows it
         let scope1 = MoqtScopeBuilder::new()
             .action(MoqtAction::Publish)
             .namespace_exact(b"example.com")
@@ -789,34 +905,27 @@ mod tests {
 
         let token = CatTokenBuilder::new()
             .issuer("https://test.com")
+            .single_audience("relay")
             .moqt_scopes(vec![scope1, scope2])
             .build()
             .unwrap();
 
         let validator = MoqtValidator::new();
 
-        // Publish should match scope 0
-        let request = MoqtAuthRequest::new(
+        let request = ctx(
             MoqtAction::Publish,
             vec![b"example.com".to_vec()],
             b"/stream/1".to_vec(),
         );
-        let result = validator
-            .authorize(&ValidatedToken::from_unchecked(token.clone()), &request)
-            .unwrap();
-        assert!(result.authorized);
-        assert_eq!(result.matched_scope_index, Some(0));
+        let result = authorize_no_guard(&validator, &token, &request).unwrap();
+        assert_eq!(result.matched_scope_index, 0);
 
-        // Fetch should match scope 1
-        let request = MoqtAuthRequest::new(
+        let request = ctx(
             MoqtAction::Fetch,
             vec![b"example.com".to_vec()],
             b"/stream/1".to_vec(),
         );
-        let result = validator
-            .authorize(&ValidatedToken::from_unchecked(token.clone()), &request)
-            .unwrap();
-        assert!(result.authorized);
-        assert_eq!(result.matched_scope_index, Some(1));
+        let result = authorize_no_guard(&validator, &token, &request).unwrap();
+        assert_eq!(result.matched_scope_index, 1);
     }
 }

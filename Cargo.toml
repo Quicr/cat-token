@@ -3,7 +3,7 @@ name = "cat-token"
 version = "0.2.0"
 edition = "2024"
 authors = ["Suhas Nandakumar"]
-description = "Implementation of CTA-5007-B Common Access Token specification"
+description = "Strict fail-closed profile of CTA-5007-B CAT and CAT-4-MOQT (see docs/PROFILE.md for supported claim forms and rejections)"
 license = "BSD-2-Clause"
 repository = "https://github.com/Quicr/cat-token"
 keywords = ["cat", "cwt", "cbor", "token", "authentication"]
@@ -33,9 +33,6 @@ sfv = "0.9"
 
 # Optional qp-trie dependency
 qp-trie = { version = "0.8", optional = true }
-
-# Optional RFC 3986 compliant URL parser
-url = { version = "2", optional = true }
 
 [dependencies.regex]
 version = "1.10"
@@ -101,4 +98,3 @@ default = ["builtin-trie", "moqt"]
 builtin-trie = []
 qp-trie = ["dep:qp-trie"]
 moqt = []
-rfc3986-url = ["dep:url"]

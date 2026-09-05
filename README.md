@@ -5,7 +5,14 @@
 
 **Linux** [![Ubuntu](https://github.com/Quicr/cat-token/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/Quicr/cat-token/actions/workflows/ci.yml?query=branch%3Amain+os%3Aubuntu-latest) | **macOS** [![macOS](https://github.com/Quicr/cat-token/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/Quicr/cat-token/actions/workflows/ci.yml?query=branch%3Amain+os%3Amacos-latest) | **Windows** [![Windows](https://github.com/Quicr/cat-token/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/Quicr/cat-token/actions/workflows/ci.yml?query=branch%3Amain+os%3Awindows-latest) | [![License](https://img.shields.io/badge/License-BSD_2--Clause-blue.svg)](https://opensource.org/licenses/BSD-2-Clause)
 
-Rust implementation of [Common Access Token for Media Over QUIC Transport (CAT-4-MOQT)](https://github.com/moq-wg/CAT-4-MOQT) based on [CTA-5007-B](https://shop.cta.tech/products/common-access-token).
+Rust implementation of a **strict, fail-closed profile** of
+[Common Access Token for Media Over QUIC Transport (CAT-4-MOQT)](https://github.com/moq-wg/CAT-4-MOQT)
+built on [CTA-5007-B](https://shop.cta.tech/products/common-access-token).
+This is not a full CTA-5007-B recipient: anywhere the base spec allows
+multiple encodings of the same semantic content, this crate accepts one
+form and rejects the rest. See [docs/PROFILE.md](docs/PROFILE.md) for the
+supported-form matrix, the authorization contract, and interoperability
+non-goals.
 
 ## Installation
 

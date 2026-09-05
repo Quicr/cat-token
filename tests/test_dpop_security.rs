@@ -33,7 +33,7 @@ fn test_dpop_uses_embedded_key() {
     .with_jti(generate_jti());
     proof.sign(&alg).unwrap();
 
-    let settings = CatDpopSettings::new().with_window(300);
+    let settings = CatDpopSettings::new().with_window(300).unwrap();
     let validator = DpopValidator::new(settings);
 
     // validate() derives the key from the embedded JWK — no external algorithm needed
@@ -64,7 +64,7 @@ fn test_dpop_wrong_embedded_key_rejected() {
     // Sign with a DIFFERENT key than the one in the JWK header
     proof.sign(&cat_alg).unwrap();
 
-    let settings = CatDpopSettings::new().with_window(300);
+    let settings = CatDpopSettings::new().with_window(300).unwrap();
     let validator = DpopValidator::new(settings);
 
     // Should fail — signature was made with cat_alg but JWK advertises dpop_alg's key
@@ -97,23 +97,26 @@ fn test_dpop_namespace_mismatch_rejected() {
 
     let token = CatTokenBuilder::new()
         .issuer("https://test.com")
+        .single_audience("relay")
         .moqt_scope(scope)
         .confirmation(thumbprint)
         .build()
         .unwrap();
 
-    let settings = CatDpopSettings::new().with_window(300);
+    let settings = CatDpopSettings::new().with_window(300).unwrap();
     let validator = cat_token::moqt::MoqtValidator::new().with_dpop_validation(settings);
 
     // Request for namespace_b — proof is bound to namespace_a
-    let request = cat_token::moqt::MoqtAuthRequest::new(
+    let request = cat_token::moqt::RelayRequestContext::new(
+        "relay",
         MoqtAction::Publish,
         vec![b"namespace_b".to_vec()],
         b"track".to_vec(),
     )
     .with_dpop_proof(proof);
 
-    let result = validator.authorize_with_dpop(&make_validated(&token), &request);
+    let result =
+        validator.authorize::<dyn ReplayGuard>(&make_validated(&token), &request, None, None);
     assert!(result.is_err(), "Should reject namespace mismatch");
     assert!(matches!(result, Err(CatError::DpopValidationFailed(_))));
 }
@@ -142,23 +145,26 @@ fn test_dpop_track_mismatch_rejected() {
 
     let token = CatTokenBuilder::new()
         .issuer("https://test.com")
+        .single_audience("relay")
         .moqt_scope(scope)
         .confirmation(thumbprint)
         .build()
         .unwrap();
 
-    let settings = CatDpopSettings::new().with_window(300);
+    let settings = CatDpopSettings::new().with_window(300).unwrap();
     let validator = cat_token::moqt::MoqtValidator::new().with_dpop_validation(settings);
 
     // Request for track_b — proof is bound to track_a
-    let request = cat_token::moqt::MoqtAuthRequest::new(
+    let request = cat_token::moqt::RelayRequestContext::new(
+        "relay",
         MoqtAction::Publish,
         vec![b"ns".to_vec()],
         b"track_b".to_vec(),
     )
     .with_dpop_proof(proof);
 
-    let result = validator.authorize_with_dpop(&make_validated(&token), &request);
+    let result =
+        validator.authorize::<dyn ReplayGuard>(&make_validated(&token), &request, None, None);
     assert!(result.is_err(), "Should reject track mismatch");
     assert!(matches!(result, Err(CatError::DpopValidationFailed(_))));
 }
@@ -184,20 +190,22 @@ fn test_dpop_matching_target_succeeds() {
 
     let token = CatTokenBuilder::new()
         .issuer("https://test.com")
+        .single_audience("relay")
         .moqt_scope(scope)
         .confirmation(thumbprint)
         .build()
         .unwrap();
 
-    let settings = CatDpopSettings::new().with_window(300);
+    let settings = CatDpopSettings::new().with_window(300).unwrap();
     let validator = cat_token::moqt::MoqtValidator::new().with_dpop_validation(settings);
 
-    let request = cat_token::moqt::MoqtAuthRequest::new(MoqtAction::Publish, ns, track.to_vec())
-        .with_dpop_proof(proof);
+    let request =
+        cat_token::moqt::RelayRequestContext::new("relay", MoqtAction::Publish, ns, track.to_vec())
+            .with_dpop_proof(proof);
 
-    let result = validator.authorize_with_dpop(&make_validated(&token), &request);
+    let result =
+        validator.authorize::<dyn ReplayGuard>(&make_validated(&token), &request, None, None);
     assert!(result.is_ok());
-    assert!(result.unwrap().authorized);
 }
 
 #[test]
@@ -222,6 +230,7 @@ fn test_replay_cache_not_polluted_on_bad_signature() {
 
     let settings = CatDpopSettings::new()
         .with_window(300)
+        .unwrap()
         .with_jti_processing(true);
     let validator = DpopValidator::new(settings);
 
@@ -269,7 +278,7 @@ fn test_dpop_key_mismatch_detected() {
     .with_jti(generate_jti());
     proof.sign(&alg).unwrap();
 
-    let settings = CatDpopSettings::new().with_window(300);
+    let settings = CatDpopSettings::new().with_window(300).unwrap();
     let validator = DpopValidator::new(settings);
 
     // Should fail — embedded JWK thumbprint doesn't match expected

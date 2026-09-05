@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2022 Quicr
 // SPDX-License-Identifier: BSD-2-Clause
 
-use cat_token::moqt::{MoqtAuthRequest, MoqtScopeBuilder, MoqtValidator};
+use cat_token::moqt::{MoqtScopeBuilder, MoqtValidator, RelayRequestContext};
 use cat_token::*;
 use chrono::{Duration, Utc};
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
@@ -54,7 +54,7 @@ fn create_complex_token() -> CatToken {
         .with_issued_at(iat)
         .with_interface_data("mobile-interface-v2")
         .with_confirmation(b"jwk-thumbprint-xyz-padded-to-32b".to_vec())
-        .with_dpop_settings(cat_token::CatDpopSettings::new().with_window(300))
+        .with_dpop_settings(cat_token::CatDpopSettings::new().with_window(300).unwrap())
         .with_ip_address("192.168.1.100")
         .unwrap()
         .with_ip_range("10.0.0.0/8")
@@ -151,13 +151,14 @@ fn bench_moqt_authorization(c: &mut Criterion) {
         .build()
         .unwrap();
 
-    let validator = MoqtValidator::new();
+    let validator = MoqtValidator::new().allow_missing_audience();
 
     let single_validated = make_validated(&single_scope_token);
     let multi_validated = make_validated(&multi_scope_token);
 
     // Matching request (single scope)
-    let matching_request = MoqtAuthRequest::new(
+    let matching_request = RelayRequestContext::new(
+        "relay",
         MoqtAction::Publish,
         vec![b"cdn.example.com".to_vec()],
         b"/stream/live".to_vec(),
@@ -167,14 +168,15 @@ fn bench_moqt_authorization(c: &mut Criterion) {
         b.iter(|| {
             black_box(
                 validator
-                    .authorize(&single_validated, &matching_request)
+                    .authorize::<dyn ReplayGuard>(&single_validated, &matching_request, None, None)
                     .unwrap(),
             )
         })
     });
 
     // Non-matching request (must check all scopes)
-    let non_matching_request = MoqtAuthRequest::new(
+    let non_matching_request = RelayRequestContext::new(
+        "relay",
         MoqtAction::Publish,
         vec![b"other.com".to_vec()],
         b"/stream/live".to_vec(),
@@ -184,14 +186,20 @@ fn bench_moqt_authorization(c: &mut Criterion) {
         b.iter(|| {
             black_box(
                 validator
-                    .authorize(&single_validated, &non_matching_request)
-                    .unwrap(),
+                    .authorize::<dyn ReplayGuard>(
+                        &single_validated,
+                        &non_matching_request,
+                        None,
+                        None,
+                    )
+                    .is_err(),
             )
         })
     });
 
     // Multi-scope - first scope matches
-    let first_match_request = MoqtAuthRequest::new(
+    let first_match_request = RelayRequestContext::new(
+        "relay",
         MoqtAction::Publish,
         vec![b"namespace-0".to_vec()],
         b"/track".to_vec(),
@@ -201,14 +209,20 @@ fn bench_moqt_authorization(c: &mut Criterion) {
         b.iter(|| {
             black_box(
                 validator
-                    .authorize(&multi_validated, &first_match_request)
+                    .authorize::<dyn ReplayGuard>(
+                        &multi_validated,
+                        &first_match_request,
+                        None,
+                        None,
+                    )
                     .unwrap(),
             )
         })
     });
 
     // Multi-scope - last scope matches
-    let last_match_request = MoqtAuthRequest::new(
+    let last_match_request = RelayRequestContext::new(
+        "relay",
         MoqtAction::Publish,
         vec![b"namespace-9".to_vec()],
         b"/track".to_vec(),
@@ -218,14 +232,15 @@ fn bench_moqt_authorization(c: &mut Criterion) {
         b.iter(|| {
             black_box(
                 validator
-                    .authorize(&multi_validated, &last_match_request)
+                    .authorize::<dyn ReplayGuard>(&multi_validated, &last_match_request, None, None)
                     .unwrap(),
             )
         })
     });
 
     // Multi-scope - no match
-    let no_match_request = MoqtAuthRequest::new(
+    let no_match_request = RelayRequestContext::new(
+        "relay",
         MoqtAction::Publish,
         vec![b"namespace-99".to_vec()],
         b"/track".to_vec(),
@@ -235,8 +250,8 @@ fn bench_moqt_authorization(c: &mut Criterion) {
         b.iter(|| {
             black_box(
                 validator
-                    .authorize(&multi_validated, &no_match_request)
-                    .unwrap(),
+                    .authorize::<dyn ReplayGuard>(&multi_validated, &no_match_request, None, None)
+                    .is_err(),
             )
         })
     });
@@ -258,7 +273,7 @@ fn bench_moqt_throughput(c: &mut Criterion) {
         .build()
         .unwrap();
 
-    let validator = MoqtValidator::new();
+    let validator = MoqtValidator::new().allow_missing_audience();
     let validated = make_validated(&token);
 
     // Simulate batch authorization (100K ops target)
@@ -269,7 +284,8 @@ fn bench_moqt_throughput(c: &mut Criterion) {
             |b, &size| {
                 let requests: Vec<_> = (0..size)
                     .map(|i| {
-                        MoqtAuthRequest::new(
+                        RelayRequestContext::new(
+                            "relay",
                             MoqtAction::Publish,
                             vec![b"cdn.example.com".to_vec()],
                             format!("/stream/{}", i).into_bytes(),
@@ -280,7 +296,10 @@ fn bench_moqt_throughput(c: &mut Criterion) {
                 b.iter(|| {
                     let mut authorized = 0;
                     for req in &requests {
-                        if validator.authorize(&validated, req).unwrap().authorized {
+                        if validator
+                            .authorize::<dyn ReplayGuard>(&validated, req, None, None)
+                            .is_ok()
+                        {
                             authorized += 1;
                         }
                     }

@@ -1,6 +1,44 @@
 // SPDX-FileCopyrightText: Copyright (c) 2022 Quicr
 // SPDX-License-Identifier: BSD-2-Clause
 
+//! CAT claim data model.
+//!
+//! # Profile: narrow, deterministic, fail-closed
+//!
+//! This crate implements a deliberately narrow subset of CTA-5007-B. Anywhere
+//! the specification allows multiple representational forms for the same
+//! semantic content, we accept exactly one form on input and produce exactly
+//! one form on output. Deployments that need the full data model should
+//! extend the profile explicitly, with corresponding test vectors, rather
+//! than relying on the decoder silently accepting an alternate encoding.
+//!
+//! The concrete narrowings that differ from the base spec:
+//!
+//! - **`catif` keys**: integer claim keys only. Label strings and label sets
+//!   are rejected. The single supported form maps a specific claim number
+//!   to a single [`CatIfAction`].
+//! - **`catif` headers**: text-string name / text-string value only. Arrays,
+//!   integers, and CWT-nullable claim values are rejected. Names may not
+//!   embed `:` and neither name nor value may contain NUL/CR/LF.
+//! - **`catif` action arrays**: exactly the tuple `(status, headers?, kid?)`.
+//!   Extra positional members are rejected as invalid form rather than
+//!   ignored.
+//! - **`catr` numeric fields**: fractional numeric dates are rejected on
+//!   decode (see [`CatRenewal::with_expadd`], [`CatRenewal::with_deadline`],
+//!   and the top-level date-claim rules).
+//! - **`catalpn`**: byte strings only; the crate does not itself verify
+//!   the peer negotiated ALPN — the relay context must supply that.
+//! - **`catpor` id**: integer or byte-string forms only.
+//! - **URI parsing**: userinfo and fragments are rejected, since they are
+//!   commonly stripped/altered before authorization and diverge the token's
+//!   surface from the actual request.
+//! - **HTTP header values in responses**: control characters (other than
+//!   HTAB) are rejected rather than silently stripped; a hostile issuer
+//!   cannot smuggle CRLF past a downstream serializer.
+//!
+//! Interoperability with implementations that use the broader spec form is
+//! explicitly out of scope for this profile.
+
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -187,11 +225,16 @@ impl ConfirmationClaim {
     }
 }
 
+/// Upper cap for a DPoP acceptance window (seconds). Chosen to keep replay
+/// exposure bounded even under aggressive skew; callers that need more should
+/// re-issue tokens instead.
+pub const CATDPOP_MAX_WINDOW_SECS: i64 = 3600;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Default)]
 pub struct CatDpopSettings {
-    pub crit: Option<Vec<i64>>,
-    pub window: Option<i64>,
-    pub honor_jti: Option<bool>,
+    pub(crate) crit: Option<Vec<i64>>,
+    pub(crate) window: Option<i64>,
+    pub(crate) honor_jti: Option<bool>,
 }
 
 impl CatDpopSettings {
@@ -199,19 +242,65 @@ impl CatDpopSettings {
         Self::default()
     }
 
-    pub fn with_critical(mut self, keys: Vec<i64>) -> Self {
+    /// Set the `crit` list. Fails if any entry is an always-understood key,
+    /// or if the list is empty (CTA-5007-B §4.8.2 requires at least one entry when present).
+    pub fn with_critical(mut self, keys: Vec<i64>) -> Result<Self, crate::CatError> {
+        const ALWAYS_UNDERSTOOD: &[i64] = &[CATDPOP_CRIT, CATDPOP_WINDOW, CATDPOP_HONOR_JTI];
+        for &key in &keys {
+            if ALWAYS_UNDERSTOOD.contains(&key) {
+                return Err(crate::CatError::InvalidClaimValue(format!(
+                    "catdpop crit must not contain always-understood key: {key}"
+                )));
+            }
+        }
         self.crit = Some(keys);
-        self
+        Ok(self)
     }
 
-    pub fn with_window(mut self, seconds: i64) -> Self {
+    /// Set the acceptance window. Fails if the window is non-positive or exceeds
+    /// [`CATDPOP_MAX_WINDOW_SECS`].
+    pub fn with_window(mut self, seconds: i64) -> Result<Self, crate::CatError> {
+        if seconds <= 0 {
+            return Err(crate::CatError::InvalidClaimValue(format!(
+                "catdpop window must be > 0 (got {seconds})"
+            )));
+        }
+        if seconds > CATDPOP_MAX_WINDOW_SECS {
+            return Err(crate::CatError::InvalidClaimValue(format!(
+                "catdpop window {seconds}s exceeds cap {CATDPOP_MAX_WINDOW_SECS}s"
+            )));
+        }
         self.window = Some(seconds);
-        self
+        Ok(self)
     }
 
     pub fn with_jti_processing(mut self, honor: bool) -> Self {
         self.honor_jti = Some(honor);
         self
+    }
+
+    pub fn crit(&self) -> Option<&[i64]> {
+        self.crit.as_deref()
+    }
+
+    pub fn window(&self) -> Option<i64> {
+        self.window
+    }
+
+    pub fn honor_jti(&self) -> Option<bool> {
+        self.honor_jti
+    }
+
+    pub(crate) fn set_crit_from_decode(&mut self, keys: Vec<i64>) {
+        self.crit = Some(keys);
+    }
+
+    pub(crate) fn set_window_from_decode(&mut self, seconds: i64) {
+        self.window = Some(seconds);
+    }
+
+    pub(crate) fn set_honor_jti_from_decode(&mut self, honor: bool) {
+        self.honor_jti = Some(honor);
     }
 
     pub fn validate_crit(&self) -> Result<(), crate::CatError> {
@@ -247,11 +336,79 @@ pub struct DpopClaims {
 /// Per-claim failure action (CTA-5007-B §4.9.1).
 /// When a specific claim fails validation, the action tells the recipient
 /// what HTTP status code, headers, and/or signing key to use in the response.
+///
+/// Constructed via [`CatIfAction::new`]. Fields are private to keep the value
+/// well-formed: status codes must be in the standard HTTP range, and header
+/// name/value pairs are validated for control characters at attach time.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct CatIfAction {
-    pub status: u32,
-    pub headers: Option<Vec<(String, String)>>,
-    pub kid: Option<String>,
+    pub(crate) status: u32,
+    pub(crate) headers: Option<Vec<(String, String)>>,
+    pub(crate) kid: Option<String>,
+}
+
+fn ensure_header_value_clean(name: &str, value: &str) -> Result<(), crate::CatError> {
+    for &b in name.as_bytes() {
+        if b == 0 || b == b'\r' || b == b'\n' || b == b':' {
+            return Err(crate::CatError::InvalidClaimValue(format!(
+                "header name contains prohibited byte: 0x{b:02x}"
+            )));
+        }
+    }
+    for &b in value.as_bytes() {
+        if b == 0 || b == b'\r' || b == b'\n' {
+            return Err(crate::CatError::InvalidClaimValue(format!(
+                "header value for {name:?} contains prohibited control byte: 0x{b:02x}"
+            )));
+        }
+    }
+    Ok(())
+}
+
+impl CatIfAction {
+    /// Create a new per-claim failure action.
+    ///
+    /// The HTTP status code must be in the 100..=599 range.
+    pub fn new(status: u32) -> Result<Self, crate::CatError> {
+        if !(100..=599).contains(&status) {
+            return Err(crate::CatError::InvalidClaimValue(format!(
+                "catif status must be an HTTP status code in 100..=599 (got {status})"
+            )));
+        }
+        Ok(Self {
+            status,
+            headers: None,
+            kid: None,
+        })
+    }
+
+    /// Attach headers. Each name/value must be free of NUL/CR/LF and header
+    /// names must not embed `:`.
+    pub fn with_headers(mut self, headers: Vec<(String, String)>) -> Result<Self, crate::CatError> {
+        for (name, value) in &headers {
+            ensure_header_value_clean(name, value)?;
+        }
+        self.headers = Some(headers);
+        Ok(self)
+    }
+
+    /// Attach a signing key identifier.
+    pub fn with_kid(mut self, kid: impl Into<String>) -> Self {
+        self.kid = Some(kid.into());
+        self
+    }
+
+    pub fn status(&self) -> u32 {
+        self.status
+    }
+
+    pub fn headers(&self) -> Option<&[(String, String)]> {
+        self.headers.as_deref()
+    }
+
+    pub fn kid(&self) -> Option<&str> {
+        self.kid.as_deref()
+    }
 }
 
 /// Renewal type (CTA-5007-B §4.9.2).
@@ -277,16 +434,40 @@ impl CatRenewalType {
 }
 
 /// Token renewal parameters (CTA-5007-B §4.9.2).
+///
+/// Fields are private to keep the value shape consistent with the renewal
+/// type: cookie/header names are only accepted for their respective types,
+/// status codes only for redirect, and floating-point parameters are checked
+/// for NaN/Infinity/negative zero at attach time.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct CatRenewal {
-    pub renewal_type: CatRenewalType,
-    pub expadd: Option<f64>,
-    pub deadline: Option<f64>,
-    pub cookie_name: Option<String>,
-    pub header_name: Option<String>,
-    pub cookie_params: Option<Vec<String>>,
-    pub header_params: Option<Vec<String>>,
-    pub status_code: Option<u32>,
+    pub(crate) renewal_type: CatRenewalType,
+    pub(crate) expadd: Option<f64>,
+    pub(crate) deadline: Option<f64>,
+    pub(crate) cookie_name: Option<String>,
+    pub(crate) header_name: Option<String>,
+    pub(crate) cookie_params: Option<Vec<String>>,
+    pub(crate) header_params: Option<Vec<String>>,
+    pub(crate) status_code: Option<u32>,
+}
+
+fn validate_renewal_number(name: &'static str, v: f64) -> Result<f64, crate::CatError> {
+    if v.is_nan() {
+        return Err(crate::CatError::InvalidClaimValue(format!(
+            "catr {name}: NaN is not permitted"
+        )));
+    }
+    if v.is_infinite() {
+        return Err(crate::CatError::InvalidClaimValue(format!(
+            "catr {name}: infinity is not permitted"
+        )));
+    }
+    if v == 0.0 && v.is_sign_negative() {
+        return Err(crate::CatError::InvalidClaimValue(format!(
+            "catr {name}: negative zero is not permitted"
+        )));
+    }
+    Ok(v)
 }
 
 impl CatRenewal {
@@ -342,14 +523,19 @@ impl CatRenewal {
         }
     }
 
-    pub fn with_expadd(mut self, seconds: f64) -> Self {
-        self.expadd = Some(seconds);
-        self
+    /// Set the `expadd` renewal offset. Rejects NaN, infinity, and negatives;
+    /// silent-fallback variants were removed so an invalid policy input
+    /// cannot become an unsigned or default value.
+    pub fn with_expadd(mut self, seconds: f64) -> Result<Self, crate::CatError> {
+        self.expadd = Some(validate_renewal_number("expadd", seconds)?);
+        Ok(self)
     }
 
-    pub fn with_deadline(mut self, timestamp: f64) -> Self {
-        self.deadline = Some(timestamp);
-        self
+    /// Set the `deadline` renewal timestamp. Rejects NaN, infinity, and
+    /// negatives; see [`with_expadd`](Self::with_expadd).
+    pub fn with_deadline(mut self, timestamp: f64) -> Result<Self, crate::CatError> {
+        self.deadline = Some(validate_renewal_number("deadline", timestamp)?);
+        Ok(self)
     }
 
     pub fn with_cookie_name(mut self, name: impl Into<String>) -> Self {
@@ -375,6 +561,61 @@ impl CatRenewal {
     pub fn with_status_code(mut self, code: u32) -> Self {
         self.status_code = Some(code);
         self
+    }
+
+    pub fn renewal_type(&self) -> CatRenewalType {
+        self.renewal_type
+    }
+
+    pub fn expadd(&self) -> Option<f64> {
+        self.expadd
+    }
+
+    pub fn deadline(&self) -> Option<f64> {
+        self.deadline
+    }
+
+    pub fn cookie_name(&self) -> Option<&str> {
+        self.cookie_name.as_deref()
+    }
+
+    pub fn header_name(&self) -> Option<&str> {
+        self.header_name.as_deref()
+    }
+
+    pub fn cookie_params(&self) -> Option<&[String]> {
+        self.cookie_params.as_deref()
+    }
+
+    pub fn header_params(&self) -> Option<&[String]> {
+        self.header_params.as_deref()
+    }
+
+    pub fn status_code(&self) -> Option<u32> {
+        self.status_code
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn from_parts_unchecked(
+        renewal_type: CatRenewalType,
+        expadd: Option<f64>,
+        deadline: Option<f64>,
+        cookie_name: Option<String>,
+        header_name: Option<String>,
+        cookie_params: Option<Vec<String>>,
+        header_params: Option<Vec<String>>,
+        status_code: Option<u32>,
+    ) -> Self {
+        Self {
+            renewal_type,
+            expadd,
+            deadline,
+            cookie_name,
+            header_name,
+            cookie_params,
+            header_params,
+            status_code,
+        }
     }
 }
 
@@ -769,6 +1010,45 @@ pub enum NetworkIdentifier {
     AsnRange(u32, u32),
 }
 
+fn ip_in_prefix(peer: std::net::IpAddr, prefix: std::net::IpAddr, prefix_len: u8) -> bool {
+    match (peer, prefix) {
+        (std::net::IpAddr::V4(p), std::net::IpAddr::V4(n)) => {
+            let peer_bits = u32::from(p);
+            let net_bits = u32::from(n);
+            if prefix_len == 0 {
+                return true;
+            }
+            if prefix_len > 32 {
+                return false;
+            }
+            let mask: u32 = if prefix_len == 32 {
+                u32::MAX
+            } else {
+                !((1u32 << (32 - prefix_len)) - 1)
+            };
+            (peer_bits & mask) == (net_bits & mask)
+        }
+        (std::net::IpAddr::V6(p), std::net::IpAddr::V6(n)) => {
+            let peer_bits = u128::from(p);
+            let net_bits = u128::from(n);
+            if prefix_len == 0 {
+                return true;
+            }
+            if prefix_len > 128 {
+                return false;
+            }
+            let mask: u128 = if prefix_len == 128 {
+                u128::MAX
+            } else {
+                !((1u128 << (128 - prefix_len)) - 1)
+            };
+            (peer_bits & mask) == (net_bits & mask)
+        }
+        // Address family mismatch — no prefix crosses v4/v6.
+        _ => false,
+    }
+}
+
 impl NetworkIdentifier {
     pub fn from_ip_str(ip: &str) -> Result<Self, crate::CatError> {
         let addr: std::net::IpAddr = ip
@@ -800,6 +1080,44 @@ impl NetworkIdentifier {
             )));
         }
         Ok(Self::IpPrefix(addr, prefix_len))
+    }
+
+    /// Whether this identifier matches the caller-supplied peer IP.
+    /// ASN-typed identifiers do not participate in IP matching.
+    pub fn matches_ip(&self, peer: std::net::IpAddr) -> bool {
+        match self {
+            NetworkIdentifier::IpAddress(addr) => *addr == peer,
+            NetworkIdentifier::IpPrefix(prefix_addr, prefix_len) => {
+                ip_in_prefix(peer, *prefix_addr, *prefix_len)
+            }
+            NetworkIdentifier::Asn(_) | NetworkIdentifier::AsnRange(_, _) => false,
+        }
+    }
+
+    /// Whether this identifier matches the caller-supplied peer ASN.
+    /// IP-typed identifiers do not participate in ASN matching.
+    pub fn matches_asn(&self, peer_asn: u32) -> bool {
+        match self {
+            NetworkIdentifier::Asn(a) => *a == peer_asn,
+            NetworkIdentifier::AsnRange(start, end) => peer_asn >= *start && peer_asn <= *end,
+            NetworkIdentifier::IpAddress(_) | NetworkIdentifier::IpPrefix(_, _) => false,
+        }
+    }
+
+    /// True if this identifier is IP-based (matches against a peer IP).
+    pub fn is_ip_based(&self) -> bool {
+        matches!(
+            self,
+            NetworkIdentifier::IpAddress(_) | NetworkIdentifier::IpPrefix(_, _)
+        )
+    }
+
+    /// True if this identifier is ASN-based.
+    pub fn is_asn_based(&self) -> bool {
+        matches!(
+            self,
+            NetworkIdentifier::Asn(_) | NetworkIdentifier::AsnRange(_, _)
+        )
     }
 
     pub fn validate(&self) -> Result<(), crate::CatError> {
@@ -1331,10 +1649,14 @@ impl CatToken {
         self
     }
 
-    pub fn with_dpop_window(mut self, window_seconds: i64) -> Self {
+    /// Set the DPoP acceptance window. Fails if the value is non-positive or
+    /// exceeds [`CATDPOP_MAX_WINDOW_SECS`]; a silent fallback to defaults would
+    /// let a caller believe it configured a policy while the token carried a
+    /// different (or no) window.
+    pub fn with_dpop_window(mut self, window_seconds: i64) -> Result<Self, crate::CatError> {
         let settings = self.dpop.catdpop.take().unwrap_or_default();
-        self.dpop.catdpop = Some(settings.with_window(window_seconds));
-        self
+        self.dpop.catdpop = Some(settings.with_window(window_seconds)?);
+        Ok(self)
     }
 
     pub fn with_if_action(mut self, claim_key: i64, action: CatIfAction) -> Self {

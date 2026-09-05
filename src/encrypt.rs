@@ -12,7 +12,12 @@ use std::io::Cursor;
 const COSE_TAG_ENCRYPT0: u64 = 16;
 const ALG_A128GCM: i64 = 1;
 const ALG_A256GCM: i64 = 3;
-const MAX_ENCRYPT0_SIZE: usize = 16 * 1024;
+/// Default outer envelope cap (bytes). Also the default cap applied to the
+/// decrypted plaintext when no explicit budget is passed. This keeps a single
+/// decode invocation from consuming more than roughly 2× this many bytes of
+/// working memory even under pathological inputs.
+pub const MAX_ENCRYPT0_SIZE: usize = 16 * 1024;
+const GCM_TAG_BYTES: usize = 16;
 
 pub enum EncryptionAlgorithm {
     A128Gcm,
@@ -124,8 +129,25 @@ pub fn cose_encrypt0(
     Ok(buffer)
 }
 
-/// Decrypt a COSE_Encrypt0 structure.
+/// Decrypt a COSE_Encrypt0 structure. Applies [`MAX_ENCRYPT0_SIZE`] to the
+/// outer envelope AND to the recovered plaintext, so total working memory is
+/// bounded by roughly `2 * MAX_ENCRYPT0_SIZE`.
+///
+/// Use [`cose_decrypt0_with_max_plaintext`] to enforce a tighter shared
+/// budget across outer envelope and inner plaintext.
 pub fn cose_decrypt0(cose_bytes: &[u8], key: &[u8]) -> Result<Vec<u8>, CatError> {
+    cose_decrypt0_with_max_plaintext(cose_bytes, key, MAX_ENCRYPT0_SIZE)
+}
+
+/// Same as [`cose_decrypt0`] but caps the decrypted plaintext at
+/// `max_plaintext_size` bytes. The check is applied against the ciphertext
+/// length pre-decrypt (ciphertext_len - GCM_TAG_BYTES) so we refuse to
+/// allocate a plaintext buffer larger than the caller's budget.
+pub fn cose_decrypt0_with_max_plaintext(
+    cose_bytes: &[u8],
+    key: &[u8],
+    max_plaintext_size: usize,
+) -> Result<Vec<u8>, CatError> {
     if cose_bytes.len() > MAX_ENCRYPT0_SIZE {
         return Err(CatError::InvalidCbor(format!(
             "COSE_Encrypt0 too large: {} bytes exceeds limit of {} bytes",
@@ -182,6 +204,17 @@ pub fn cose_decrypt0(cose_bytes: &[u8], key: &[u8]) -> Result<Vec<u8>, CatError>
         Value::Bytes(b) => b.clone(),
         _ => return Err(CatError::InvalidTokenFormat),
     };
+
+    // Reject before decryption: AES-GCM plaintext length equals
+    // ciphertext_len - 16 (tag). We refuse to decrypt anything whose plaintext
+    // would exceed the caller's budget, so a hostile envelope cannot force us
+    // to allocate an oversized buffer even briefly.
+    let projected_plaintext = ciphertext.len().saturating_sub(GCM_TAG_BYTES);
+    if projected_plaintext > max_plaintext_size {
+        return Err(CatError::InvalidCbor(format!(
+            "COSE_Encrypt0 plaintext {projected_plaintext} bytes exceeds cap of {max_plaintext_size} bytes"
+        )));
+    }
 
     let header_val: Value = ciborium::de::from_reader(protected.as_slice())
         .map_err(|e| CatError::InvalidCbor(e.to_string()))?;

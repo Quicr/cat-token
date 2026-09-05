@@ -30,7 +30,9 @@ fn build_cose_mac0_with_payload(payload_cbor: &[u8], alg: &HmacSha256Algorithm) 
 }
 
 #[test]
-fn test_float_exp_decoded() {
+fn test_fractional_exp_rejected() {
+    // Strict numeric profile: fractional numeric dates must not silently
+    // truncate — they change the authorization semantics.
     let key = HmacSha256Algorithm::generate_key().unwrap();
     let alg = HmacSha256Algorithm::from_secret_key(&key);
 
@@ -47,14 +49,14 @@ fn test_float_exp_decoded() {
     ciborium::ser::into_writer(&ciborium::Value::Map(cbor_map), &mut payload_buf).unwrap();
 
     let cose_bytes = build_cose_mac0_with_payload(&payload_buf, &alg);
-    let decoded = decode_token(&cose_bytes, &alg)
-        .unwrap()
-        .into_unvalidated_token();
-    assert_eq!(decoded.core.exp, Some(1700000000));
+    assert!(matches!(
+        decode_token(&cose_bytes, &alg),
+        Err(CatError::InvalidClaimValue(_))
+    ));
 }
 
 #[test]
-fn test_float_nbf_decoded() {
+fn test_fractional_nbf_rejected() {
     let key = HmacSha256Algorithm::generate_key().unwrap();
     let alg = HmacSha256Algorithm::from_secret_key(&key);
 
@@ -70,14 +72,14 @@ fn test_float_nbf_decoded() {
     ciborium::ser::into_writer(&ciborium::Value::Map(cbor_map), &mut payload_buf).unwrap();
 
     let cose_bytes = build_cose_mac0_with_payload(&payload_buf, &alg);
-    let decoded = decode_token(&cose_bytes, &alg)
-        .unwrap()
-        .into_unvalidated_token();
-    assert_eq!(decoded.core.nbf, Some(1700000000));
+    assert!(matches!(
+        decode_token(&cose_bytes, &alg),
+        Err(CatError::InvalidClaimValue(_))
+    ));
 }
 
 #[test]
-fn test_float_iat_decoded() {
+fn test_fractional_iat_rejected() {
     let key = HmacSha256Algorithm::generate_key().unwrap();
     let alg = HmacSha256Algorithm::from_secret_key(&key);
 
@@ -93,10 +95,35 @@ fn test_float_iat_decoded() {
     ciborium::ser::into_writer(&ciborium::Value::Map(cbor_map), &mut payload_buf).unwrap();
 
     let cose_bytes = build_cose_mac0_with_payload(&payload_buf, &alg);
+    assert!(matches!(
+        decode_token(&cose_bytes, &alg),
+        Err(CatError::InvalidClaimValue(_))
+    ));
+}
+
+#[test]
+fn test_integer_valued_float_exp_accepted() {
+    // A float that is exactly integer-valued is still accepted, since CBOR
+    // may encode integer timestamps as floats and there is no truncation.
+    let key = HmacSha256Algorithm::generate_key().unwrap();
+    let alg = HmacSha256Algorithm::from_secret_key(&key);
+
+    let mut claims = std::collections::BTreeMap::new();
+    claims.insert(1i64, ciborium::Value::Text("iss".to_string()));
+    claims.insert(4i64, ciborium::Value::Float(1700000000.0));
+
+    let cbor_map: Vec<(ciborium::Value, ciborium::Value)> = claims
+        .into_iter()
+        .map(|(k, v)| (ciborium::Value::Integer(k.into()), v))
+        .collect();
+    let mut payload_buf = Vec::new();
+    ciborium::ser::into_writer(&ciborium::Value::Map(cbor_map), &mut payload_buf).unwrap();
+
+    let cose_bytes = build_cose_mac0_with_payload(&payload_buf, &alg);
     let decoded = decode_token(&cose_bytes, &alg)
         .unwrap()
         .into_unvalidated_token();
-    assert_eq!(decoded.informational.iat, Some(1700000000));
+    assert_eq!(decoded.core.exp, Some(1700000000));
 }
 
 #[test]

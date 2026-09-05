@@ -19,6 +19,13 @@ const COSE_TAG_SIGN1: u64 = 18;
 const COSE_TAG_MAC0: u64 = 17;
 const REGEX_CACHE_SIZE: usize = 64;
 
+/// Maximum accepted clock-skew tolerance (seconds). RFC 8392 and CTA-5007-B do
+/// not specify a cap; we bound it defensively so operators cannot inadvertently
+/// disable expiry enforcement by configuring an unbounded tolerance. 1 hour is
+/// well above realistic NTP drift while keeping expired tokens meaningfully
+/// rejected.
+pub const MAX_CLOCK_SKEW_TOLERANCE_SECS: i64 = 3600;
+
 thread_local! {
     static REGEX_CACHE: RefCell<LruCache<String, regex::Regex>> = RefCell::new(
         LruCache::new(NonZeroUsize::new(REGEX_CACHE_SIZE).unwrap())
@@ -37,6 +44,20 @@ impl Default for CatTokenValidator {
     fn default() -> Self {
         Self::new()
     }
+}
+
+fn check_tolerance(name: &str, seconds: i64) -> Result<(), CatError> {
+    if seconds < 0 {
+        return Err(CatError::InvalidClaimValue(format!(
+            "{name} must not be negative"
+        )));
+    }
+    if seconds > MAX_CLOCK_SKEW_TOLERANCE_SECS {
+        return Err(CatError::InvalidClaimValue(format!(
+            "{name} {seconds}s exceeds cap of {MAX_CLOCK_SKEW_TOLERANCE_SECS}s"
+        )));
+    }
+    Ok(())
 }
 
 impl CatTokenValidator {
@@ -61,11 +82,7 @@ impl CatTokenValidator {
     }
 
     pub fn with_clock_skew_tolerance(mut self, tolerance_seconds: i64) -> Result<Self, CatError> {
-        if tolerance_seconds < 0 {
-            return Err(CatError::InvalidClaimValue(
-                "clock skew tolerance must not be negative".to_string(),
-            ));
-        }
+        check_tolerance("clock skew tolerance", tolerance_seconds)?;
         self.exp_tolerance = tolerance_seconds;
         self.nbf_tolerance = tolerance_seconds;
         Ok(self)
@@ -76,11 +93,8 @@ impl CatTokenValidator {
         exp_tolerance: i64,
         nbf_tolerance: i64,
     ) -> Result<Self, CatError> {
-        if exp_tolerance < 0 || nbf_tolerance < 0 {
-            return Err(CatError::InvalidClaimValue(
-                "tolerance values must not be negative".to_string(),
-            ));
-        }
+        check_tolerance("exp tolerance", exp_tolerance)?;
+        check_tolerance("nbf tolerance", nbf_tolerance)?;
         self.exp_tolerance = exp_tolerance;
         self.nbf_tolerance = nbf_tolerance;
         Ok(self)
@@ -102,16 +116,28 @@ impl CatTokenValidator {
     ) -> Result<(), CatError> {
         let now = Utc::now().timestamp();
 
-        if let Some(exp) = token.core.exp
-            && now > exp.saturating_add(self.exp_tolerance)
-        {
-            return Err(CatError::TokenExpired);
+        if let Some(exp) = token.core.exp {
+            let effective_exp = exp.checked_add(self.exp_tolerance).ok_or_else(|| {
+                CatError::InvalidClaimValue(
+                    "exp + tolerance overflows i64 — reject rather than accept an unbounded window"
+                        .to_string(),
+                )
+            })?;
+            if now > effective_exp {
+                return Err(CatError::TokenExpired);
+            }
         }
 
-        if let Some(nbf) = token.core.nbf
-            && now < nbf.saturating_sub(self.nbf_tolerance)
-        {
-            return Err(CatError::TokenNotYetValid);
+        if let Some(nbf) = token.core.nbf {
+            let effective_nbf = nbf.checked_sub(self.nbf_tolerance).ok_or_else(|| {
+                CatError::InvalidClaimValue(
+                    "nbf - tolerance underflows i64 — reject rather than accept an unbounded window"
+                        .to_string(),
+                )
+            })?;
+            if now < effective_nbf {
+                return Err(CatError::TokenNotYetValid);
+            }
         }
 
         if let Some(ref expected_issuers) = self.expected_issuers {
@@ -330,33 +356,18 @@ pub fn apply_match_value(mv: &crate::claims::MatchValue, input: &str) -> bool {
     }
 }
 
-/// Validate an HTTP header against `cath` rules.
-/// Header name comparison is case-insensitive per CTA-5007-B §4.6.13.
-pub fn validate_header(token: &CatToken, name: &str, value: &str) -> Result<(), CatError> {
-    if let Some(ref rules) = token.cat.cath {
-        for rule in rules {
-            if rule.name.eq_ignore_ascii_case(name) {
-                let unfolded = unfold_header_value(value);
-                if !rule
-                    .matches
-                    .iter()
-                    .any(|mv| apply_match_value(mv, &unfolded))
-                {
-                    return Err(CatError::InvalidClaimValue(format!(
-                        "Header '{name}' value does not match any rule"
-                    )));
-                }
-                return Ok(());
-            }
-        }
-    }
-    Ok(())
-}
-
-/// Validate all `cath` header rules against the provided request headers.
-/// Every header rule in the token must be satisfied by at least one matching
-/// header in `request_headers`. Returns an error if any required header is
-/// missing or fails to match.
+/// Validate every `cath` header rule against the request's full header set.
+///
+/// This is the only supported entry point for `cath` enforcement. It is
+/// fail-closed: every rule in the token must be satisfied by at least one
+/// matching header in `request_headers`, and a missing header is a failure.
+///
+/// Header name comparison is case-insensitive per CTA-5007-B §4.6.13. Values
+/// are unfolded per RFC 9110 §5.2 before matching.
+///
+/// A previous single-header entry point that silently succeeded when the
+/// caller failed to check a header has been removed: callers must pass the
+/// complete header list so no rule can be bypassed.
 pub fn validate_all_headers(
     token: &CatToken,
     request_headers: &[(&str, &str)],
@@ -415,6 +426,142 @@ pub fn unfold_header_value(value: &str) -> String {
         }
     }
     result
+}
+
+/// Caller-side replay guard used to enforce the token's `catreplay` claim.
+///
+/// Implementations back this with whatever storage matches the deployment
+/// (e.g. in-memory LRU, Redis, distributed key-value store). The
+/// authorization pipeline calls `check_and_record` before granting the
+/// request: the guard returns whether the token's cti has been seen
+/// previously and atomically records the observation for future calls.
+///
+/// Called only when the token carries a `catreplay` claim that requires
+/// per-cti bookkeeping (`Prohibited` or `ReuseDetection`).
+pub trait ReplayGuard: Send + Sync {
+    /// Returns true if the token's `cti` has been observed before. Records
+    /// this observation atomically so a concurrent request sees the same
+    /// answer. Callers pass the token's `cti` (which the encoder guarantees
+    /// is non-empty when `catreplay` is `Prohibited` or `ReuseDetection`).
+    fn check_and_record(&self, cti: &[u8]) -> Result<bool, CatError>;
+}
+
+/// Enforce the token's `catreplay` claim using the supplied guard.
+///
+/// - `Permitted`: no-op; the token allows unlimited reuse.
+/// - `Prohibited`: on first observation, `Ok(false)`; on any repeat,
+///   `Err(ReplayDetected)`.
+/// - `ReuseDetection`: on first observation, `Ok(false)`; on repeat,
+///   `Ok(true)` — the caller may still authorize but should flag the reuse
+///   for audit. The return value signals whether reuse was detected.
+///
+/// Fail-closed: a token that requires replay bookkeeping but has no `cti` is
+/// rejected. A guard-side error propagates as `Err`.
+pub fn enforce_catreplay<G: ReplayGuard + ?Sized>(
+    token: &CatToken,
+    guard: &G,
+) -> Result<bool, CatError> {
+    let mode = match token.cat.catreplay {
+        Some(m) => m,
+        None => return Ok(false),
+    };
+    match mode {
+        crate::claims::ReplayProtection::Permitted => Ok(false),
+        crate::claims::ReplayProtection::Prohibited => {
+            let cti = token.core.cti.as_ref().ok_or_else(|| {
+                CatError::MissingRequiredClaim("cti required when catreplay=Prohibited".to_string())
+            })?;
+            if guard.check_and_record(cti)? {
+                Err(CatError::ReplayAttackDetected)
+            } else {
+                Ok(false)
+            }
+        }
+        crate::claims::ReplayProtection::ReuseDetection => {
+            let cti = token.core.cti.as_ref().ok_or_else(|| {
+                CatError::MissingRequiredClaim(
+                    "cti required when catreplay=ReuseDetection".to_string(),
+                )
+            })?;
+            let seen = guard.check_and_record(cti)?;
+            Ok(seen)
+        }
+    }
+}
+
+/// Enforce a token's `catu` URI match rules against a request URI. Fail-closed:
+/// every rule in the token must be satisfied by at least one match value on
+/// the corresponding component of `request_uri`. A missing token claim is a
+/// no-op; a malformed request URI or an unsatisfied rule is an error.
+pub fn enforce_catu(token: &CatToken, request_uri: &str) -> Result<(), CatError> {
+    let rules = match token.cat.catu.as_ref() {
+        Some(r) => r,
+        None => return Ok(()),
+    };
+    let components = crate::uri::decompose_uri(request_uri)?;
+    for rule in rules {
+        let target = components.component(rule.component);
+        if !rule.matches.iter().any(|mv| apply_match_value(mv, target)) {
+            return Err(CatError::InvalidClaimValue(format!(
+                "catu: URI component {} does not match any allowed value",
+                rule.component
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Enforce a token's `catnip` (network identifier) claim against the peer's
+/// IP address and/or ASN. Fail-closed: if the token has any IP-typed
+/// identifier, the caller must supply `peer_ip`; likewise for ASN-typed
+/// identifiers and `peer_asn`. Approval requires at least one identifier
+/// (across both families) to match.
+pub fn enforce_catnip(
+    token: &CatToken,
+    peer_ip: Option<std::net::IpAddr>,
+    peer_asn: Option<u32>,
+) -> Result<(), CatError> {
+    let nips = match token.cat.catnip.as_ref() {
+        Some(n) => n,
+        None => return Ok(()),
+    };
+    if nips.is_empty() {
+        return Ok(());
+    }
+
+    let has_ip_rule = nips.iter().any(|n| n.is_ip_based());
+    let has_asn_rule = nips.iter().any(|n| n.is_asn_based());
+
+    if has_ip_rule && peer_ip.is_none() {
+        return Err(CatError::InvalidClaimValue(
+            "catnip: token asserts IP restriction but request context has no peer IP".to_string(),
+        ));
+    }
+    if has_asn_rule && peer_asn.is_none() {
+        return Err(CatError::InvalidClaimValue(
+            "catnip: token asserts ASN restriction but request context has no peer ASN".to_string(),
+        ));
+    }
+
+    let matched = nips.iter().any(|n| {
+        if let Some(ip) = peer_ip
+            && n.matches_ip(ip)
+        {
+            return true;
+        }
+        if let Some(asn) = peer_asn
+            && n.matches_asn(asn)
+        {
+            return true;
+        }
+        false
+    });
+    if !matched {
+        return Err(CatError::InvalidClaimValue(
+            "catnip: peer network identifier does not match any token identifier".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 /// Block list for catpor probability-of-rejection enforcement.
@@ -658,9 +805,9 @@ impl CatTokenBuilder {
         self
     }
 
-    pub fn dpop_window(mut self, window_seconds: i64) -> Self {
-        self.inner = self.inner.with_dpop_window(window_seconds);
-        self
+    pub fn dpop_window(mut self, window_seconds: i64) -> Result<Self, CatError> {
+        self.inner = self.inner.with_dpop_window(window_seconds)?;
+        Ok(self)
     }
 
     pub fn if_action(mut self, claim_key: i64, action: crate::claims::CatIfAction) -> Self {
@@ -899,7 +1046,16 @@ pub fn decode_encrypted_token_with_limits(
     signing_algorithm: &dyn CryptographicAlgorithm,
     limits: &CwtLimits,
 ) -> Result<VerifiedToken, CatError> {
-    let inner_bytes = crate::encrypt::cose_decrypt0(cose_bytes, encryption_key)?;
+    // The inner signed token is bounded by MAX_TOKEN_SIZE; the CBOR payload
+    // inside that signed token is further bounded by limits.max_cbor_payload_size.
+    // Use the tighter of the two so a hostile Encrypt0 cannot bypass the CBOR
+    // budget by hiding oversize plaintext inside an outer envelope.
+    let max_plaintext = MAX_TOKEN_SIZE.min(limits.max_cbor_payload_size());
+    let inner_bytes = crate::encrypt::cose_decrypt0_with_max_plaintext(
+        cose_bytes,
+        encryption_key,
+        max_plaintext,
+    )?;
     let verified = decode_token_with_limits(&inner_bytes, signing_algorithm, limits)?;
     let header = verified.header().clone();
     Ok(VerifiedToken::new(
@@ -1042,10 +1198,17 @@ pub fn decode_token_with_resolver_and_limits(
 ) -> Result<VerifiedToken, CatError> {
     let envelope = parse_cose_envelope(cose_bytes)?;
 
+    // Peek `iss` from the still-unverified payload so the resolver can enforce
+    // an (iss, kid, alg) exact match. The peeked value is only trusted for key
+    // selection: if the wrong key is selected, signature verification below
+    // rejects the token, and if the right key is selected the full decoder
+    // re-parses `iss` for downstream validation.
+    let peeked_issuer = crate::cwt::peek_issuer(&envelope.payload_cbor)?;
+
     let hint = crate::key_resolver::KeyHint {
         algorithm_id: envelope.header_alg,
         kid: envelope.header_kid.clone(),
-        issuer: None,
+        issuer: peeked_issuer,
     };
     let algorithm = resolver.resolve(&hint)?;
 
@@ -1074,10 +1237,12 @@ pub fn decode_token_with_admission_and_limits(
     };
     policy.check(cose_bytes, &header)?;
 
+    let peeked_issuer = crate::cwt::peek_issuer(&envelope.payload_cbor)?;
+
     let hint = crate::key_resolver::KeyHint {
         algorithm_id: envelope.header_alg,
         kid: envelope.header_kid.clone(),
-        issuer: None,
+        issuer: peeked_issuer,
     };
     let algorithm = resolver.resolve(&hint)?;
 

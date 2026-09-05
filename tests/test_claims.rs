@@ -88,33 +88,29 @@ fn test_dpop_claims() {
     let jkt = b"confirmation-key".to_vec();
     let token = CatToken::new()
         .with_confirmation(jkt.clone())
-        .with_dpop_settings(CatDpopSettings::new().with_window(300));
+        .with_dpop_settings(CatDpopSettings::new().with_window(300).unwrap());
 
     assert!(token.dpop.cnf.is_some());
     assert_eq!(token.dpop.cnf.as_ref().unwrap().jkt, jkt);
     assert!(token.dpop.catdpop.is_some());
-    assert_eq!(token.dpop.catdpop.as_ref().unwrap().window, Some(300));
+    assert_eq!(token.dpop.catdpop.as_ref().unwrap().window(), Some(300));
 }
 
 #[test]
 fn test_request_claims() {
-    let action = CatIfAction {
-        status: 401,
-        headers: None,
-        kid: None,
-    };
+    let action = CatIfAction::new(401).unwrap();
     let token = CatToken::new()
         .with_if_action(CLAIM_EXP, action.clone())
-        .with_renewal(CatRenewal::automatic().with_expadd(3600.0));
+        .with_renewal(CatRenewal::automatic().with_expadd(3600.0).unwrap());
 
     let catif = token.request.catif.unwrap();
     assert_eq!(catif.len(), 1);
     assert_eq!(catif[0].0, CLAIM_EXP);
-    assert_eq!(catif[0].1.status, 401);
+    assert_eq!(catif[0].1.status(), 401);
 
     let catr = token.request.catr.unwrap();
-    assert_eq!(catr.renewal_type, CatRenewalType::Automatic);
-    assert_eq!(catr.expadd, Some(3600.0));
+    assert_eq!(catr.renewal_type(), CatRenewalType::Automatic);
+    assert_eq!(catr.expadd(), Some(3600.0));
 }
 
 #[test]
@@ -159,14 +155,7 @@ fn test_token_builder() {
         .version(1)
         .subject("user456")
         .confirmation(jkt.clone())
-        .if_action(
-            CLAIM_EXP,
-            CatIfAction {
-                status: 403,
-                headers: None,
-                kid: None,
-            },
-        )
+        .if_action(CLAIM_EXP, CatIfAction::new(403).unwrap())
         .build()
         .unwrap();
 
@@ -176,7 +165,7 @@ fn test_token_builder() {
     assert!(token.dpop.cnf.is_some());
     assert_eq!(token.dpop.cnf.as_ref().unwrap().jkt, jkt);
     assert!(token.request.catif.is_some());
-    assert_eq!(token.request.catif.unwrap()[0].1.status, 403);
+    assert_eq!(token.request.catif.unwrap()[0].1.status(), 403);
 }
 
 #[test]

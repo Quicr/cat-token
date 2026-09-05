@@ -42,8 +42,8 @@ fn test_cath_case_insensitive_name() {
         name: "Content-Type".to_string(),
         matches: vec![claims::MatchValue::Exact("text/html".to_string())],
     }]);
-    assert!(validate_header(&token, "content-type", "text/html").is_ok());
-    assert!(validate_header(&token, "CONTENT-TYPE", "text/html").is_ok());
+    assert!(validate_all_headers(&token, &[("content-type", "text/html")]).is_ok());
+    assert!(validate_all_headers(&token, &[("CONTENT-TYPE", "text/html")]).is_ok());
 }
 
 #[test]
@@ -53,7 +53,7 @@ fn test_cath_value_mismatch() {
         name: "Content-Type".to_string(),
         matches: vec![claims::MatchValue::Exact("text/html".to_string())],
     }]);
-    assert!(validate_header(&token, "Content-Type", "application/json").is_err());
+    assert!(validate_all_headers(&token, &[("Content-Type", "application/json")]).is_err());
 }
 
 #[test]
@@ -63,14 +63,27 @@ fn test_cath_prefix_match() {
         name: "Authorization".to_string(),
         matches: vec![claims::MatchValue::Prefix("Bearer ".to_string())],
     }]);
-    assert!(validate_header(&token, "authorization", "Bearer abc123").is_ok());
-    assert!(validate_header(&token, "authorization", "Basic abc123").is_err());
+    assert!(validate_all_headers(&token, &[("authorization", "Bearer abc123")]).is_ok());
+    assert!(validate_all_headers(&token, &[("authorization", "Basic abc123")]).is_err());
 }
 
 #[test]
 fn test_cath_absent_allows_all() {
     let token = CatToken::new();
-    assert!(validate_header(&token, "Any-Header", "any-value").is_ok());
+    assert!(validate_all_headers(&token, &[("Any-Header", "any-value")]).is_ok());
+}
+
+#[test]
+fn test_cath_missing_required_header_rejected() {
+    // A cath rule with no matching header in the request must fail closed:
+    // this was the subtle bug in the removed single-header helper.
+    let mut token = CatToken::new();
+    token.cat.cath = Some(vec![claims::HeaderMatchRule {
+        name: "Content-Type".to_string(),
+        matches: vec![claims::MatchValue::Exact("text/html".to_string())],
+    }]);
+    assert!(validate_all_headers(&token, &[("X-Other", "value")]).is_err());
+    assert!(validate_all_headers(&token, &[]).is_err());
 }
 
 // --- header folding (RFC 9110 §5.2) ---
