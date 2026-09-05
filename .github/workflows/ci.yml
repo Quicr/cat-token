@@ -48,19 +48,19 @@ jobs:
       run: cargo fmt --all -- --check
 
     - name: Run clippy
-      run: cargo clippy --all-targets --all-features -- -D warnings
+      run: cargo clippy --locked --all-targets --all-features -- -D warnings
 
     - name: Build
-      run: cargo build --verbose
+      run: cargo build --locked --verbose
 
     - name: Run tests
-      run: cargo test --verbose
+      run: cargo test --locked --verbose
 
     - name: Run integration tests
-      run: cargo test --test integration_tests --verbose
+      run: cargo test --locked --test integration_tests --verbose
 
     - name: Build CLI binary
-      run: cargo build --bin cat-cli --verbose
+      run: cargo build --locked --bin cat-cli --verbose
 
   feature-matrix:
     name: Feature Matrix
@@ -82,13 +82,13 @@ jobs:
       uses: dtolnay/rust-toolchain@stable
 
     - name: Build with features '${{ matrix.features }}'
-      run: cargo build --no-default-features --features "${{ matrix.features }}"
+      run: cargo build --locked --no-default-features --features "${{ matrix.features }}"
 
     - name: Test with features '${{ matrix.features }}'
-      run: cargo test --no-default-features --features "${{ matrix.features }}"
+      run: cargo test --locked --no-default-features --features "${{ matrix.features }}"
 
     - name: Clippy with features '${{ matrix.features }}'
-      run: cargo clippy --no-default-features --features "${{ matrix.features }}" -- -D warnings
+      run: cargo clippy --locked --no-default-features --features "${{ matrix.features }}" -- -D warnings
 
   cargo-deny:
     name: Dependency Audit
@@ -112,7 +112,7 @@ jobs:
       run: cargo install cargo-tarpaulin
 
     - name: Generate code coverage
-      run: cargo tarpaulin --verbose --all-features --workspace --timeout 120 --out xml
+      run: cargo tarpaulin --locked --verbose --all-features --workspace --timeout 120 --out xml
 
     - name: Upload to codecov.io
       uses: codecov/codecov-action@v5

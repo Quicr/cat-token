@@ -96,19 +96,26 @@ impl Default for KeyRingResolver {
 
 impl KeyResolver for KeyRingResolver {
     fn resolve(&self, hint: &KeyHint) -> Result<&dyn CryptographicAlgorithm, CatError> {
-        if let Some(kid) = &hint.kid
-            && let Some(alg) = self.keys.get(kid.as_slice())
-        {
-            return Ok(alg.as_ref());
+        match &hint.kid {
+            Some(kid) => self
+                .keys
+                .get(kid.as_slice())
+                .map(|a| a.as_ref() as &dyn CryptographicAlgorithm)
+                .ok_or_else(|| {
+                    CatError::CryptoError(format!(
+                        "no key found for kid: {}",
+                        String::from_utf8_lossy(kid)
+                    ))
+                }),
+            None => self
+                .default
+                .as_ref()
+                .map(|a| a.as_ref() as &dyn CryptographicAlgorithm)
+                .ok_or_else(|| {
+                    CatError::CryptoError(
+                        "no kid in token and no default key configured".to_string(),
+                    )
+                }),
         }
-
-        if let Some(default) = &self.default {
-            return Ok(default.as_ref());
-        }
-
-        Err(CatError::CryptoError(match &hint.kid {
-            Some(kid) => format!("no key found for kid: {}", String::from_utf8_lossy(kid)),
-            None => "no key found and no default configured".to_string(),
-        }))
     }
 }

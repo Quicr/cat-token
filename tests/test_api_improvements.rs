@@ -359,12 +359,7 @@ fn test_namespace_path_allows_additional_trailing_elements() {
 
 #[test]
 fn test_c4m_token_type_value() {
-    // "c4m" = 0x63 ('c'), 0x34 ('4'), 0x6d ('m') → 0x63346d
-    assert_eq!(C4M_TOKEN_TYPE, 0x63346d);
-    assert_eq!(
-        C4M_TOKEN_TYPE,
-        (b'c' as u64) << 16 | (b'4' as u64) << 8 | (b'm' as u64)
-    );
+    assert_eq!(C4M_TOKEN_TYPE, 0x01);
 }
 
 // --- Full round-trip with new APIs ---

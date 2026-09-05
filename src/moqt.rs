@@ -7,8 +7,7 @@ use crate::{
 };
 
 /// IANA-registered token type for C4M (CAT for MoQ) AUTHORIZATION TOKEN parameter.
-/// Value: "c4m" encoded as 24-bit big-endian integer (0x63 = 'c', 0x34 = '4', 0x6d = 'm').
-pub const C4M_TOKEN_TYPE: u64 = 0x63346d;
+pub const C4M_TOKEN_TYPE: u64 = 0x01;
 
 /// MOQT authorization request
 #[derive(Debug, Clone)]
@@ -79,6 +78,8 @@ pub struct MoqtValidator {
     supports_revalidation: bool,
     /// DPoP validator for proof-of-possession
     dpop_validator: Option<DpopValidator>,
+    /// Expected resource URI for DPoP binding (e.g. "moqt://relay.example.com")
+    expected_resource: Option<String>,
 }
 
 impl Default for MoqtValidator {
@@ -93,6 +94,7 @@ impl MoqtValidator {
             min_revalidation_interval: None,
             supports_revalidation: true,
             dpop_validator: None,
+            expected_resource: None,
         }
     }
 
@@ -111,6 +113,12 @@ impl MoqtValidator {
     /// Enable DPoP validation with settings
     pub fn with_dpop_validation(mut self, settings: CatDpopSettings) -> Self {
         self.dpop_validator = Some(DpopValidator::new(settings));
+        self
+    }
+
+    /// Set the expected resource URI for DPoP binding validation
+    pub fn with_expected_resource(mut self, resource: impl Into<String>) -> Self {
+        self.expected_resource = Some(resource.into());
         self
     }
 
@@ -225,6 +233,24 @@ impl MoqtValidator {
                 return Err(CatError::DpopValidationFailed(
                     "DPoP proof track does not match request".to_string(),
                 ));
+            }
+
+            // Validate resource binding when expected resource is configured
+            if let Some(ref expected) = self.expected_resource {
+                match &proof.payload.actx.resource {
+                    Some(resource) if resource != expected => {
+                        return Err(CatError::DpopValidationFailed(format!(
+                            "DPoP proof resource '{}' does not match expected '{}'",
+                            resource, expected
+                        )));
+                    }
+                    None => {
+                        return Err(CatError::DpopValidationFailed(
+                            "DPoP proof missing required resource binding".to_string(),
+                        ));
+                    }
+                    _ => {}
+                }
             }
 
             // All checks passed — commit JTI to replay cache

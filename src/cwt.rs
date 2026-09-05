@@ -133,6 +133,11 @@ fn validate_float(f: f64, claim_name: &str) -> Result<(), CatError> {
             "{claim_name}: NaN is not permitted per CTA-5007-B §4.5"
         )));
     }
+    if f.is_infinite() {
+        return Err(CatError::InvalidClaimValue(format!(
+            "{claim_name}: infinity is not permitted per CTA-5007-B §4.5"
+        )));
+    }
     if f == 0.0 && f.is_sign_negative() {
         return Err(CatError::InvalidClaimValue(format!(
             "{claim_name}: negative zero is not permitted per CTA-5007-B §4.5"
@@ -355,9 +360,23 @@ fn decode_network_identifier(value: &Value) -> Result<NetworkIdentifier, CatErro
             },
             Value::Map(map) if map.len() == 1 => {
                 let (k, v) = &map[0];
-                let prefix_len = match k {
+                let prefix_len: u8 = match k {
                     Value::Integer(i) => {
                         let val: i64 = (*i).try_into().map_err(|_| CatError::InvalidTokenFormat)?;
+                        let max_bits = match *tag {
+                            CBOR_TAG_IPV4 => 32u8,
+                            CBOR_TAG_IPV6 => 128u8,
+                            _ => {
+                                return Err(CatError::InvalidClaimValue(format!(
+                                    "Unknown IP tag: {tag}"
+                                )));
+                            }
+                        };
+                        if val < 0 || val > max_bits as i64 {
+                            return Err(CatError::InvalidClaimValue(format!(
+                                "catnip: prefix length {val} out of range for tag {tag} (max {max_bits})"
+                            )));
+                        }
                         val as u8
                     }
                     _ => return Err(CatError::InvalidTokenFormat),
@@ -731,36 +750,54 @@ impl Cwt {
 
         #[cfg(feature = "moqt")]
         if let Some(ref moqt_scopes) = self.payload.moqt.moqt {
-            let scopes_array: Vec<Value> = moqt_scopes
-                .iter()
-                .map(|scope| {
-                    let actions: Vec<Value> = scope
-                        .actions
-                        .iter()
-                        .map(|action| Value::Integer((*action as i32).into()))
-                        .collect();
+            let mut scopes_array = Vec::new();
+            for scope in moqt_scopes {
+                if scope.actions.is_empty() {
+                    return Err(CatError::InvalidClaimValue(
+                        "MOQT scope must have at least one action".to_string(),
+                    ));
+                }
 
-                    let mut scope_array = vec![Value::Array(actions)];
+                let actions: Vec<Value> = scope
+                    .actions
+                    .iter()
+                    .map(|action| Value::Integer((*action as i32).into()))
+                    .collect();
 
-                    if !scope.namespace_matches.is_empty() {
-                        let ns_matches: Vec<Value> = scope
-                            .namespace_matches
-                            .iter()
-                            .map(encode_namespace_match)
-                            .collect();
-                        scope_array.push(Value::Array(ns_matches));
-                    }
+                let mut scope_array = vec![Value::Array(actions)];
 
-                    if let Some(ref track_match) = scope.track_match {
-                        if scope.namespace_matches.is_empty() {
-                            scope_array.push(Value::Array(vec![]));
+                if !scope.namespace_matches.is_empty() {
+                    let mut ns_matches = Vec::new();
+                    let mut seen_nil = false;
+                    for ns in &scope.namespace_matches {
+                        if seen_nil {
+                            return Err(CatError::InvalidClaimValue(
+                                "Namespace nil must be the last element".to_string(),
+                            ));
                         }
-                        scope_array.push(encode_binary_match(track_match));
+                        if matches!(ns, NamespaceMatch::Nil) {
+                            seen_nil = true;
+                        }
+                        ns_matches.push(encode_namespace_match(ns)?);
                     }
+                    scope_array.push(Value::Array(ns_matches));
+                }
 
-                    Value::Array(scope_array)
-                })
-                .collect();
+                if let Some(ref track_match) = scope.track_match {
+                    if track_match.match_type == BinaryMatchType::Any {
+                        return Err(CatError::InvalidClaimValue(
+                            "Track wildcard must use Option::None, not BinaryMatch::Any"
+                                .to_string(),
+                        ));
+                    }
+                    if scope.namespace_matches.is_empty() {
+                        scope_array.push(Value::Array(vec![]));
+                    }
+                    scope_array.push(encode_binary_match(track_match)?);
+                }
+
+                scopes_array.push(Value::Array(scope_array));
+            }
             claims_map.insert(CLAIM_MOQT, Value::Array(scopes_array));
         }
 
@@ -798,33 +835,44 @@ impl Cwt {
 }
 
 #[cfg(feature = "moqt")]
-fn encode_binary_match(binary_match: &crate::claims::BinaryMatch) -> Value {
+fn encode_binary_match(binary_match: &crate::claims::BinaryMatch) -> Result<Value, CatError> {
     match binary_match.match_type {
-        BinaryMatchType::Any => Value::Null,
-        BinaryMatchType::Exact => Value::Bytes(binary_match.pattern.clone()),
-        BinaryMatchType::Prefix => Value::Array(vec![
+        BinaryMatchType::Any => Err(CatError::InvalidClaimValue(
+            "BinaryMatch::Any cannot be encoded on the wire; use Option::None to omit".to_string(),
+        )),
+        BinaryMatchType::Exact => Ok(Value::Bytes(binary_match.pattern.clone())),
+        BinaryMatchType::Prefix => Ok(Value::Array(vec![
             Value::Integer(MATCH_TYPE_PREFIX.into()),
             Value::Bytes(binary_match.pattern.clone()),
-        ]),
-        BinaryMatchType::Suffix => Value::Array(vec![
+        ])),
+        BinaryMatchType::Suffix => Ok(Value::Array(vec![
             Value::Integer(MATCH_TYPE_SUFFIX.into()),
             Value::Bytes(binary_match.pattern.clone()),
-        ]),
+        ])),
     }
 }
 
 #[cfg(feature = "moqt")]
-fn encode_namespace_match(ns_match: &crate::claims::NamespaceMatch) -> Value {
+fn encode_namespace_match(ns_match: &crate::claims::NamespaceMatch) -> Result<Value, CatError> {
     match ns_match {
-        NamespaceMatch::Nil => Value::Null,
-        NamespaceMatch::Match(binary_match) => encode_binary_match(binary_match),
+        NamespaceMatch::Nil => Ok(Value::Null),
+        NamespaceMatch::Match(binary_match) => {
+            if binary_match.match_type == BinaryMatchType::Any {
+                return Err(CatError::InvalidClaimValue(
+                    "Namespace wildcard must use Option::None, not BinaryMatch::Any".to_string(),
+                ));
+            }
+            encode_binary_match(binary_match)
+        }
     }
 }
 
 #[cfg(feature = "moqt")]
 fn decode_binary_match(value: &Value) -> Result<crate::claims::BinaryMatch, CatError> {
     match value {
-        Value::Null => Ok(BinaryMatch::any()),
+        Value::Null => Err(CatError::InvalidClaimValue(
+            "CBOR null is not a valid binary match; use omission for wildcard".to_string(),
+        )),
         Value::Bytes(data) => Ok(BinaryMatch::exact(data.clone())),
         Value::Array(arr) if arr.len() == 2 => {
             let match_type = match &arr[0] {
@@ -860,7 +908,7 @@ fn decode_namespace_match(value: &Value) -> Result<crate::claims::NamespaceMatch
     }
 }
 
-pub(crate) const DEFAULT_MAX_CBOR_PAYLOAD_SIZE: usize = 1024 * 1024;
+pub(crate) const DEFAULT_MAX_CBOR_PAYLOAD_SIZE: usize = 16 * 1024;
 pub(crate) const DEFAULT_MAX_MOQT_SCOPES: usize = 1000;
 pub(crate) const DEFAULT_MAX_CUSTOM_CLAIMS: usize = 100;
 pub(crate) const DEFAULT_MAX_STRING_CLAIM_LENGTH: usize = 8 * 1024;
@@ -1403,10 +1451,9 @@ impl Cwt {
                         for item in arr {
                             match item {
                                 Value::Bytes(b) => alpns.push(b),
-                                Value::Text(s) => alpns.push(s.into_bytes()),
                                 _ => {
                                     return Err(CatError::InvalidClaimValue(
-                                        "catalpn array items must be bytes or text".to_string(),
+                                        "catalpn array items must be byte strings per CTA-5007-B §4.6.8".to_string(),
                                     ));
                                 }
                             }
@@ -2130,10 +2177,11 @@ impl Cwt {
                         let mut scopes = Vec::new();
                         for scope_value in scopes_array {
                             if let Value::Array(scope_array) = scope_value {
-                                if scope_array.is_empty() {
-                                    return Err(CatError::InvalidClaimValue(
-                                        "MOQT scope array must not be empty".to_string(),
-                                    ));
+                                if scope_array.is_empty() || scope_array.len() > 3 {
+                                    return Err(CatError::InvalidClaimValue(format!(
+                                        "MOQT scope array must have 1-3 elements, got {}",
+                                        scope_array.len()
+                                    )));
                                 }
 
                                 let mut actions = Vec::new();
@@ -2170,6 +2218,12 @@ impl Cwt {
                                     }
                                 }
 
+                                if actions.is_empty() {
+                                    return Err(CatError::InvalidClaimValue(
+                                        "MOQT scope must have at least one action".to_string(),
+                                    ));
+                                }
+
                                 let mut namespace_matches = Vec::new();
                                 let mut track_match = None;
 
@@ -2196,6 +2250,19 @@ impl Cwt {
                                                     .to_string(),
                                             ));
                                         }
+                                    }
+                                }
+
+                                // Enforce nil-last: once a Nil is seen, no further elements are allowed
+                                let mut seen_nil = false;
+                                for (idx, ns) in namespace_matches.iter().enumerate() {
+                                    if seen_nil {
+                                        return Err(CatError::InvalidClaimValue(format!(
+                                            "Namespace nil must be the last element (found element at index {idx} after nil)"
+                                        )));
+                                    }
+                                    if matches!(ns, NamespaceMatch::Nil) {
+                                        seen_nil = true;
                                     }
                                 }
 

@@ -70,8 +70,19 @@ pub struct ValidatedToken {
 }
 
 impl ValidatedToken {
-    /// Wrap an already-validated CatToken. The caller asserts that validation
-    /// has been performed externally (e.g. in unit tests that construct tokens directly).
+    #[cfg(not(any(test, feature = "test-util")))]
+    pub(crate) fn from_unchecked(token: CatToken) -> Self {
+        Self {
+            token,
+            header: TokenHeader {
+                algorithm_id: 0,
+                kid: None,
+            },
+            provenance: TokenProvenance::Signed,
+        }
+    }
+
+    #[cfg(any(test, feature = "test-util"))]
     pub fn from_unchecked(token: CatToken) -> Self {
         Self {
             token,
@@ -104,7 +115,7 @@ impl ValidatedToken {
     }
 }
 
-const DEFAULT_MAX_TOKEN_SIZE: usize = 1_048_576; // 1 MB
+const DEFAULT_MAX_TOKEN_SIZE: usize = 16 * 1024; // 16KB — relay-appropriate default
 
 pub struct AdmissionPolicy {
     max_token_size: usize,

@@ -47,6 +47,7 @@ version = "0.4"
 tokio-test = "0.4"
 criterion = { version = "0.5", features = ["html_reports"] }
 x509-cert = { version = "0.2", features = ["std", "builder"] }
+cat-token = { path = ".", features = ["test-util"] }
 
 [lib]
 name = "cat_token"
@@ -101,3 +102,4 @@ builtin-trie = []
 qp-trie = ["dep:qp-trie"]
 moqt = []
 rfc3986-url = ["dep:url"]
+test-util = []

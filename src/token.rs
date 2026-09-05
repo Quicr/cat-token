@@ -135,7 +135,6 @@ impl CatTokenValidator {
 
         self.validate_privacy_claims(token, provenance)?;
         self.validate_geographic_restrictions(token)?;
-        self.validate_usage_limits(token)?;
         self.validate_regex_ere(token)?;
         self.validate_composite_claims(token)?;
 
@@ -213,10 +212,6 @@ impl CatTokenValidator {
             }
         }
 
-        Ok(())
-    }
-
-    fn validate_usage_limits(&self, _token: &CatToken) -> Result<(), CatError> {
         Ok(())
     }
 
@@ -343,6 +338,45 @@ pub fn validate_header(token: &CatToken, name: &str, value: &str) -> Result<(), 
                     )));
                 }
                 return Ok(());
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Validate all `cath` header rules against the provided request headers.
+/// Every header rule in the token must be satisfied by at least one matching
+/// header in `request_headers`. Returns an error if any required header is
+/// missing or fails to match.
+pub fn validate_all_headers(
+    token: &CatToken,
+    request_headers: &[(&str, &str)],
+) -> Result<(), CatError> {
+    if let Some(ref rules) = token.cat.cath {
+        for rule in rules {
+            let matching_header = request_headers
+                .iter()
+                .find(|(name, _)| rule.name.eq_ignore_ascii_case(name));
+            match matching_header {
+                Some((_, value)) => {
+                    let unfolded = unfold_header_value(value);
+                    if !rule
+                        .matches
+                        .iter()
+                        .any(|mv| apply_match_value(mv, &unfolded))
+                    {
+                        return Err(CatError::InvalidClaimValue(format!(
+                            "Header '{}' value does not match any rule",
+                            rule.name
+                        )));
+                    }
+                }
+                None => {
+                    return Err(CatError::InvalidClaimValue(format!(
+                        "Required header '{}' is missing from request",
+                        rule.name
+                    )));
+                }
             }
         }
     }
@@ -779,7 +813,7 @@ pub fn encode_token_base64(
     Ok(URL_SAFE_NO_PAD.encode(&bytes))
 }
 
-const MAX_TOKEN_SIZE: usize = 1024 * 1024; // 1MB
+const MAX_TOKEN_SIZE: usize = 16 * 1024; // 16KB — relay-appropriate default
 
 /// Decode a CatToken from COSE_Sign1 (tag 18) or COSE_Mac0 (tag 17) CBOR bytes.
 ///
@@ -894,13 +928,28 @@ pub fn decode_encrypted_token(
     encryption_key: &[u8],
     signing_algorithm: &dyn CryptographicAlgorithm,
 ) -> Result<VerifiedToken, CatError> {
+    decode_encrypted_token_with_limits(
+        cose_bytes,
+        encryption_key,
+        signing_algorithm,
+        &CwtLimits::default(),
+    )
+}
+
+pub fn decode_encrypted_token_with_limits(
+    cose_bytes: &[u8],
+    encryption_key: &[u8],
+    signing_algorithm: &dyn CryptographicAlgorithm,
+    limits: &CwtLimits,
+) -> Result<VerifiedToken, CatError> {
     let inner_bytes = crate::encrypt::cose_decrypt0(cose_bytes, encryption_key)?;
-    let verified = decode_token(&inner_bytes, signing_algorithm)?;
+    let verified = decode_token_with_limits(&inner_bytes, signing_algorithm, limits)?;
+    let header = verified.header().clone();
     Ok(VerifiedToken::new(
         verified.into_unvalidated_token(),
         TokenHeader {
-            algorithm_id: signing_algorithm.algorithm_id(),
-            kid: None,
+            algorithm_id: header.algorithm_id,
+            kid: header.kid,
         },
         TokenProvenance::Encrypted,
     ))

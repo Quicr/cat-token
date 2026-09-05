@@ -369,8 +369,9 @@ const MIN_JTI_CACHE_SIZE: usize = 1000;
 
 #[cfg(feature = "moqt")]
 pub trait JtiStore: Send + Sync {
-    fn contains(&self, key: &str) -> Result<bool, CatError>;
-    fn insert(&self, key: String, iat: i64) -> Result<(), CatError>;
+    /// Atomically check whether `key` exists and insert it if not.
+    /// Returns `Ok(())` on successful insert, or `Err(ReplayAttackDetected)` if already present.
+    fn check_and_insert(&self, key: String, iat: i64) -> Result<(), CatError>;
     fn len(&self) -> usize;
     fn is_empty(&self) -> bool {
         self.len() == 0
@@ -400,15 +401,7 @@ impl LruJtiStore {
 
 #[cfg(feature = "moqt")]
 impl JtiStore for LruJtiStore {
-    fn contains(&self, key: &str) -> Result<bool, CatError> {
-        let cache = self
-            .cache
-            .lock()
-            .map_err(|_| CatError::CryptoError("Lock poisoned".to_string()))?;
-        Ok(cache.contains(key))
-    }
-
-    fn insert(&self, key: String, iat: i64) -> Result<(), CatError> {
+    fn check_and_insert(&self, key: String, iat: i64) -> Result<(), CatError> {
         let mut cache = self
             .cache
             .lock()
@@ -579,15 +572,6 @@ impl DpopValidator {
             }
         }
 
-        if self.settings.should_honor_jti()
-            && let Some(ref jti) = proof.payload.jti
-        {
-            let composite_key = format!("{}:{}", hex::encode(expected_thumbprint), jti);
-            if self.jti_store.contains(&composite_key)? {
-                return Err(CatError::ReplayAttackDetected);
-            }
-        }
-
         Ok(())
     }
 
@@ -596,7 +580,8 @@ impl DpopValidator {
             && let Some(ref jti) = proof.payload.jti
         {
             let composite_key = format!("{}:{}", hex::encode(thumbprint), jti);
-            self.jti_store.insert(composite_key, proof.payload.iat)?;
+            self.jti_store
+                .check_and_insert(composite_key, proof.payload.iat)?;
         }
         Ok(())
     }
@@ -624,10 +609,7 @@ impl DpopValidator {
         Ok(())
     }
 
-    /// Validate DPoP proof without committing the JTI to the replay cache.
-    /// Use this when additional checks (e.g. target binding) must pass before replay
-    /// protection is finalized. Call `commit_jti` after those checks succeed.
-    pub fn validate_without_jti_commit(
+    pub(crate) fn validate_without_jti_commit(
         &self,
         proof: &DpopProof,
         expected_action: MoqtAction,
@@ -651,8 +633,7 @@ impl DpopValidator {
         Ok(())
     }
 
-    /// Commit the JTI to the replay cache after all validation checks have passed.
-    pub fn commit_jti(&self, proof: &DpopProof, thumbprint: &[u8]) -> Result<(), CatError> {
+    pub(crate) fn commit_jti(&self, proof: &DpopProof, thumbprint: &[u8]) -> Result<(), CatError> {
         self.insert_jti(proof, thumbprint)
     }
 
