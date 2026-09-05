@@ -50,7 +50,7 @@ type HmacSha256 = Hmac<Sha256>;
 /// Minimum RSA key size in bytes (2048 bits = 256 bytes)
 pub const MIN_RSA_KEY_SIZE: usize = 256;
 
-pub trait CryptographicAlgorithm {
+pub trait CryptographicAlgorithm: Send + Sync {
     fn sign(&self, data: &[u8]) -> Result<Vec<u8>, CatError>;
     fn verify(&self, data: &[u8], signature: &[u8]) -> Result<(), CatError>;
     fn algorithm_id(&self) -> i64;

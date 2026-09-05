@@ -22,14 +22,16 @@ pub use crate::dpop::{
 pub use crate::encrypt::{EncryptionAlgorithm, cose_decrypt0, cose_encrypt0};
 pub use crate::error::CatError;
 pub use crate::jwk::Jwk;
+pub use crate::key_resolver::{KeyHint, KeyResolver, KeyRingResolver, StaticKeyResolver};
 pub use crate::pipeline::{TokenHeader, TokenProvenance, ValidatedToken, VerifiedToken};
 pub use crate::structured_header::{
     get_sf_dictionary_member, normalize_sf_value, parse_sf_dictionary, parse_sf_item, parse_sf_list,
 };
 pub use crate::token::{
     CatPorBlockList, CatTokenBuilder, CatTokenValidator, apply_match_value, decode_token,
-    decode_token_base64, encode_token, encode_token_base64, enforce_catpor, strip_token_from_uri,
-    unfold_header_value, validate_header, validate_method,
+    decode_token_base64, decode_token_with_resolver, decode_token_with_resolver_and_limits,
+    encode_token, encode_token_base64, enforce_catpor, strip_token_from_uri, unfold_header_value,
+    validate_header, validate_method,
 };
 pub use crate::x509::{extract_spki_from_cert, validate_cattpk, validate_cattpk_chain};
 

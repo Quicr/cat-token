@@ -8,6 +8,7 @@ pub mod dpop;
 pub mod encrypt;
 pub mod error;
 pub mod jwk;
+pub mod key_resolver;
 #[cfg(feature = "moqt")]
 pub mod moqt;
 pub mod pipeline;
@@ -36,6 +37,7 @@ pub use dpop::*;
 pub use encrypt::*;
 pub use error::*;
 pub use jwk::*;
+pub use key_resolver::*;
 #[cfg(feature = "moqt")]
 pub use moqt::*;
 pub use pipeline::*;
