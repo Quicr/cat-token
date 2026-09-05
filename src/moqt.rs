@@ -69,6 +69,45 @@ impl MoqtAuthResult {
     }
 }
 
+/// Context for a relay authorization request, used with `MoqtValidator::authorize_request`.
+#[derive(Debug, Clone)]
+pub struct RelayRequestContext {
+    pub relay_endpoint: String,
+    pub action: MoqtAction,
+    pub namespace: Vec<Vec<u8>>,
+    pub track: Vec<u8>,
+    pub peer_tls_alpn: Option<Vec<u8>>,
+    pub dpop_proof: Option<DpopProof>,
+}
+
+impl RelayRequestContext {
+    pub fn new(
+        relay_endpoint: impl Into<String>,
+        action: MoqtAction,
+        namespace: Vec<Vec<u8>>,
+        track: Vec<u8>,
+    ) -> Self {
+        Self {
+            relay_endpoint: relay_endpoint.into(),
+            action,
+            namespace,
+            track,
+            peer_tls_alpn: None,
+            dpop_proof: None,
+        }
+    }
+
+    pub fn with_peer_tls_alpn(mut self, alpn: Vec<u8>) -> Self {
+        self.peer_tls_alpn = Some(alpn);
+        self
+    }
+
+    pub fn with_dpop_proof(mut self, proof: DpopProof) -> Self {
+        self.dpop_proof = Some(proof);
+        self
+    }
+}
+
 /// MOQT-specific token validator
 #[derive(Clone)]
 pub struct MoqtValidator {
@@ -256,6 +295,104 @@ impl MoqtValidator {
             }
 
             // All checks passed — commit JTI to replay cache
+            validator.commit_jti(proof, &cnf.jkt, issuer)?;
+        }
+
+        Ok(auth_result)
+    }
+
+    /// Fail-closed authorization entry point for relay implementations.
+    ///
+    /// Validates MOQT claims, checks audience, checks ALPN binding, performs scope
+    /// matching, and validates DPoP proof (if present) in a single call.
+    pub fn authorize_request(
+        &self,
+        token: &ValidatedToken,
+        ctx: &RelayRequestContext,
+    ) -> Result<MoqtAuthResult, CatError> {
+        self.validate_moqt_claims(token.claims())?;
+
+        if let Some(ref audiences) = token.claims().core.aud
+            && !audiences.contains(&ctx.relay_endpoint)
+        {
+            return Err(CatError::InvalidAudience);
+        }
+
+        if let Some(ref token_alpns) = token.claims().cat.catalpn {
+            match &ctx.peer_tls_alpn {
+                Some(peer_alpn) => {
+                    if !token_alpns.iter().any(|a| a == peer_alpn) {
+                        return Err(CatError::InvalidClaimValue(
+                            "peer TLS ALPN does not match token catalpn".to_string(),
+                        ));
+                    }
+                }
+                None => {
+                    return Err(CatError::InvalidClaimValue(
+                        "token requires ALPN binding but no peer ALPN provided".to_string(),
+                    ));
+                }
+            }
+        }
+
+        let auth_request = MoqtAuthRequest {
+            action: ctx.action,
+            namespace: ctx.namespace.clone(),
+            track: ctx.track.clone(),
+            dpop_proof: ctx.dpop_proof.clone(),
+        };
+
+        let auth_result = self.authorize_inner(token.claims(), &auth_request);
+        if !auth_result.authorized {
+            return Ok(auth_result);
+        }
+
+        if let Some(ref cnf) = token.claims().dpop.cnf {
+            let proof = auth_request.dpop_proof.as_ref().ok_or_else(|| {
+                CatError::DpopValidationFailed(
+                    "Token requires DPoP proof but none provided".to_string(),
+                )
+            })?;
+
+            let validator = self.dpop_validator.as_ref().ok_or_else(|| {
+                CatError::DpopValidationFailed("DPoP validation not configured".to_string())
+            })?;
+
+            if !confirmation_matches_jwk(cnf, &proof.header.jwk)? {
+                return Err(CatError::InvalidDpopBinding);
+            }
+
+            let issuer = token.claims().core.iss.as_deref();
+            validator.validate_without_jti_commit(proof, ctx.action, &cnf.jkt, issuer)?;
+
+            if proof.payload.actx.tns != ctx.namespace {
+                return Err(CatError::DpopValidationFailed(
+                    "DPoP proof namespace does not match request".to_string(),
+                ));
+            }
+            if proof.payload.actx.tn != ctx.track {
+                return Err(CatError::DpopValidationFailed(
+                    "DPoP proof track does not match request".to_string(),
+                ));
+            }
+
+            if let Some(ref expected) = self.expected_resource {
+                match &proof.payload.actx.resource {
+                    Some(resource) if resource != expected => {
+                        return Err(CatError::DpopValidationFailed(format!(
+                            "DPoP proof resource '{}' does not match expected '{}'",
+                            resource, expected
+                        )));
+                    }
+                    None => {
+                        return Err(CatError::DpopValidationFailed(
+                            "DPoP proof missing required resource binding".to_string(),
+                        ));
+                    }
+                    _ => {}
+                }
+            }
+
             validator.commit_jti(proof, &cnf.jkt, issuer)?;
         }
 
