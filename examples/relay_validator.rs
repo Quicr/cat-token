@@ -132,7 +132,7 @@ fn validate_and_authorize(
 
     // Step 4: Authorize the action
     let request = MoqtAuthRequest::new(action, vec![namespace.to_vec()], track.to_vec());
-    let result = moqt_validator.authorize(&token, &request);
+    let result = moqt_validator.authorize(&token, &request).unwrap();
 
     if result.authorized {
         Ok(result)

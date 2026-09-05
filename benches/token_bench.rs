@@ -38,7 +38,7 @@ fn create_complex_token() -> CatToken {
         .with_cwt_id_str("token-12345")
         .with_version(1)
         .with_replay_protection(claims::ReplayProtection::Prohibited)
-        .with_geo_coordinate(40.7128, -74.0060, Some(100))
+        .with_geo_coordinate(40.7128, -74.0060, 100)
         .with_geohash("dr5regw")
         .with_subject("user@example.com")
         .with_issued_at(iat)
@@ -148,7 +148,13 @@ fn bench_moqt_authorization(c: &mut Criterion) {
     );
 
     group.bench_function("single_scope_match", |b| {
-        b.iter(|| black_box(validator.authorize(&single_scope_token, &matching_request)))
+        b.iter(|| {
+            black_box(
+                validator
+                    .authorize(&single_scope_token, &matching_request)
+                    .unwrap(),
+            )
+        })
     });
 
     // Non-matching request (must check all scopes)
@@ -159,7 +165,13 @@ fn bench_moqt_authorization(c: &mut Criterion) {
     );
 
     group.bench_function("single_scope_no_match", |b| {
-        b.iter(|| black_box(validator.authorize(&single_scope_token, &non_matching_request)))
+        b.iter(|| {
+            black_box(
+                validator
+                    .authorize(&single_scope_token, &non_matching_request)
+                    .unwrap(),
+            )
+        })
     });
 
     // Multi-scope - first scope matches
@@ -170,7 +182,13 @@ fn bench_moqt_authorization(c: &mut Criterion) {
     );
 
     group.bench_function("multi_scope_first_match", |b| {
-        b.iter(|| black_box(validator.authorize(&multi_scope_token, &first_match_request)))
+        b.iter(|| {
+            black_box(
+                validator
+                    .authorize(&multi_scope_token, &first_match_request)
+                    .unwrap(),
+            )
+        })
     });
 
     // Multi-scope - last scope matches
@@ -181,7 +199,13 @@ fn bench_moqt_authorization(c: &mut Criterion) {
     );
 
     group.bench_function("multi_scope_last_match", |b| {
-        b.iter(|| black_box(validator.authorize(&multi_scope_token, &last_match_request)))
+        b.iter(|| {
+            black_box(
+                validator
+                    .authorize(&multi_scope_token, &last_match_request)
+                    .unwrap(),
+            )
+        })
     });
 
     // Multi-scope - no match
@@ -192,7 +216,13 @@ fn bench_moqt_authorization(c: &mut Criterion) {
     );
 
     group.bench_function("multi_scope_no_match", |b| {
-        b.iter(|| black_box(validator.authorize(&multi_scope_token, &no_match_request)))
+        b.iter(|| {
+            black_box(
+                validator
+                    .authorize(&multi_scope_token, &no_match_request)
+                    .unwrap(),
+            )
+        })
     });
 
     group.finish();
@@ -232,7 +262,7 @@ fn bench_moqt_throughput(c: &mut Criterion) {
                 b.iter(|| {
                     let mut authorized = 0;
                     for req in &requests {
-                        if validator.authorize(&token, req).authorized {
+                        if validator.authorize(&token, req).unwrap().authorized {
                             authorized += 1;
                         }
                     }

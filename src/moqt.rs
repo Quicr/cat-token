@@ -153,9 +153,25 @@ impl MoqtValidator {
         Ok(())
     }
 
-    /// Check if a specific MOQT action is authorized
+    /// Validate MOQT claims and check if a specific action is authorized.
+    /// This is the recommended entry point: it ensures claim validation before authorization.
+    pub fn authorize(
+        &self,
+        token: &CatToken,
+        request: &MoqtAuthRequest,
+    ) -> Result<MoqtAuthResult, CatError> {
+        self.validate_moqt_claims(token)?;
+        Ok(self.authorize_unchecked(token, request))
+    }
+
+    /// Check if a specific MOQT action is authorized without validating claims first.
+    /// Caller must ensure `validate_moqt_claims` has already been called.
     /// "Evaluation stops after the first acceptable result is discovered"
-    pub fn authorize(&self, token: &CatToken, request: &MoqtAuthRequest) -> MoqtAuthResult {
+    pub fn authorize_unchecked(
+        &self,
+        token: &CatToken,
+        request: &MoqtAuthRequest,
+    ) -> MoqtAuthResult {
         let scopes = match &token.moqt.moqt {
             Some(s) => s,
             None => return MoqtAuthResult::denied(), // No MOQT claims means blocked
@@ -189,8 +205,8 @@ impl MoqtValidator {
         token: &CatToken,
         request: &MoqtAuthRequest,
     ) -> Result<MoqtAuthResult, CatError> {
-        // First check basic authorization
-        let auth_result = self.authorize(token, request);
+        // Validate claims and check basic authorization
+        let auth_result = self.authorize(token, request)?;
         if !auth_result.authorized {
             return Ok(auth_result);
         }
@@ -476,7 +492,7 @@ mod tests {
             vec![b"example.com".to_vec()],
             b"/stream/video".to_vec(),
         );
-        let result = validator.authorize(&token, &request);
+        let result = validator.authorize(&token, &request).unwrap();
         assert!(result.authorized);
 
         // Should deny (wrong action)
@@ -485,7 +501,7 @@ mod tests {
             vec![b"example.com".to_vec()],
             b"/stream/video".to_vec(),
         );
-        let result = validator.authorize(&token, &request);
+        let result = validator.authorize(&token, &request).unwrap();
         assert!(!result.authorized);
 
         // Should deny (wrong namespace)
@@ -494,7 +510,7 @@ mod tests {
             vec![b"other.com".to_vec()],
             b"/stream/video".to_vec(),
         );
-        let result = validator.authorize(&token, &request);
+        let result = validator.authorize(&token, &request).unwrap();
         assert!(!result.authorized);
 
         // Should deny (wrong track)
@@ -503,7 +519,7 @@ mod tests {
             vec![b"example.com".to_vec()],
             b"/other/video".to_vec(),
         );
-        let result = validator.authorize(&token, &request);
+        let result = validator.authorize(&token, &request).unwrap();
         assert!(!result.authorized);
     }
 
@@ -527,7 +543,7 @@ mod tests {
             vec![b"example.com".to_vec()],
             b"/stream".to_vec(),
         );
-        let result = validator.authorize(&token, &request);
+        let result = validator.authorize(&token, &request).unwrap();
 
         assert!(result.authorized);
         assert!(result.requires_revalidation);
@@ -621,7 +637,7 @@ mod tests {
             vec![b"example.com".to_vec()],
             b"/stream/1".to_vec(),
         );
-        let result = validator.authorize(&token, &request);
+        let result = validator.authorize(&token, &request).unwrap();
         assert!(result.authorized);
         assert_eq!(result.matched_scope_index, Some(0));
 
@@ -631,7 +647,7 @@ mod tests {
             vec![b"example.com".to_vec()],
             b"/stream/1".to_vec(),
         );
-        let result = validator.authorize(&token, &request);
+        let result = validator.authorize(&token, &request).unwrap();
         assert!(result.authorized);
         assert_eq!(result.matched_scope_index, Some(1));
     }

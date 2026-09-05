@@ -48,7 +48,7 @@ fn test_cat_claims() {
         .with_version(1)
         .with_uri_match_rules(uri_rules.clone())
         .with_replay_protection(cat_token::ReplayProtection::Prohibited)
-        .with_geo_coordinate(37.7749, -122.4194, Some(10))
+        .with_geo_coordinate(37.7749, -122.4194, 10)
         .with_geohash("9q8yy");
 
     assert_eq!(token.cat.catv, Some(1));
@@ -62,7 +62,7 @@ fn test_cat_claims() {
     let coords = token.cat.catgeocoord.unwrap();
     assert_eq!(coords[0].lat, 37.7749);
     assert_eq!(coords[0].lon, -122.4194);
-    assert_eq!(coords[0].radius, Some(10));
+    assert_eq!(coords[0].radius, 10);
 
     assert_eq!(token.cat.geohash, Some(vec!["9q8yy".to_string()]));
 }
@@ -184,7 +184,7 @@ fn test_geo_coordinate_validation() {
     let coord1 = GeoCoordinate {
         lat: 45.0,
         lon: 90.0,
-        radius: None,
+        radius: 0,
     };
     assert!(coord1.lat.abs() <= 90.0);
     assert!(coord1.lon.abs() <= 180.0);
@@ -193,7 +193,7 @@ fn test_geo_coordinate_validation() {
     let coord2 = GeoCoordinate {
         lat: -90.0,
         lon: -180.0,
-        radius: Some(5),
+        radius: 5,
     };
     assert!(coord2.lat.abs() <= 90.0);
     assert!(coord2.lon.abs() <= 180.0);
@@ -201,7 +201,7 @@ fn test_geo_coordinate_validation() {
     let coord3 = GeoCoordinate {
         lat: 90.0,
         lon: 180.0,
-        radius: Some(1),
+        radius: 1,
     };
     assert!(coord3.lat.abs() <= 90.0);
     assert!(coord3.lon.abs() <= 180.0);

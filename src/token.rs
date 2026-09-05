@@ -557,7 +557,7 @@ impl CatTokenBuilder {
         self
     }
 
-    pub fn geo_coordinate(mut self, lat: f64, lon: f64, radius: Option<u32>) -> Self {
+    pub fn geo_coordinate(mut self, lat: f64, lon: f64, radius: u32) -> Self {
         self.inner = self.inner.with_geo_coordinate(lat, lon, radius);
         self
     }

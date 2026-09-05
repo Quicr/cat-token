@@ -8,10 +8,9 @@ use crate::claims::ConfirmationClaim;
 use crate::jwk::Jwk;
 #[cfg(feature = "moqt")]
 use crate::{CryptographicAlgorithm, Es256Algorithm, MoqtAction, Ps256Algorithm};
-use base64::{
-    Engine as _,
-    engine::general_purpose::{URL_SAFE, URL_SAFE_NO_PAD},
-};
+#[cfg(feature = "moqt")]
+use base64::engine::general_purpose::URL_SAFE;
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 #[cfg(feature = "moqt")]
 use lru::LruCache;
 use serde::{Deserialize, Serialize};
@@ -27,7 +26,7 @@ pub const DPOP_TYP: &str = "dpop-proof+jwt";
 /// Supported DPoP algorithms (asymmetric only per RFC 9449 §4.2)
 pub const SUPPORTED_DPOP_ALGORITHMS: &[&str] = &["ES256", "PS256"];
 
-/// Maximum size for DPoP proof parts (header/payload) in bytes
+#[cfg(feature = "moqt")]
 const MAX_DPOP_PART_SIZE: usize = 16 * 1024; // 16KB
 
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
@@ -362,9 +361,10 @@ impl DpopProof {
     }
 }
 
+#[cfg(feature = "moqt")]
 const DEFAULT_JTI_CACHE_SIZE: usize = 100_000;
 
-/// Minimum JTI cache size to provide meaningful replay protection
+#[cfg(feature = "moqt")]
 const MIN_JTI_CACHE_SIZE: usize = 1000;
 
 /// Statistics about the JTI cache

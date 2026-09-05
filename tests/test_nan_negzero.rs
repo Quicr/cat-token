@@ -23,7 +23,7 @@ fn test_negative_zero_geo_lat_rejected_on_encode() {
     token.cat.catgeocoord = Some(vec![GeoCoordinate {
         lat: -0.0_f64,
         lon: 10.0,
-        radius: None,
+        radius: 0,
     }]);
 
     assert!(encode_token(&token, &algorithm).is_err());
@@ -38,7 +38,7 @@ fn test_negative_zero_geo_lon_rejected_on_encode() {
     token.cat.catgeocoord = Some(vec![GeoCoordinate {
         lat: 10.0,
         lon: -0.0_f64,
-        radius: None,
+        radius: 0,
     }]);
 
     assert!(encode_token(&token, &algorithm).is_err());
@@ -79,7 +79,7 @@ fn test_valid_floats_accepted() {
 
     let token = CatToken::new()
         .with_issuer("test")
-        .with_geo_coordinate(0.0, 0.0, Some(100))
+        .with_geo_coordinate(0.0, 0.0, 100)
         .with_probability_of_rejection(0.5, vec![1], None);
 
     assert!(encode_token(&token, &algorithm).is_ok());
@@ -92,7 +92,7 @@ fn test_positive_zero_is_valid() {
 
     let token = CatToken::new()
         .with_issuer("test")
-        .with_geo_coordinate(0.0, 0.0, None);
+        .with_geo_coordinate(0.0, 0.0, 0);
 
     assert!(encode_token(&token, &algorithm).is_ok());
 }

@@ -36,7 +36,7 @@ fn test_moqt_validator_spec_example_exact_match() {
         vec![b"example.com".to_vec()],
         b"/bob".to_vec(),
     );
-    assert!(validator.authorize(&token, &request).authorized);
+    assert!(validator.authorize(&token, &request).unwrap().authorized);
 
     // Should prohibit - various mismatches
     let test_cases = vec![
@@ -54,7 +54,7 @@ fn test_moqt_validator_spec_example_exact_match() {
             track.clone(),
         );
         assert!(
-            !validator.authorize(&token, &request).authorized,
+            !validator.authorize(&token, &request).unwrap().authorized,
             "Should deny ns={:?} track={:?}",
             String::from_utf8_lossy(&ns),
             String::from_utf8_lossy(&track)
@@ -98,7 +98,7 @@ fn test_moqt_validator_spec_example_prefix_match() {
             track.to_vec(),
         );
         assert!(
-            validator.authorize(&token, &request).authorized,
+            validator.authorize(&token, &request).unwrap().authorized,
             "Should permit ns={:?} track={:?}",
             String::from_utf8_lossy(ns),
             String::from_utf8_lossy(track)
@@ -116,7 +116,7 @@ fn test_moqt_validator_spec_example_prefix_match() {
             track.to_vec(),
         );
         assert!(
-            !validator.authorize(&token, &request).authorized,
+            !validator.authorize(&token, &request).unwrap().authorized,
             "Should deny ns={:?} track={:?}",
             String::from_utf8_lossy(ns),
             String::from_utf8_lossy(track)
@@ -145,7 +145,7 @@ fn test_moqt_validator_multiple_scopes() {
         vec![b"cdn.example.com".to_vec()],
         b"/live/stream1".to_vec(),
     );
-    let result = validator.authorize(&token, &request);
+    let result = validator.authorize(&token, &request).unwrap();
     assert!(result.authorized);
     assert_eq!(result.matched_scope_index, Some(0));
 
@@ -155,7 +155,7 @@ fn test_moqt_validator_multiple_scopes() {
         vec![b"cdn.example.com".to_vec()],
         b"/vod/movie1".to_vec(),
     );
-    assert!(!validator.authorize(&token, &request).authorized);
+    assert!(!validator.authorize(&token, &request).unwrap().authorized);
 
     // Subscriber can fetch from /vod/
     let request = MoqtAuthRequest::new(
@@ -163,7 +163,7 @@ fn test_moqt_validator_multiple_scopes() {
         vec![b"cdn.example.com".to_vec()],
         b"/vod/movie1".to_vec(),
     );
-    let result = validator.authorize(&token, &request);
+    let result = validator.authorize(&token, &request).unwrap();
     assert!(result.authorized);
     assert_eq!(result.matched_scope_index, Some(1));
 
@@ -173,7 +173,7 @@ fn test_moqt_validator_multiple_scopes() {
         vec![b"cdn.example.com".to_vec()],
         b"/live/stream1".to_vec(),
     );
-    assert!(!validator.authorize(&token, &request).authorized);
+    assert!(!validator.authorize(&token, &request).unwrap().authorized);
 }
 
 #[test]
@@ -196,7 +196,7 @@ fn test_moqt_validator_revalidation_required() {
         vec![b"example.com".to_vec()],
         b"/stream".to_vec(),
     );
-    let result = validator.authorize(&token, &request);
+    let result = validator.authorize(&token, &request).unwrap();
 
     assert!(result.authorized);
     assert!(result.requires_revalidation);
@@ -224,7 +224,7 @@ fn test_moqt_validator_revalidation_zero() {
         vec![b"example.com".to_vec()],
         b"/stream".to_vec(),
     );
-    let result = validator.authorize(&token, &request);
+    let result = validator.authorize(&token, &request).unwrap();
 
     assert!(result.authorized);
     assert!(!result.requires_revalidation); // 0 means no revalidation
@@ -341,7 +341,7 @@ fn test_moqt_default_blocked() {
         vec![b"example.com".to_vec()],
         b"/stream".to_vec(),
     );
-    let result = validator.authorize(&token, &request);
+    let result = validator.authorize(&token, &request).unwrap();
 
     assert!(!result.authorized);
     assert!(result.matched_scope_index.is_none());
@@ -361,7 +361,7 @@ fn test_moqt_empty_scopes() {
         vec![b"example.com".to_vec()],
         b"/stream".to_vec(),
     );
-    let result = validator.authorize(&token, &request);
+    let result = validator.authorize(&token, &request).unwrap();
 
     assert!(!result.authorized);
 }
@@ -396,7 +396,7 @@ fn test_moqt_validator_concurrent_access() {
                     vec![b"cdn.example.com".to_vec()],
                     track.as_bytes().to_vec(),
                 );
-                let result = validator.authorize(&token, &request);
+                let result = validator.authorize(&token, &request).unwrap();
                 assert!(
                     result.authorized,
                     "Thread {} iter {} should be authorized",

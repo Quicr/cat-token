@@ -53,7 +53,7 @@ fn create_complex_token() -> CatToken {
         .with_cwt_id_str("token-12345-complex")
         .with_version(1)
         .with_replay_protection(claims::ReplayProtection::Prohibited)
-        .with_geo_coordinate(40.7128, -74.0060, Some(100))
+        .with_geo_coordinate(40.7128, -74.0060, 100)
         .with_geohash("dr5regw")
         .with_subject("user@example.com")
         .with_issued_at(iat)

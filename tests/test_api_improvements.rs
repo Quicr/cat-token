@@ -219,7 +219,7 @@ fn test_namespace_path_splits_by_slash() {
         vec![b"sports".to_vec(), b"football".to_vec(), b"live".to_vec()],
         b"video".to_vec(),
     );
-    assert!(validator.authorize(&token, &request).authorized);
+    assert!(validator.authorize(&token, &request).unwrap().authorized);
 
     // Wrong first element
     let request = MoqtAuthRequest::new(
@@ -227,7 +227,7 @@ fn test_namespace_path_splits_by_slash() {
         vec![b"music".to_vec(), b"football".to_vec(), b"live".to_vec()],
         b"video".to_vec(),
     );
-    assert!(!validator.authorize(&token, &request).authorized);
+    assert!(!validator.authorize(&token, &request).unwrap().authorized);
 
     // Wrong second element
     let request = MoqtAuthRequest::new(
@@ -235,7 +235,7 @@ fn test_namespace_path_splits_by_slash() {
         vec![b"sports".to_vec(), b"basketball".to_vec(), b"live".to_vec()],
         b"video".to_vec(),
     );
-    assert!(!validator.authorize(&token, &request).authorized);
+    assert!(!validator.authorize(&token, &request).unwrap().authorized);
 }
 
 #[test]
@@ -259,7 +259,7 @@ fn test_namespace_path_ignores_empty_segments() {
         vec![b"sports".to_vec(), b"football".to_vec()],
         b"video".to_vec(),
     );
-    assert!(validator.authorize(&token, &request).authorized);
+    assert!(validator.authorize(&token, &request).unwrap().authorized);
 }
 
 // --- MoqtScopeBuilder::namespace_path tuple-prefix semantics ---
@@ -287,7 +287,7 @@ fn test_namespace_path_allows_additional_trailing_elements() {
         vec![b"sports".to_vec(), b"football".to_vec()],
         b"video".to_vec(),
     );
-    assert!(validator.authorize(&token, &request).authorized);
+    assert!(validator.authorize(&token, &request).unwrap().authorized);
 
     // 3 elements — trailing "spain" is allowed (tuple-prefix semantics)
     let request = MoqtAuthRequest::new(
@@ -295,7 +295,7 @@ fn test_namespace_path_allows_additional_trailing_elements() {
         vec![b"sports".to_vec(), b"football".to_vec(), b"spain".to_vec()],
         b"video".to_vec(),
     );
-    assert!(validator.authorize(&token, &request).authorized);
+    assert!(validator.authorize(&token, &request).unwrap().authorized);
 
     // Partial byte match on a tuple element must NOT work
     let request = MoqtAuthRequest::new(
@@ -303,7 +303,7 @@ fn test_namespace_path_allows_additional_trailing_elements() {
         vec![b"sports".to_vec(), b"foot".to_vec()],
         b"video".to_vec(),
     );
-    assert!(!validator.authorize(&token, &request).authorized);
+    assert!(!validator.authorize(&token, &request).unwrap().authorized);
 }
 
 // --- C4M_TOKEN_TYPE constant ---
@@ -367,14 +367,24 @@ fn test_full_roundtrip_new_apis() {
     let moqt_validator = MoqtValidator::new();
 
     let setup_req = MoqtAuthRequest::new(MoqtAction::ClientSetup, vec![], vec![]);
-    assert!(moqt_validator.authorize(&decoded, &setup_req).authorized);
+    assert!(
+        moqt_validator
+            .authorize(&decoded, &setup_req)
+            .unwrap()
+            .authorized
+    );
 
     let publish_req = MoqtAuthRequest::new(
         MoqtAction::Publish,
         vec![b"live".to_vec(), b"sports".to_vec(), b"football".to_vec()],
         b"video-1080p".to_vec(),
     );
-    assert!(moqt_validator.authorize(&decoded, &publish_req).authorized);
+    assert!(
+        moqt_validator
+            .authorize(&decoded, &publish_req)
+            .unwrap()
+            .authorized
+    );
 
     // Subscribe should be denied (publisher token)
     let sub_req = MoqtAuthRequest::new(
@@ -382,5 +392,10 @@ fn test_full_roundtrip_new_apis() {
         vec![b"live".to_vec(), b"sports".to_vec(), b"football".to_vec()],
         b"video-1080p".to_vec(),
     );
-    assert!(!moqt_validator.authorize(&decoded, &sub_req).authorized);
+    assert!(
+        !moqt_validator
+            .authorize(&decoded, &sub_req)
+            .unwrap()
+            .authorized
+    );
 }

@@ -23,7 +23,7 @@ fn test_cat_token_creation() {
             matches: vec![MatchValue::Exact("example.com".to_string())],
         }])
         .replay_protection(cat_token::ReplayProtection::Prohibited)
-        .geo_coordinate(37.7749, -122.4194, Some(100))
+        .geo_coordinate(37.7749, -122.4194, 100)
         .geohash("9q8yy")
         .build();
 
@@ -50,7 +50,7 @@ fn test_cat_token_creation() {
     if let Some(coords) = &token.cat.catgeocoord {
         assert_eq!(coords[0].lat, 37.7749);
         assert_eq!(coords[0].lon, -122.4194);
-        assert_eq!(coords[0].radius, Some(100));
+        assert_eq!(coords[0].radius, 100);
     } else {
         panic!("Expected geo coordinates");
     }
@@ -147,7 +147,7 @@ fn test_token_validation_success() {
         .not_before(now)
         .cwt_id_str("valid-token")
         .version(1)
-        .geo_coordinate(40.7128, -74.0060, Some(50))
+        .geo_coordinate(40.7128, -74.0060, 50)
         .geohash("dr5reg")
         .build();
 
@@ -259,7 +259,7 @@ fn test_cwt_payload_encoding_decoding() {
             matches: vec![MatchValue::Prefix("/api/".to_string())],
         }])
         .replay_protection(cat_token::ReplayProtection::Prohibited)
-        .geo_coordinate(51.5074, -0.1278, None)
+        .geo_coordinate(51.5074, -0.1278, 0)
         .geohash("gcpvj")
         .build();
 
@@ -328,7 +328,7 @@ fn test_all_cat_claims() {
         catgeocoord: Some(vec![GeoCoordinate {
             lat: 34.0522,
             lon: -118.2437,
-            radius: Some(25),
+            radius: 25,
         }]),
         geohash: Some(vec!["9q5ct".to_string()]),
         catgeoalt: Some(cat_token::GeoAltitude {
@@ -418,7 +418,7 @@ fn test_geographic_validation() {
     token.cat.catgeocoord = Some(vec![GeoCoordinate {
         lat: 91.0, // Invalid latitude
         lon: 0.0,
-        radius: None,
+        radius: 0,
     }]);
 
     let result = validator.validate(&token);

@@ -23,6 +23,7 @@ fn test_catgeocoord_with_wgs84_crs_wrapper() {
     let coord_array = ciborium::Value::Array(vec![ciborium::Value::Array(vec![
         ciborium::Value::Float(37.7749),
         ciborium::Value::Float(-122.4194),
+        ciborium::Value::Integer(500.into()),
     ])]);
 
     let cbor = encode_with_crs_tag(CLAIM_CATGEOCOORD, 0, coord_array);
@@ -32,6 +33,7 @@ fn test_catgeocoord_with_wgs84_crs_wrapper() {
     assert_eq!(coords.len(), 1);
     assert!((coords[0].lat - 37.7749).abs() < 0.001);
     assert!((coords[0].lon - (-122.4194)).abs() < 0.001);
+    assert_eq!(coords[0].radius, 500);
 }
 
 #[test]
@@ -39,6 +41,7 @@ fn test_catgeocoord_rejects_unsupported_crs() {
     let coord_array = ciborium::Value::Array(vec![ciborium::Value::Array(vec![
         ciborium::Value::Float(37.7749),
         ciborium::Value::Float(-122.4194),
+        ciborium::Value::Integer(500.into()),
     ])]);
 
     let cbor = encode_with_crs_tag(CLAIM_CATGEOCOORD, 99, coord_array);
@@ -111,7 +114,7 @@ fn test_catgeoalt_rejects_unsupported_crs() {
 
 #[test]
 fn test_catgeocoord_without_crs_wrapper_still_works() {
-    let token = CatToken::new().with_geo_coordinate(37.7749, -122.4194, Some(10));
+    let token = CatToken::new().with_geo_coordinate(37.7749, -122.4194, 10);
 
     let cwt = Cwt::new(-7, token);
     let encoded = cwt.encode_payload().unwrap();

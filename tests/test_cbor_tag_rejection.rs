@@ -99,7 +99,7 @@ fn test_catgeocoord_with_crs_wrapper_still_works() {
     let alg = HmacSha256Algorithm::from_secret_key(&key);
 
     let token = CatTokenBuilder::new()
-        .geo_coordinate(45.5, -90.5, Some(1000))
+        .geo_coordinate(45.5, -90.5, 1000)
         .build();
 
     let encoded = encode_token(&token, &alg).unwrap();

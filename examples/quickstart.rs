@@ -52,7 +52,7 @@ fn main() -> Result<(), CatError> {
         vec![b"live.example.com".to_vec(), b"streaming-123".to_vec()],
         b"/video".to_vec(),
     );
-    let result = moqt_validator.authorize(&decoded, &request);
+    let result = moqt_validator.authorize(&decoded, &request).unwrap();
 
     println!("Authorized: {}", result.authorized);
     Ok(())

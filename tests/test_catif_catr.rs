@@ -180,10 +180,7 @@ fn test_catr_cookie_renewal() {
     let token = CatToken::new().with_renewal(
         CatRenewal::cookie("session_token")
             .with_expadd(7200)
-            .with_cookie_params(vec![
-                ("SameSite".to_string(), "Strict".to_string()),
-                ("Secure".to_string(), "true".to_string()),
-            ]),
+            .with_cookie_params(vec!["SameSite=Strict".to_string(), "Secure".to_string()]),
     );
 
     let catr = token.request.catr.unwrap();
@@ -234,7 +231,7 @@ fn test_catr_roundtrip() {
         CatRenewal::cookie("token")
             .with_expadd(3600)
             .with_deadline(1700000000)
-            .with_cookie_params(vec![("Secure".to_string(), "true".to_string())]),
+            .with_cookie_params(vec!["Secure".to_string()]),
     );
 
     let encoded = encode_token(&token, &algorithm).unwrap();
@@ -245,7 +242,7 @@ fn test_catr_roundtrip() {
     assert_eq!(catr.cookie_name.as_ref().unwrap(), "token");
     assert_eq!(catr.expadd, Some(3600));
     assert_eq!(catr.deadline, Some(1700000000));
-    assert_eq!(catr.cookie_params.as_ref().unwrap()[0].0, "Secure");
+    assert_eq!(catr.cookie_params.as_ref().unwrap()[0], "Secure");
 }
 
 #[test]

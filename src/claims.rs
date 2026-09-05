@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::collections::HashMap;
 
 pub const CLAIM_ISS: i64 = 1;
@@ -66,11 +66,12 @@ pub const CLAIM_AND: i64 = 326;
 pub const CLAIM_MOQT: i64 = 327; // TBD_MOQT in the spec
 pub const CLAIM_MOQT_REVAL: i64 = 328; // TBD_MOQT_REVAL in the spec
 
-// MOQT Binary match types per spec
+#[cfg(feature = "moqt")]
 pub(crate) const MATCH_TYPE_PREFIX: i64 = 1;
+#[cfg(feature = "moqt")]
 pub(crate) const MATCH_TYPE_SUFFIX: i64 = 2;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct CoreClaims {
     pub iss: Option<String>,
     pub aud: Option<Vec<String>>,
@@ -79,7 +80,7 @@ pub struct CoreClaims {
     pub cti: Option<Vec<u8>>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[repr(u32)]
 pub enum ReplayProtection {
     Permitted = 0,
@@ -101,20 +102,20 @@ impl TryFrom<u32> for ReplayProtection {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ProbabilityOfRejection {
     pub probability: f64,
     pub id: Vec<u8>,
     pub expiration: Option<i64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct GeoAltitude {
     pub altitude: f64,
     pub deviation: f64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Default)]
 pub struct CatClaims {
     pub catreplay: Option<ReplayProtection>,
     pub catpor: Option<ProbabilityOfRejection>,
@@ -131,7 +132,7 @@ pub struct CatClaims {
     pub cattpk: Option<Vec<u8>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct InformationalClaims {
     pub sub: Option<String>,
     pub iat: Option<i64>,
@@ -142,7 +143,7 @@ pub struct InformationalClaims {
 ///
 /// Supports both JWK Thumbprint (jkt, key 3) and COSE Key Thumbprint (ckt, key 6, RFC 9679).
 /// Serialization redacts thumbprint values to prevent accidental leakage.
-#[derive(Clone, PartialEq, Deserialize)]
+#[derive(Clone, PartialEq)]
 pub struct ConfirmationClaim {
     pub jkt: Vec<u8>,
     pub ckt: Option<Vec<u8>>,
@@ -186,7 +187,7 @@ impl ConfirmationClaim {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Default)]
 pub struct CatDpopSettings {
     pub crit: Option<Vec<i64>>,
     pub window: Option<i64>,
@@ -237,7 +238,7 @@ impl CatDpopSettings {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct DpopClaims {
     pub cnf: Option<ConfirmationClaim>,
     pub catdpop: Option<CatDpopSettings>,
@@ -246,7 +247,7 @@ pub struct DpopClaims {
 /// Per-claim failure action (CTA-5007-B §4.9.1).
 /// When a specific claim fails validation, the action tells the recipient
 /// what HTTP status code, headers, and/or signing key to use in the response.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct CatIfAction {
     pub status: u32,
     pub headers: Option<Vec<(String, String)>>,
@@ -254,7 +255,7 @@ pub struct CatIfAction {
 }
 
 /// Renewal type (CTA-5007-B §4.9.2).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[repr(u32)]
 pub enum CatRenewalType {
     Automatic = 0,
@@ -276,15 +277,15 @@ impl CatRenewalType {
 }
 
 /// Token renewal parameters (CTA-5007-B §4.9.2).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct CatRenewal {
     pub renewal_type: CatRenewalType,
     pub expadd: Option<i64>,
     pub deadline: Option<i64>,
     pub cookie_name: Option<String>,
     pub header_name: Option<String>,
-    pub cookie_params: Option<Vec<(String, String)>>,
-    pub header_params: Option<Vec<(String, String)>>,
+    pub cookie_params: Option<Vec<String>>,
+    pub header_params: Option<Vec<String>>,
     pub status_code: Option<u32>,
 }
 
@@ -361,12 +362,12 @@ impl CatRenewal {
         self
     }
 
-    pub fn with_cookie_params(mut self, params: Vec<(String, String)>) -> Self {
+    pub fn with_cookie_params(mut self, params: Vec<String>) -> Self {
         self.cookie_params = Some(params);
         self
     }
 
-    pub fn with_header_params(mut self, params: Vec<(String, String)>) -> Self {
+    pub fn with_header_params(mut self, params: Vec<String>) -> Self {
         self.header_params = Some(params);
         self
     }
@@ -377,14 +378,14 @@ impl CatRenewal {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct RequestClaims {
     pub catif: Option<Vec<(i64, CatIfAction)>>,
     pub catr: Option<CatRenewal>,
 }
 
 /// Logical operators for composite claims
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum CompositeOperator {
     /// At least one claim set must be acceptable
     Or,
@@ -395,7 +396,7 @@ pub enum CompositeOperator {
 }
 
 /// A claim set that can contain either a token or a nested composite claim
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum ClaimSet {
     /// A regular CAT token
     Token(Box<CatToken>),
@@ -405,7 +406,7 @@ pub enum ClaimSet {
 
 /// Composite claim structure implementing logical relationships between claim sets
 /// as defined in draft-lemmons-cose-composite-claims-02
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct CompositeClaim {
     /// The logical operator for this composite claim
     pub op: CompositeOperator,
@@ -546,7 +547,7 @@ impl CompositeClaim {
 }
 
 /// Container for composite claims in a CAT token
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Default)]
 pub struct CompositeClaims {
     /// OR composite claim
     pub or_claim: Option<CompositeClaim>,
@@ -626,14 +627,14 @@ impl CompositeClaims {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct GeoCoordinate {
     pub lat: f64,
     pub lon: f64,
-    pub radius: Option<u32>,
+    pub radius: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum UriPattern {
     Exact(String),
     Prefix(String),
@@ -737,7 +738,7 @@ pub fn validate_posix_ere(pattern: &str) -> Option<String> {
     None
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum MatchValue {
     Exact(String),
     Prefix(String),
@@ -748,19 +749,19 @@ pub enum MatchValue {
     Sha512_256(Vec<u8>),
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct UriMatchRule {
     pub component: i64,
     pub matches: Vec<MatchValue>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct HeaderMatchRule {
     pub name: String,
     pub matches: Vec<MatchValue>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum NetworkIdentifier {
     IpAddress(std::net::IpAddr),
     IpPrefix(std::net::IpAddr, u8),
@@ -838,7 +839,7 @@ impl NetworkIdentifier {
 }
 
 #[cfg(feature = "moqt")]
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub enum MoqtAction {
     ClientSetup = 0,
     ServerSetup = 1,
@@ -904,7 +905,7 @@ impl TryFrom<i32> for MoqtAction {
 }
 
 #[cfg(feature = "moqt")]
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub enum BinaryMatchType {
     Any,
     Exact,
@@ -913,7 +914,7 @@ pub enum BinaryMatchType {
 }
 
 #[cfg(feature = "moqt")]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct BinaryMatch {
     pub match_type: BinaryMatchType,
     pub pattern: Vec<u8>,
@@ -987,7 +988,7 @@ impl BinaryMatch {
 }
 
 #[cfg(feature = "moqt")]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum NamespaceMatch {
     Match(BinaryMatch),
     Nil,
@@ -1022,7 +1023,7 @@ impl NamespaceMatch {
 }
 
 #[cfg(feature = "moqt")]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct MoqtScope {
     pub actions: Vec<MoqtAction>,
     pub namespace_matches: Vec<NamespaceMatch>,
@@ -1116,13 +1117,13 @@ impl MoqtScope {
 }
 
 #[cfg(feature = "moqt")]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct MoqtClaims {
     pub moqt: Option<Vec<MoqtScope>>,
     pub moqt_reval: Option<f64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct CatToken {
     pub core: CoreClaims,
     pub cat: CatClaims,
@@ -1250,7 +1251,7 @@ impl CatToken {
         self
     }
 
-    pub fn with_geo_coordinate(mut self, lat: f64, lon: f64, radius: Option<u32>) -> Self {
+    pub fn with_geo_coordinate(mut self, lat: f64, lon: f64, radius: u32) -> Self {
         let coord = GeoCoordinate { lat, lon, radius };
         match self.cat.catgeocoord {
             Some(ref mut coords) => coords.push(coord),
