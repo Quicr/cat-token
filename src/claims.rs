@@ -1180,20 +1180,6 @@ impl MoqtAction {
     pub const ANNOUNCE: MoqtAction = MoqtAction::PublishNamespace;
     pub const SUBSCRIBE_UPDATE: MoqtAction = MoqtAction::RequestUpdate;
 
-    pub fn action_name(&self) -> &'static str {
-        match self {
-            MoqtAction::ClientSetup => "CLIENT_SETUP",
-            MoqtAction::ServerSetup => "SERVER_SETUP",
-            MoqtAction::PublishNamespace => "PUBLISH_NAMESPACE",
-            MoqtAction::SubscribeNamespace => "SUBSCRIBE_NAMESPACE",
-            MoqtAction::Subscribe => "SUBSCRIBE",
-            MoqtAction::RequestUpdate => "REQUEST_UPDATE",
-            MoqtAction::Publish => "PUBLISH",
-            MoqtAction::Fetch => "FETCH",
-            MoqtAction::TrackStatus => "TRACK_STATUS",
-        }
-    }
-
     pub fn is_valid(value: i32) -> bool {
         (0..=8).contains(&value)
     }

@@ -1,6 +1,6 @@
 [package]
 name = "cat-token"
-version = "0.4.0"
+version = "0.4.1"
 edition = "2024"
 authors = ["Suhas Nandakumar"]
 description = "Strict fail-closed profile of CTA-5007-B CAT and CAT-4-MOQT (see docs/PROFILE.md for supported claim forms and rejections)"

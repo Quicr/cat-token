@@ -9,6 +9,151 @@
     /* Default styles provided by pandoc.
     ** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
     */
+    html {
+      color: #1a1a1a;
+      background-color: #fdfdfd;
+    }
+    body {
+      margin: 0 auto;
+      max-width: 36em;
+      padding-left: 50px;
+      padding-right: 50px;
+      padding-top: 50px;
+      padding-bottom: 50px;
+      hyphens: auto;
+      overflow-wrap: break-word;
+      text-rendering: optimizeLegibility;
+      font-kerning: normal;
+    }
+    @media (max-width: 600px) {
+      body {
+        font-size: 0.9em;
+        padding: 12px;
+      }
+      h1 {
+        font-size: 1.8em;
+      }
+    }
+    @media print {
+      html {
+        background-color: white;
+      }
+      body {
+        background-color: transparent;
+        color: black;
+        font-size: 12pt;
+      }
+      p, h2, h3 {
+        orphans: 3;
+        widows: 3;
+      }
+      h2, h3, h4 {
+        page-break-after: avoid;
+      }
+    }
+    p {
+      margin: 1em 0;
+    }
+    a {
+      color: #1a1a1a;
+    }
+    a:visited {
+      color: #1a1a1a;
+    }
+    img {
+      max-width: 100%;
+    }
+    svg {
+      height: auto;
+      max-width: 100%;
+    }
+    h1, h2, h3, h4, h5, h6 {
+      margin-top: 1.4em;
+    }
+    h5, h6 {
+      font-size: 1em;
+      font-style: italic;
+    }
+    h6 {
+      font-weight: normal;
+    }
+    ol, ul {
+      padding-left: 1.7em;
+      margin-top: 1em;
+    }
+    li > ol, li > ul {
+      margin-top: 0;
+    }
+    blockquote {
+      margin: 1em 0 1em 1.7em;
+      padding-left: 1em;
+      border-left: 2px solid #e6e6e6;
+      color: #606060;
+    }
+    code {
+      font-family: Menlo, Monaco, Consolas, 'Lucida Console', monospace;
+      font-size: 85%;
+      margin: 0;
+      hyphens: manual;
+    }
+    pre {
+      margin: 1em 0;
+      overflow: auto;
+    }
+    pre code {
+      padding: 0;
+      overflow: visible;
+      overflow-wrap: normal;
+    }
+    .sourceCode {
+     background-color: transparent;
+     overflow: visible;
+    }
+    hr {
+      border: none;
+      border-top: 1px solid #1a1a1a;
+      height: 1px;
+      margin: 1em 0;
+    }
+    table {
+      margin: 1em 0;
+      border-collapse: collapse;
+      width: 100%;
+      overflow-x: auto;
+      display: block;
+      font-variant-numeric: lining-nums tabular-nums;
+    }
+    table caption {
+      margin-bottom: 0.75em;
+    }
+    tbody {
+      margin-top: 0.5em;
+      border-top: 1px solid #1a1a1a;
+      border-bottom: 1px solid #1a1a1a;
+    }
+    th {
+      border-top: 1px solid #1a1a1a;
+      padding: 0.25em 0.5em 0.25em 0.5em;
+    }
+    td {
+      padding: 0.125em 0.5em 0.25em 0.5em;
+    }
+    header {
+      margin-bottom: 4em;
+      text-align: center;
+    }
+    #TOC li {
+      list-style: none;
+    }
+    #TOC ul {
+      padding-left: 1.3em;
+    }
+    #TOC > ul {
+      padding-left: 0;
+    }
+    #TOC a:not(:hover) {
+      text-decoration: none;
+    }
     code{white-space: pre-wrap;}
     span.smallcaps{font-variant: small-caps;}
     div.columns{display: flex; gap: min(4vw, 1.5em);}
@@ -25,57 +170,185 @@
     }
     .display.math{display: block; text-align: center; margin: 0.5rem auto;}
   </style>
-  <link rel="stylesheet" href="" />
-  <style>
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-      max-width: 960px;
-      margin: 2rem auto;
-      padding: 0 1rem;
-      line-height: 1.6;
-      color: #24292e;
-      background: #fff;
-    }
-    h1 { border-bottom: 2px solid #e1e4e8; padding-bottom: .3em; }
-    h2 { border-bottom: 1px solid #e1e4e8; padding-bottom: .3em; margin-top: 2rem; }
-    h3 { margin-top: 1.5rem; }
-    table { border-collapse: collapse; width: 100%; margin: 1em 0; }
-    th, td { border: 1px solid #d0d7de; padding: 8px 12px; text-align: left; }
-    th { background: #f6f8fa; font-weight: 600; }
-    tr:nth-child(even) { background: #f6f8fa; }
-    code { background: #f0f3f6; padding: 2px 6px; border-radius: 3px; font-size: 0.9em; }
-    strong { color: inherit; }
-    hr { border: none; border-top: 1px solid #d0d7de; margin: 2rem 0; }
-    a { color: #0366d6; text-decoration: none; }
-    a:hover { text-decoration: underline; }
-  </style>
 </head>
 <body>
 <header id="title-block-header">
 <h1 class="title">CTA-5007-B Compliance — cat.rs</h1>
 </header>
-<h1 id="standards-compliance-requirements-cat.rs">Standards Compliance
+<nav id="TOC" role="doc-toc">
+<ul>
+<li><a href="#standards-compliance-requirements--catrs"
+id="toc-standards-compliance-requirements--catrs">Standards Compliance
+Requirements — cat.rs</a>
+<ul>
+<li><a href="#1-token-format--cose-structure"
+id="toc-1-token-format--cose-structure">1. Token Format &amp; COSE
+Structure</a>
+<ul>
+<li><a href="#rfc-8392--cbor-web-token-cwt"
+id="toc-rfc-8392--cbor-web-token-cwt">RFC 8392 — CBOR Web Token
+(CWT)</a></li>
+<li><a href="#rfc-9052--cose-structures-and-process"
+id="toc-rfc-9052--cose-structures-and-process">RFC 9052 — COSE
+Structures and Process</a></li>
+<li><a href="#rfc-8949--cbor-encoding"
+id="toc-rfc-8949--cbor-encoding">RFC 8949 — CBOR Encoding</a></li>
+</ul></li>
+<li><a href="#2-algorithms" id="toc-2-algorithms">2. Algorithms</a>
+<ul>
+<li><a href="#rfc-9053--cose-initial-algorithms"
+id="toc-rfc-9053--cose-initial-algorithms">RFC 9053 — COSE Initial
+Algorithms</a></li>
+<li><a href="#rfc-8230--rsa-with-cose"
+id="toc-rfc-8230--rsa-with-cose">RFC 8230 — RSA with COSE</a></li>
+<li><a href="#fips-180-4--secure-hash-standard"
+id="toc-fips-180-4--secure-hash-standard">FIPS 180-4 — Secure Hash
+Standard</a></li>
+</ul></li>
+<li><a href="#3-core-claims-cta-46" id="toc-3-core-claims-cta-46">3.
+Core Claims (CTA §4.6)</a>
+<ul>
+<li><a href="#31-issuer--iss-key-1--must-support"
+id="toc-31-issuer--iss-key-1--must-support">3.1 Issuer —
+<code>iss</code> (key 1) — MUST support</a></li>
+<li><a href="#32-audience--aud-key-3--must-support"
+id="toc-32-audience--aud-key-3--must-support">3.2 Audience —
+<code>aud</code> (key 3) — MUST support</a></li>
+<li><a href="#33-expiration--exp-key-4--must-support"
+id="toc-33-expiration--exp-key-4--must-support">3.3 Expiration —
+<code>exp</code> (key 4) — MUST support</a></li>
+<li><a href="#34-not-before--nbf-key-5--must-support"
+id="toc-34-not-before--nbf-key-5--must-support">3.4 Not Before —
+<code>nbf</code> (key 5) — MUST support</a></li>
+<li><a href="#35-cwt-id--cti-key-7--must-support"
+id="toc-35-cwt-id--cti-key-7--must-support">3.5 CWT ID —
+<code>cti</code> (key 7) — MUST support</a></li>
+<li><a href="#36-replay--catreplay-key-308--may-support"
+id="toc-36-replay--catreplay-key-308--may-support">3.6 Replay —
+<code>catreplay</code> (key 308) — MAY support</a></li>
+<li><a href="#37-probability-of-rejection--catpor-key-309--may-support"
+id="toc-37-probability-of-rejection--catpor-key-309--may-support">3.7
+Probability of Rejection — <code>catpor</code> (key 309) — MAY
+support</a></li>
+<li><a href="#38-version--catv-key-310--must-support"
+id="toc-38-version--catv-key-310--must-support">3.8 Version —
+<code>catv</code> (key 310) — MUST support</a></li>
+<li><a href="#39-network-ip--catnip-key-311--must-support"
+id="toc-39-network-ip--catnip-key-311--must-support">3.9 Network IP —
+<code>catnip</code> (key 311) — MUST support</a></li>
+<li><a href="#310-uri--catu-key-312--must-support"
+id="toc-310-uri--catu-key-312--must-support">3.10 URI —
+<code>catu</code> (key 312) — MUST support</a></li>
+<li><a href="#311-methods--catm-key-313--must-support"
+id="toc-311-methods--catm-key-313--must-support">3.11 Methods —
+<code>catm</code> (key 313) — MUST support</a></li>
+<li><a href="#312-alpn--catalpn-key-314--may-support"
+id="toc-312-alpn--catalpn-key-314--may-support">3.12 ALPN —
+<code>catalpn</code> (key 314) — MAY support</a></li>
+<li><a href="#313-header--cath-key-315--must-support"
+id="toc-313-header--cath-key-315--must-support">3.13 Header —
+<code>cath</code> (key 315) — MUST support</a></li>
+<li><a
+href="#314-geographic-iso-3166--catgeoiso3166-key-316--may-support"
+id="toc-314-geographic-iso-3166--catgeoiso3166-key-316--may-support">3.14
+Geographic ISO 3166 — <code>catgeoiso3166</code> (key 316) — MAY
+support</a></li>
+<li><a
+href="#315-geographic-coordinate--catgeocoord-key-317--may-support"
+id="toc-315-geographic-coordinate--catgeocoord-key-317--may-support">3.15
+Geographic Coordinate — <code>catgeocoord</code> (key 317) — MAY
+support</a></li>
+<li><a href="#316-geohash--geohash-key-282--may-support"
+id="toc-316-geohash--geohash-key-282--may-support">3.16 Geohash —
+<code>geohash</code> (key 282) — MAY support</a></li>
+<li><a href="#317-altitude--catgeoalt-key-318--may-support"
+id="toc-317-altitude--catgeoalt-key-318--may-support">3.17 Altitude —
+<code>catgeoalt</code> (key 318) — MAY support</a></li>
+<li><a href="#318-tls-public-key--cattpk-key-319--may-support"
+id="toc-318-tls-public-key--cattpk-key-319--may-support">3.18 TLS Public
+Key — <code>cattpk</code> (key 319) — MAY support</a></li>
+</ul></li>
+<li><a href="#4-informational-claims-cta-47"
+id="toc-4-informational-claims-cta-47">4. Informational Claims (CTA
+§4.7)</a>
+<ul>
+<li><a href="#41-subject--sub-key-2--must-support"
+id="toc-41-subject--sub-key-2--must-support">4.1 Subject —
+<code>sub</code> (key 2) — MUST support</a></li>
+<li><a href="#42-issued-at--iat-key-6--must-support"
+id="toc-42-issued-at--iat-key-6--must-support">4.2 Issued At —
+<code>iat</code> (key 6) — MUST support</a></li>
+<li><a href="#43-if-data--catifdata-key-320--may-support"
+id="toc-43-if-data--catifdata-key-320--may-support">4.3 If Data —
+<code>catifdata</code> (key 320) — MAY support</a></li>
+</ul></li>
+<li><a href="#5-dpop-claims-cta-48" id="toc-5-dpop-claims-cta-48">5.
+DPoP Claims (CTA §4.8)</a>
+<ul>
+<li><a href="#rfc-9449--oauth-20-dpop"
+id="toc-rfc-9449--oauth-20-dpop">RFC 9449 — OAuth 2.0 DPoP</a></li>
+<li><a href="#51-confirmation--cnf-key-8--must-support"
+id="toc-51-confirmation--cnf-key-8--must-support">5.1 Confirmation —
+<code>cnf</code> (key 8) — MUST support</a></li>
+<li><a href="#rfc-7638--jwk-thumbprint"
+id="toc-rfc-7638--jwk-thumbprint">RFC 7638 — JWK Thumbprint</a></li>
+<li><a href="#rfc-9679--cose-key-thumbprint"
+id="toc-rfc-9679--cose-key-thumbprint">RFC 9679 — COSE Key
+Thumbprint</a></li>
+<li><a href="#52-dpop-settings--catdpop-key-321--must-support"
+id="toc-52-dpop-settings--catdpop-key-321--must-support">5.2 DPoP
+Settings — <code>catdpop</code> (key 321) — MUST support</a></li>
+<li><a href="#rfc-8747--pop-key-semantics-for-cwts"
+id="toc-rfc-8747--pop-key-semantics-for-cwts">RFC 8747 — PoP Key
+Semantics for CWTs</a></li>
+</ul></li>
+<li><a href="#6-request-claims-cta-49"
+id="toc-6-request-claims-cta-49">6. Request Claims (CTA §4.9)</a>
+<ul>
+<li><a href="#61-if--catif-key-322--may-support"
+id="toc-61-if--catif-key-322--may-support">6.1 If — <code>catif</code>
+(key 322) — MAY support</a></li>
+<li><a href="#62-renewal--catr-key-323--may-support"
+id="toc-62-renewal--catr-key-323--may-support">6.2 Renewal —
+<code>catr</code> (key 323) — MAY support</a></li>
+</ul></li>
+<li><a href="#7-composite-claims-draft-lemmons-composite-claims"
+id="toc-7-composite-claims-draft-lemmons-composite-claims">7. Composite
+Claims (draft-lemmons-composite-claims)</a></li>
+<li><a href="#8-moqt-claims-draft-ietf-moq-c4m"
+id="toc-8-moqt-claims-draft-ietf-moq-c4m">8. MOQT Claims
+(draft-ietf-moq-c4m)</a></li>
+<li><a href="#9-security-requirements-cta-410"
+id="toc-9-security-requirements-cta-410">9. Security Requirements (CTA
+§4.10)</a></li>
+<li><a href="#10-referenced-standards--implementation-status-summary"
+id="toc-10-referenced-standards--implementation-status-summary">10.
+Referenced Standards — Implementation Status Summary</a></li>
+<li><a href="#11-compliance-summary" id="toc-11-compliance-summary">11.
+Compliance Summary</a></li>
+</ul></li>
+</ul>
+</nav>
+<h1 id="standards-compliance-requirements--catrs">Standards Compliance
 Requirements — cat.rs</h1>
 <p><strong>Project:</strong> cat-token (Rust) <strong>Spec
 baseline:</strong> CTA-5007-B (April 2025) — Common Access Token
 <strong>Last updated:</strong> 2026-09-03</p>
-<p>Status legend: - <strong>PASS</strong> — fully implemented and
-compliant - <strong>PARTIAL</strong> — implemented but deviates from
-spec or incomplete - <strong>MISSING</strong> — not implemented -
-<strong>N/A</strong> — not applicable to a library (transport-layer or
-out-of-band concern)</p>
+<p>Status legend:</p>
+<ul>
+<li><strong>PASS</strong> — fully implemented and compliant</li>
+<li><strong>PARTIAL</strong> — implemented but deviates from spec or
+incomplete</li>
+<li><strong>MISSING</strong> — not implemented</li>
+<li><strong>N/A</strong> — not applicable to a library (transport-layer
+or out-of-band concern)</li>
+</ul>
 <hr />
-<h2 id="token-format-cose-structure">1. Token Format &amp; COSE
+<h2 id="1-token-format--cose-structure">1. Token Format &amp; COSE
 Structure</h2>
-<h3 id="rfc-8392-cbor-web-token-cwt">RFC 8392 — CBOR Web Token
+<h3 id="rfc-8392--cbor-web-token-cwt">RFC 8392 — CBOR Web Token
 (CWT)</h3>
 <table>
-<colgroup>
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-</colgroup>
 <thead>
 <tr>
 <th>Requirement</th>
@@ -136,15 +409,9 @@ crate</td>
 </tr>
 </tbody>
 </table>
-<h3 id="rfc-9052-cose-structures-and-process">RFC 9052 — COSE Structures
-and Process</h3>
+<h3 id="rfc-9052--cose-structures-and-process">RFC 9052 — COSE
+Structures and Process</h3>
 <table>
-<colgroup>
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-</colgroup>
 <thead>
 <tr>
 <th>Requirement</th>
@@ -186,14 +453,8 @@ header</td>
 </tr>
 </tbody>
 </table>
-<h3 id="rfc-8949-cbor-encoding">RFC 8949 — CBOR Encoding</h3>
+<h3 id="rfc-8949--cbor-encoding">RFC 8949 — CBOR Encoding</h3>
 <table>
-<colgroup>
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-</colgroup>
 <thead>
 <tr>
 <th>Requirement</th>
@@ -253,16 +514,10 @@ integer map keys on decode</td>
 </tbody>
 </table>
 <hr />
-<h2 id="algorithms">2. Algorithms</h2>
-<h3 id="rfc-9053-cose-initial-algorithms">RFC 9053 — COSE Initial
+<h2 id="2-algorithms">2. Algorithms</h2>
+<h3 id="rfc-9053--cose-initial-algorithms">RFC 9053 — COSE Initial
 Algorithms</h3>
 <table>
-<colgroup>
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-</colgroup>
 <thead>
 <tr>
 <th>Requirement</th>
@@ -311,14 +566,8 @@ minimum enforced</td>
 </tr>
 </tbody>
 </table>
-<h3 id="rfc-8230-rsa-with-cose">RFC 8230 — RSA with COSE</h3>
+<h3 id="rfc-8230--rsa-with-cose">RFC 8230 — RSA with COSE</h3>
 <table>
-<colgroup>
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-</colgroup>
 <thead>
 <tr>
 <th>Requirement</th>
@@ -342,15 +591,9 @@ minimum enforced</td>
 </tr>
 </tbody>
 </table>
-<h3 id="fips-180-4-secure-hash-standard">FIPS 180-4 — Secure Hash
+<h3 id="fips-180-4--secure-hash-standard">FIPS 180-4 — Secure Hash
 Standard</h3>
 <table>
-<colgroup>
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-</colgroup>
 <thead>
 <tr>
 <th>Requirement</th>
@@ -375,16 +618,10 @@ Standard</h3>
 </tbody>
 </table>
 <hr />
-<h2 id="core-claims-cta-4.6">3. Core Claims (CTA §4.6)</h2>
-<h3 id="issuer-iss-key-1-must-support">3.1 Issuer — <code>iss</code>
-(key 1) — MUST support</h3>
+<h2 id="3-core-claims-cta-46">3. Core Claims (CTA §4.6)</h2>
+<h3 id="31-issuer--iss-key-1--must-support">3.1 Issuer —
+<code>iss</code> (key 1) — MUST support</h3>
 <table>
-<colgroup>
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-</colgroup>
 <thead>
 <tr>
 <th>Requirement</th>
@@ -414,15 +651,9 @@ Standard</h3>
 </tr>
 </tbody>
 </table>
-<h3 id="audience-aud-key-3-must-support">3.2 Audience — <code>aud</code>
-(key 3) — MUST support</h3>
+<h3 id="32-audience--aud-key-3--must-support">3.2 Audience —
+<code>aud</code> (key 3) — MUST support</h3>
 <table>
-<colgroup>
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-</colgroup>
 <thead>
 <tr>
 <th>Requirement</th>
@@ -446,15 +677,9 @@ Standard</h3>
 </tr>
 </tbody>
 </table>
-<h3 id="expiration-exp-key-4-must-support">3.3 Expiration —
+<h3 id="33-expiration--exp-key-4--must-support">3.3 Expiration —
 <code>exp</code> (key 4) — MUST support</h3>
 <table>
-<colgroup>
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-</colgroup>
 <thead>
 <tr>
 <th>Requirement</th>
@@ -487,15 +712,9 @@ available for opt-in use</td>
 </tr>
 </tbody>
 </table>
-<h3 id="not-before-nbf-key-5-must-support">3.4 Not Before —
+<h3 id="34-not-before--nbf-key-5--must-support">3.4 Not Before —
 <code>nbf</code> (key 5) — MUST support</h3>
 <table>
-<colgroup>
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-</colgroup>
 <thead>
 <tr>
 <th>Requirement</th>
@@ -527,15 +746,9 @@ available for opt-in use</td>
 </tr>
 </tbody>
 </table>
-<h3 id="cwt-id-cti-key-7-must-support">3.5 CWT ID — <code>cti</code>
-(key 7) — MUST support</h3>
+<h3 id="35-cwt-id--cti-key-7--must-support">3.5 CWT ID —
+<code>cti</code> (key 7) — MUST support</h3>
 <table>
-<colgroup>
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-</colgroup>
 <thead>
 <tr>
 <th>Requirement</th>
@@ -560,15 +773,9 @@ available for opt-in use</td>
 </tr>
 </tbody>
 </table>
-<h3 id="replay-catreplay-key-308-may-support">3.6 Replay —
+<h3 id="36-replay--catreplay-key-308--may-support">3.6 Replay —
 <code>catreplay</code> (key 308) — MAY support</h3>
 <table>
-<colgroup>
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-</colgroup>
 <thead>
 <tr>
 <th>Requirement</th>
@@ -605,16 +812,10 @@ Prohibited(1), ReuseDetection(2)</td>
 </tr>
 </tbody>
 </table>
-<h3 id="probability-of-rejection-catpor-key-309-may-support">3.7
+<h3 id="37-probability-of-rejection--catpor-key-309--may-support">3.7
 Probability of Rejection — <code>catpor</code> (key 309) — MAY
 support</h3>
 <table>
-<colgroup>
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-</colgroup>
 <thead>
 <tr>
 <th>Requirement</th>
@@ -641,20 +842,14 @@ support</h3>
 <td>Block list management with expiration</td>
 <td>CTA §4.6.7</td>
 <td><strong>PASS</strong></td>
-<td><code>CatPorBlockList</code> with <code>Mutex&lt;HashMap&gt;</code>,
-expiration-aware blocking</td>
+<td><code>CatPorBlockList</code> with bounded <code>LruCache</code>
+(100K capacity), expiration-aware blocking</td>
 </tr>
 </tbody>
 </table>
-<h3 id="version-catv-key-310-must-support">3.8 Version —
+<h3 id="38-version--catv-key-310--must-support">3.8 Version —
 <code>catv</code> (key 310) — MUST support</h3>
 <table>
-<colgroup>
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-</colgroup>
 <thead>
 <tr>
 <th>Requirement</th>
@@ -678,15 +873,9 @@ expiration-aware blocking</td>
 </tr>
 </tbody>
 </table>
-<h3 id="network-ip-catnip-key-311-must-support">3.9 Network IP —
+<h3 id="39-network-ip--catnip-key-311--must-support">3.9 Network IP —
 <code>catnip</code> (key 311) — MUST support</h3>
 <table>
-<colgroup>
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-</colgroup>
 <thead>
 <tr>
 <th>Requirement</th>
@@ -751,15 +940,9 @@ form (3-element arrays with full address bytes + prefix length)</td>
 </tr>
 </tbody>
 </table>
-<h3 id="uri-catu-key-312-must-support">3.10 URI — <code>catu</code> (key
-312) — MUST support</h3>
+<h3 id="310-uri--catu-key-312--must-support">3.10 URI —
+<code>catu</code> (key 312) — MUST support</h3>
 <table>
-<colgroup>
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-</colgroup>
 <thead>
 <tr>
 <th>Requirement</th>
@@ -829,15 +1012,9 @@ parameter names</td>
 </tr>
 </tbody>
 </table>
-<h3 id="methods-catm-key-313-must-support">3.11 Methods —
+<h3 id="311-methods--catm-key-313--must-support">3.11 Methods —
 <code>catm</code> (key 313) — MUST support</h3>
 <table>
-<colgroup>
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-</colgroup>
 <thead>
 <tr>
 <th>Requirement</th>
@@ -874,15 +1051,9 @@ list</td>
 </tr>
 </tbody>
 </table>
-<h3 id="alpn-catalpn-key-314-may-support">3.12 ALPN —
+<h3 id="312-alpn--catalpn-key-314--may-support">3.12 ALPN —
 <code>catalpn</code> (key 314) — MAY support</h3>
 <table>
-<colgroup>
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-</colgroup>
 <thead>
 <tr>
 <th>Requirement</th>
@@ -913,15 +1084,9 @@ Encoded as CBOR bytes, not text</td>
 </tr>
 </tbody>
 </table>
-<h3 id="header-cath-key-315-must-support">3.13 Header —
+<h3 id="313-header--cath-key-315--must-support">3.13 Header —
 <code>cath</code> (key 315) — MUST support</h3>
 <table>
-<colgroup>
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-</colgroup>
 <thead>
 <tr>
 <th>Requirement</th>
@@ -965,16 +1130,11 @@ whitespace) before matching</td>
 </tr>
 </tbody>
 </table>
-<h3 id="geographic-iso-3166-catgeoiso3166-key-316-may-support">3.14
+<h3
+id="314-geographic-iso-3166--catgeoiso3166-key-316--may-support">3.14
 Geographic ISO 3166 — <code>catgeoiso3166</code> (key 316) — MAY
 support</h3>
 <table>
-<colgroup>
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-</colgroup>
 <thead>
 <tr>
 <th>Requirement</th>
@@ -1005,16 +1165,11 @@ subdivision code formats</td>
 </tr>
 </tbody>
 </table>
-<h3 id="geographic-coordinate-catgeocoord-key-317-may-support">3.15
+<h3
+id="315-geographic-coordinate--catgeocoord-key-317--may-support">3.15
 Geographic Coordinate — <code>catgeocoord</code> (key 317) — MAY
 support</h3>
 <table>
-<colgroup>
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-</colgroup>
 <thead>
 <tr>
 <th>Requirement</th>
@@ -1072,15 +1227,9 @@ CRS is WGS84</td>
 </tr>
 </tbody>
 </table>
-<h3 id="geohash-geohash-key-282-may-support">3.16 Geohash —
+<h3 id="316-geohash--geohash-key-282--may-support">3.16 Geohash —
 <code>geohash</code> (key 282) — MAY support</h3>
 <table>
-<colgroup>
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-</colgroup>
 <thead>
 <tr>
 <th>Requirement</th>
@@ -1130,15 +1279,9 @@ builder</td>
 </tr>
 </tbody>
 </table>
-<h3 id="altitude-catgeoalt-key-318-may-support">3.17 Altitude —
+<h3 id="317-altitude--catgeoalt-key-318--may-support">3.17 Altitude —
 <code>catgeoalt</code> (key 318) — MAY support</h3>
 <table>
-<colgroup>
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-</colgroup>
 <thead>
 <tr>
 <th>Requirement</th>
@@ -1168,15 +1311,9 @@ builder</td>
 </tr>
 </tbody>
 </table>
-<h3 id="tls-public-key-cattpk-key-319-may-support">3.18 TLS Public Key —
-<code>cattpk</code> (key 319) — MAY support</h3>
+<h3 id="318-tls-public-key--cattpk-key-319--may-support">3.18 TLS Public
+Key — <code>cattpk</code> (key 319) — MAY support</h3>
 <table>
-<colgroup>
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-</colgroup>
 <thead>
 <tr>
 <th>Requirement</th>
@@ -1203,17 +1340,11 @@ compare against cattpk bytes</td>
 </tbody>
 </table>
 <hr />
-<h2 id="informational-claims-cta-4.7">4. Informational Claims (CTA
+<h2 id="4-informational-claims-cta-47">4. Informational Claims (CTA
 §4.7)</h2>
-<h3 id="subject-sub-key-2-must-support">4.1 Subject — <code>sub</code>
-(key 2) — MUST support</h3>
+<h3 id="41-subject--sub-key-2--must-support">4.1 Subject —
+<code>sub</code> (key 2) — MUST support</h3>
 <table>
-<colgroup>
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-</colgroup>
 <thead>
 <tr>
 <th>Requirement</th>
@@ -1238,15 +1369,9 @@ compare against cattpk bytes</td>
 </tr>
 </tbody>
 </table>
-<h3 id="issued-at-iat-key-6-must-support">4.2 Issued At —
+<h3 id="42-issued-at--iat-key-6--must-support">4.2 Issued At —
 <code>iat</code> (key 6) — MUST support</h3>
 <table>
-<colgroup>
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-</colgroup>
 <thead>
 <tr>
 <th>Requirement</th>
@@ -1271,15 +1396,9 @@ and truncated to i64</td>
 </tr>
 </tbody>
 </table>
-<h3 id="if-data-catifdata-key-320-may-support">4.3 If Data —
+<h3 id="43-if-data--catifdata-key-320--may-support">4.3 If Data —
 <code>catifdata</code> (key 320) — MAY support</h3>
 <table>
-<colgroup>
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-</colgroup>
 <thead>
 <tr>
 <th>Requirement</th>
@@ -1300,15 +1419,9 @@ as text, multiple as array. Accumulating
 </tbody>
 </table>
 <hr />
-<h2 id="dpop-claims-cta-4.8">5. DPoP Claims (CTA §4.8)</h2>
-<h3 id="rfc-9449-oauth-2.0-dpop">RFC 9449 — OAuth 2.0 DPoP</h3>
+<h2 id="5-dpop-claims-cta-48">5. DPoP Claims (CTA §4.8)</h2>
+<h3 id="rfc-9449--oauth-20-dpop">RFC 9449 — OAuth 2.0 DPoP</h3>
 <table>
-<colgroup>
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-</colgroup>
 <thead>
 <tr>
 <th>Requirement</th>
@@ -1335,15 +1448,9 @@ verification, replay detection</td>
 </tr>
 </tbody>
 </table>
-<h3 id="confirmation-cnf-key-8-must-support">5.1 Confirmation —
+<h3 id="51-confirmation--cnf-key-8--must-support">5.1 Confirmation —
 <code>cnf</code> (key 8) — MUST support</h3>
 <table>
-<colgroup>
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-</colgroup>
 <thead>
 <tr>
 <th>Requirement</th>
@@ -1376,7 +1483,9 @@ accepted on decode for backward compatibility</td>
 <td>MUST reject cnf without valid DPoP proof</td>
 <td>CTA §4.8.1</td>
 <td><strong>PASS</strong></td>
-<td>Enforced in <code>MoqtValidator.authorize_with_dpop()</code></td>
+<td>Enforced by <code>MoqtValidator::authorize</code> when a
+<code>cnf</code> claim is present — requires an accompanying DPoP proof
+on the <code>RelayRequestContext</code></td>
 </tr>
 <tr>
 <td>ckt confirmation method (RFC 9679) MAY be supported</td>
@@ -1387,14 +1496,8 @@ cnf key 6</td>
 </tr>
 </tbody>
 </table>
-<h3 id="rfc-7638-jwk-thumbprint">RFC 7638 — JWK Thumbprint</h3>
+<h3 id="rfc-7638--jwk-thumbprint">RFC 7638 — JWK Thumbprint</h3>
 <table>
-<colgroup>
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-</colgroup>
 <thead>
 <tr>
 <th>Requirement</th>
@@ -1425,15 +1528,9 @@ validation</td>
 </tr>
 </tbody>
 </table>
-<h3 id="rfc-9679-cose-key-thumbprint">RFC 9679 — COSE Key
+<h3 id="rfc-9679--cose-key-thumbprint">RFC 9679 — COSE Key
 Thumbprint</h3>
 <table>
-<colgroup>
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-</colgroup>
 <thead>
 <tr>
 <th>Requirement</th>
@@ -1452,15 +1549,9 @@ cnf key 6. Encode/decode roundtrip supported</td>
 </tr>
 </tbody>
 </table>
-<h3 id="dpop-settings-catdpop-key-321-must-support">5.2 DPoP Settings —
-<code>catdpop</code> (key 321) — MUST support</h3>
+<h3 id="52-dpop-settings--catdpop-key-321--must-support">5.2 DPoP
+Settings — <code>catdpop</code> (key 321) — MUST support</h3>
 <table>
-<colgroup>
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-</colgroup>
 <thead>
 <tr>
 <th>Requirement</th>
@@ -1503,7 +1594,7 @@ cnf key 6. Encode/decode roundtrip supported</td>
 </tr>
 </tbody>
 </table>
-<h3 id="rfc-8747-pop-key-semantics-for-cwts">RFC 8747 — PoP Key
+<h3 id="rfc-8747--pop-key-semantics-for-cwts">RFC 8747 — PoP Key
 Semantics for CWTs</h3>
 <table>
 <thead>
@@ -1524,16 +1615,10 @@ Semantics for CWTs</h3>
 </tbody>
 </table>
 <hr />
-<h2 id="request-claims-cta-4.9">6. Request Claims (CTA §4.9)</h2>
-<h3 id="if-catif-key-322-may-support">6.1 If — <code>catif</code> (key
-322) — MAY support</h3>
+<h2 id="6-request-claims-cta-49">6. Request Claims (CTA §4.9)</h2>
+<h3 id="61-if--catif-key-322--may-support">6.1 If — <code>catif</code>
+(key 322) — MAY support</h3>
 <table>
-<colgroup>
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-</colgroup>
 <thead>
 <tr>
 <th>Requirement</th>
@@ -1553,15 +1638,9 @@ with status, headers, kid fields. Full CBOR roundtrip</td>
 </tr>
 </tbody>
 </table>
-<h3 id="renewal-catr-key-323-may-support">6.2 Renewal —
+<h3 id="62-renewal--catr-key-323--may-support">6.2 Renewal —
 <code>catr</code> (key 323) — MAY support</h3>
 <table>
-<colgroup>
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-</colgroup>
 <thead>
 <tr>
 <th>Requirement</th>
@@ -1609,15 +1688,9 @@ code)</td>
 </tbody>
 </table>
 <hr />
-<h2 id="composite-claims-draft-lemmons-composite-claims">7. Composite
+<h2 id="7-composite-claims-draft-lemmons-composite-claims">7. Composite
 Claims (draft-lemmons-composite-claims)</h2>
 <table>
-<colgroup>
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-</colgroup>
 <thead>
 <tr>
 <th>Requirement</th>
@@ -1660,15 +1733,9 @@ Claims (draft-lemmons-composite-claims)</h2>
 </tbody>
 </table>
 <hr />
-<h2 id="moqt-claims-draft-ietf-moq-c4m">8. MOQT Claims
+<h2 id="8-moqt-claims-draft-ietf-moq-c4m">8. MOQT Claims
 (draft-ietf-moq-c4m)</h2>
 <table>
-<colgroup>
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-</colgroup>
 <thead>
 <tr>
 <th>Requirement</th>
@@ -1711,8 +1778,12 @@ Claims (draft-lemmons-composite-claims)</h2>
 <tr>
 <td>DPoP integration with MOQT actions</td>
 <td>draft-ietf-moq-c4m</td>
-<td><strong>PASS</strong></td>
-<td><code>authorize_with_dpop()</code></td>
+<td><strong>PARTIAL</strong></td>
+<td>Uses the private CWT/COSE DPoP profile from
+draft-nandakumar-moq-generic-dpop-proof-00 with
+<code>typ=dpop-proof+cwt;profile=cta5007b-v1</code> (not the JWT DPoP
+form CAT-4-MOQT currently references). Interop with a peer requires that
+both sides adopt this profile. See §11 for the JWT plug-in slot.</td>
 </tr>
 <tr>
 <td>C4M token type <code>0x63346d</code></td>
@@ -1723,15 +1794,9 @@ Claims (draft-lemmons-composite-claims)</h2>
 </tbody>
 </table>
 <hr />
-<h2 id="security-requirements-cta-4.10">9. Security Requirements (CTA
+<h2 id="9-security-requirements-cta-410">9. Security Requirements (CTA
 §4.10)</h2>
 <table>
-<colgroup>
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-<col style="width: 25%" />
-</colgroup>
 <thead>
 <tr>
 <th>Requirement</th>
@@ -1764,8 +1829,12 @@ internal zeroization</td>
 <tr>
 <td>DPoP replay detection</td>
 <td>RFC 9449 §4</td>
-<td><strong>PASS</strong></td>
-<td>LRU-based JTI cache with configurable capacity and window</td>
+<td><strong>PARTIAL</strong></td>
+<td>Default in-process store is a sharded LRU that can evict live JTIs
+under pressure — suitable for single-node deployments only. CDN-scale
+deployments MUST plug a TTL-backed distributed store via
+<code>DpopValidator::with_jti_store_strict</code> per RFC 9449
+§11.1.</td>
 </tr>
 <tr>
 <td>MUST use asymmetric algorithms when no established trust</td>
@@ -1783,14 +1852,9 @@ internal zeroization</td>
 </tbody>
 </table>
 <hr />
-<h2 id="referenced-standards-implementation-status-summary">10.
+<h2 id="10-referenced-standards--implementation-status-summary">10.
 Referenced Standards — Implementation Status Summary</h2>
 <table>
-<colgroup>
-<col style="width: 33%" />
-<col style="width: 33%" />
-<col style="width: 33%" />
-</colgroup>
 <thead>
 <tr>
 <th>Standard</th>
@@ -1866,7 +1930,10 @@ implemented</td>
 <tr>
 <td><strong>RFC 9449</strong></td>
 <td>OAuth 2.0 DPoP</td>
-<td><strong>PASS</strong></td>
+<td><strong>PARTIAL</strong> — default in-process JTI store is
+eviction-based (not strict). CDN deployments MUST plug a distributed
+TTL-backed store via
+<code>DpopValidator::with_jti_store_strict</code>.</td>
 </tr>
 <tr>
 <td><strong>RFC 6750</strong></td>
@@ -1945,17 +2012,45 @@ non-ERE patterns</td>
 <tr>
 <td><strong>draft-ietf-moq-c4m</strong></td>
 <td>CAT for MoQ Transport</td>
-<td><strong>PASS</strong></td>
+<td><strong>PARTIAL</strong> — token-side claims (scopes, moqt-reval,
+actions) implemented. DPoP proof format uses the CWT profile from
+draft-nandakumar-moq-generic-dpop-proof-00
+(<code>typ=dpop-proof+cwt;profile=cta5007b-v1</code>), not the JWT form
+CAT-4-MOQT currently references. Both peers must adopt this profile for
+interop.</td>
 </tr>
 </tbody>
 </table>
 <hr />
-<h2 id="compliance-summary">11. Compliance Summary</h2>
-<p>All CTA-5007-B MUST and SHOULD requirements are implemented. All
-referenced standards that are applicable to a library implementation are
-supported. Items marked N/A are transport-layer or application-layer
-concerns outside the scope of a token encoding/decoding library.</p>
-<p><strong>Test coverage:</strong> 418+ tests covering all claim types,
-algorithms, encoding formats, validation rules, and edge cases.</p>
+<h2 id="11-compliance-summary">11. Compliance Summary</h2>
+<p>All CTA-5007-B claim-side MUST and SHOULD requirements are
+implemented and tested. Items marked <strong>N/A</strong> are
+transport-layer or application-layer concerns. Items marked
+<strong>PARTIAL</strong> deviate from the referenced spec in ways that a
+deploying integrator MUST understand:</p>
+<ul>
+<li><strong>DPoP wire format (§5, §8, §10):</strong> proofs use the
+CWT/COSE profile from draft-nandakumar-moq-generic-dpop-proof-00,
+identified by the frozen <code>typ</code> string
+<code>dpop-proof+cwt;profile=cta5007b-v1</code>. Label numbers
+400/401/402 are private-use until IANA registration lands; a peer that
+speaks only the JWT form referenced by CAT-4-MOQT cannot interoperate on
+the DPoP proof without a JWT plug-in module (the crate's
+<code>dpop.rs</code> is structured so a sibling <code>jwt</code> module
+can be added without touching validator logic).</li>
+<li><strong>RFC 9449 §11.1 replay retention:</strong> the default
+<code>LruJtiStore</code> evicts under memory pressure. CDN-scale
+deployments MUST supply a strict TTL-backed store via
+<code>DpopValidator::with_jti_store_strict</code>; the constructor
+refuses non-strict stores.</li>
+<li><strong>CAT-4-MOQT §DPoP integration:</strong> action-name mapping
+and actx label assignments follow the generic-DPoP draft, not the
+CAT-4-MOQT PUB_NS / SUB_NS mnemonics. Update this section when either
+draft advances.</li>
+</ul>
+<p><strong>Test coverage:</strong> 530+ tests covering claims,
+algorithms, encoding, validation, DPoP CWT strictness (duplicate keys,
+trailing data, cti byte-string enforcement), and cross-endpoint proof
+binding.</p>
 </body>
 </html>

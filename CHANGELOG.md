@@ -1,5 +1,63 @@
 # Changelog
 
+## 0.4.1 — 2026-09-06
+
+Post-audit follow-up. Fixes the CI feature-matrix compile break introduced
+in 0.4.0, aligns DPoP action mnemonics with CAT-4-MOQT §3.1.2, and
+tightens documentation and API surface around the CDN integration
+boundary.
+
+### Breaking
+
+- MOQT action wire mnemonics now follow CAT-4-MOQT §3.1.2 Table 2:
+  `PublishNamespace` → `PUB_NS` (was `PUBLISH_NAMESPACE`),
+  `SubscribeNamespace` → `SUB_NS` (was `SUBSCRIBE_NAMESPACE`),
+  `RequestUpdate` → `REQ_UPDATE` (was `REQUEST_UPDATE`),
+  `TrackStatus` → `TRK_STATUS` (was `TRACK_STATUS`),
+  `ClientSetup` / `ServerSetup` → `SETUP` (were `CLIENT_SETUP` /
+  `SERVER_SETUP`; the wire form is ambiguous by draft, DPoP proofs
+  decode `SETUP` as `ClientSetup`).
+- Removed `MoqtValidator::with_dpop_validator`. It bypassed the
+  strict-store contract enforced by `try_with_strict_dpop_validation`
+  and had no in-tree callers.
+- Removed `MoqtAction::action_name()`. Wire naming lives on
+  `moqt_action_wire_name` in `dpop.rs`; the enum should not carry two
+  parallel spellings.
+
+### Fixed
+
+- CI feature-matrix (`.github/workflows/ci.yml`) no longer fails at
+  `--no-default-features` or feature-subset builds:
+  - `tests/test_replay_fault_injection.rs` is gated behind
+    `#![cfg(feature = "moqt")]`.
+  - `tests/test_trie.rs` is gated behind `moqt` **and** at least one of
+    `builtin-trie` / `qp-trie` (the `PrefixTrie` symbol requires one).
+  - Generic COSE / CWT constants (`COSE_HDR_*`, `CWT_CLAIM_IAT/CTI`,
+    `COSE_KEY_*`, `COSE_KTY_*`, `COSE_CRV_P256`, `COSE_TAG_SIGN1`) are
+    now `pub` — they are RFC 8152 / 8392 primitives, not MOQT-specific,
+    and exposing them keeps them clippy-clean under `--no-default-
+    features` without misleading `#[allow(dead_code)]`.
+- `docs/std-compliance-req.html` regenerated from
+  `docs/std-compliance-req.md`; removed stale references to
+  `authorize_with_dpop()` and `DpopProof::create_proof()`.
+- `src/dpop.rs` module documentation rewritten to describe the current
+  dual-format (CWT + JWT) state instead of promising JWT "later".
+
+### Added
+
+- `MoqtValidator::try_with_strict_dpop_validation` rustdoc now spells
+  out the caller obligations behind `JtiStore::is_strict()`:
+  self-attestation only, plus explicit requirements on atomic
+  insert-if-absent, TTL ≥ freshness window, and fail-closed on backend
+  outage. Distributed CDN backends must be audited against these
+  requirements at integration time — this crate cannot verify them.
+- `JtiStore::is_strict` rustdoc clarified as self-attestation with
+  scope limits.
+- `MoqtValidator::authorize` rustdoc documents the DPoP-JTI-then-CAT-
+  cti commit ordering as **non-atomic across two independent stores**,
+  and points callers who need atomicity at binding both commits to the
+  same transactional backend.
+
 ## 0.4.0 — 2026-09-05
 
 CDN deployment readiness release. Closes round-2 audit findings around

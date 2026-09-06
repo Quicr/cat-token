@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2022 Quicr
 // SPDX-License-Identifier: BSD-2-Clause
 
-#![cfg(feature = "moqt")]
+#![cfg(all(feature = "moqt", any(feature = "builtin-trie", feature = "qp-trie")))]
 
 use cat_token::*;
 

@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2022 Quicr
 // SPDX-License-Identifier: BSD-2-Clause
 
+#![cfg(feature = "moqt")]
+
 //! Fault-injection tests for the replay-JTI store contract.
 //!
 //! CDN deployments run the JtiStore behind an unreliable transport

@@ -197,9 +197,10 @@ impl MoqtValidator {
     /// **Not strict.** RFC 9449 §11.1 requires every accepted JTI be
     /// retained for at least the freshness window; the LRU-backed default
     /// evicts under pressure. CDN-scale deployments MUST call
-    /// [`MoqtValidator::try_with_strict_dpop_validation`] or
-    /// [`MoqtValidator::with_dpop_validator`] instead, passing a store that
-    /// returns `true` from [`crate::JtiStore::is_strict`].
+    /// [`MoqtValidator::try_with_strict_dpop_validation`] instead, passing
+    /// a store that returns `true` from [`crate::JtiStore::is_strict`].
+    /// Use this constructor only for local development, single-tenant
+    /// tests, or intentionally best-effort replay defense.
     pub fn with_dpop_validation(mut self, settings: CatDpopSettings) -> Self {
         self.dpop_validator = Some(DpopValidator::new(settings));
         self
@@ -214,6 +215,27 @@ impl MoqtValidator {
     /// across relays or that must survive a single-relay restart without
     /// losing replay defense. The strict-mode contract is a hard
     /// prerequisite for that guarantee.
+    ///
+    /// # Caller obligations
+    ///
+    /// The `is_strict()` bit is *self-attestation*: the store promises it
+    /// will never evict a retained JTI within the freshness window. This
+    /// crate cannot verify durability, atomic insert-if-absent semantics,
+    /// or correct TTL configuration on your behalf. A production CDN
+    /// deployment behind a distributed store must additionally guarantee:
+    ///
+    /// - Atomic insert-if-absent across all relay nodes that share the
+    ///   store (a `SETNX`-equivalent with TTL, not `GET` then `SET`).
+    /// - `check_and_insert` returns [`CatError::CryptoError`] on backend
+    ///   unavailability so authorization fails closed (see
+    ///   [`crate::dpop::JtiStore::check_and_insert`]).
+    /// - Store TTL ≥ DPoP acceptance window + tolerated clock skew.
+    /// - No silent eviction inside that TTL under any load condition.
+    ///
+    /// The [`crate::dpop::InMemoryStrictJtiStore`] reference backend
+    /// satisfies all four for a single-relay deployment; distributed
+    /// backends (Redis, DynamoDB with strong consistency, etc.) must be
+    /// audited against this list before deployment.
     pub fn try_with_strict_dpop_validation(
         mut self,
         settings: CatDpopSettings,
@@ -221,16 +243,6 @@ impl MoqtValidator {
     ) -> Result<Self, CatError> {
         self.dpop_validator = Some(DpopValidator::with_jti_store_strict(settings, store)?);
         Ok(self)
-    }
-
-    /// Plug in a pre-constructed [`DpopValidator`]. The caller is
-    /// responsible for choosing the underlying [`JtiStore`] and for the
-    /// strictness guarantee — use this when the surrounding application
-    /// already owns a `DpopValidator` (e.g. shared across multiple
-    /// authorization pipelines).
-    pub fn with_dpop_validator(mut self, validator: DpopValidator) -> Self {
-        self.dpop_validator = Some(validator);
-        self
     }
 
     /// Set the expected resource URI for DPoP binding validation
@@ -304,6 +316,24 @@ impl MoqtValidator {
     /// Callers who want to surface `catif` action mappings on failure should
     /// consult `token.claims().request.catif` after mapping the returned
     /// error to a claim key.
+    ///
+    /// # Replay-commit atomicity (caller contract)
+    ///
+    /// If both DPoP JTI validation and `catreplay` are enabled, the two
+    /// commits go to independent stores (`JtiStore` and `ReplayGuard`) in
+    /// sequence — JTI first, `cti` second. **This is not atomic.** If the
+    /// `cti` commit fails after the JTI commit succeeds, the JTI is burned
+    /// but the `cti` is not; the client must retry with a *fresh* JTI (RFC
+    /// 9449 requires a new proof on every attempt anyway). See the inline
+    /// commentary at the commit site for why JTI-first ordering is the
+    /// safer of the two non-atomic orderings.
+    ///
+    /// Deployments that need strict atomicity between the two stores MUST
+    /// back both `JtiStore::check_and_insert` and
+    /// `ReplayGuard::check_and_record` with the same transactional
+    /// backend (or bind `ReplayGuard::check_and_record` to a store that
+    /// records both keys inside a single transaction). This crate does
+    /// not distribute a transaction across two independent stores.
     pub fn authorize<G: ReplayGuard + ?Sized>(
         &self,
         token: &ValidatedToken,

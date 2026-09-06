@@ -1,17 +1,21 @@
 // SPDX-FileCopyrightText: Copyright (c) 2022 Quicr
 // SPDX-License-Identifier: BSD-2-Clause
 
-//! DPoP proof-of-possession, CWT wire format.
+//! DPoP proof-of-possession.
 //!
 //! `DpopProof` is a format-neutral in-memory representation: the header, the
-//! payload, and the signature. Wire encoding is implemented in submodules so
-//! that alternate formats (JWT/JOSE) can be added later without changing the
-//! validator or the semantic layer.
+//! payload, and the signature. Wire encoding is implemented in submodules,
+//! selected by [`DpopProof::wire_format`] via [`DpopWireFormat`]:
 //!
-//! Current wire format: **COSE_Sign1 CWT** per
-//! `draft-nandakumar-moq-generic-dpop-proof-00`. `DpopProof::encode` /
-//! `DpopProof::decode` route through [`cwt`]; add a `jwt` sibling module and
-//! flip the default when JWT support is needed.
+//! - **COSE_Sign1 CWT** ([`cwt`]) — default. Follows
+//!   `draft-nandakumar-moq-generic-dpop-proof-00` with the frozen private
+//!   profile identified by `typ=dpop-proof+cwt;profile=cta5007b-v1`.
+//! - **JWT compact serialization** ([`jwt`]) — RFC 9449 form,
+//!   `typ=dpop-proof+jwt`.
+//!
+//! [`DpopProof::encode`] dispatches on the wire format. [`DpopProof::decode`]
+//! autodetects (JWT if the input is ASCII with two `.` separators; CWT
+//! otherwise). [`DpopProof::decode_as`] forces a specific format.
 
 use crate::CatError;
 #[cfg(feature = "moqt")]
@@ -93,44 +97,59 @@ pub enum DpopWireFormat {
 pub const SUPPORTED_DPOP_COSE_ALGORITHMS: &[i64] =
     &[crate::crypto::ALG_ES256, crate::crypto::ALG_PS256];
 
-// --- COSE labels ---------------------------------------------------------
+// --- COSE / CWT labels ---------------------------------------------------
 //
-// Protected-header labels (RFC 8152 §3.1 / RFC 9596):
-pub(crate) const COSE_HDR_ALG: i64 = 1;
-pub(crate) const COSE_HDR_COSE_KEY: i64 = 4;
-pub(crate) const COSE_HDR_TYP: i64 = 16;
+// Generic CWT / COSE primitives — RFC 8152 (COSE), RFC 8392 (CWT base
+// claims), RFC 8230 (RSA COSE_Key). These are not MOQT-specific and are
+// exposed on the crate surface so CAT-only callers can reference them by
+// name. The MOQT-specific labels — `ACTX_*` and the private-profile
+// `CWT_CLAIM_ACTX/NONCE/ATH` — are cfg-gated below.
 
-// CWT-payload labels (RFC 8392 + draft-nandakumar-moq-generic-dpop-proof-00).
-// Labels 6 and 7 come from the CWT base registry. 400/401/402 are private
-// under the profile identifier baked into `DPOP_TYP`; see the module-level
-// note above.
-pub(crate) const CWT_CLAIM_IAT: i64 = 6;
-pub(crate) const CWT_CLAIM_CTI: i64 = 7;
+// Protected-header labels (RFC 8152 §3.1 / RFC 9596):
+pub const COSE_HDR_ALG: i64 = 1;
+pub const COSE_HDR_COSE_KEY: i64 = 4;
+pub const COSE_HDR_TYP: i64 = 16;
+
+// CWT base-registry payload labels (RFC 8392):
+pub const CWT_CLAIM_IAT: i64 = 6;
+pub const CWT_CLAIM_CTI: i64 = 7;
+
+// Private-profile CWT-payload labels — draft-nandakumar-moq-generic-dpop-
+// proof-00 with the frozen `profile=cta5007b-v1` identifier. See the
+// module-level note above; these ARE MOQT-specific.
+#[cfg(feature = "moqt")]
 pub(crate) const CWT_CLAIM_ACTX: i64 = 400;
+#[cfg(feature = "moqt")]
 pub(crate) const CWT_CLAIM_NONCE: i64 = 401;
+#[cfg(feature = "moqt")]
 pub(crate) const CWT_CLAIM_ATH: i64 = 402;
 
-// actx inner-map labels (draft §3.2):
+// actx inner-map labels (draft §3.2). MOQT-specific.
+#[cfg(feature = "moqt")]
 pub(crate) const ACTX_TYPE: i64 = 0;
+#[cfg(feature = "moqt")]
 pub(crate) const ACTX_ACTION: i64 = 1;
+#[cfg(feature = "moqt")]
 pub(crate) const ACTX_TNS: i64 = 2;
+#[cfg(feature = "moqt")]
 pub(crate) const ACTX_TN: i64 = 3;
+#[cfg(feature = "moqt")]
 pub(crate) const ACTX_PARAMETERS: i64 = 4;
 
-// COSE_Key labels (RFC 8152 §7):
-const COSE_KEY_KTY: i64 = 1;
-const COSE_KEY_ALG: i64 = 3;
-const COSE_KEY_CRV: i64 = -1;
-const COSE_KEY_X: i64 = -2;
-const COSE_KEY_Y: i64 = -3;
-const COSE_KEY_N: i64 = -1; // RSA n (RFC 8230 §4)
-const COSE_KEY_E: i64 = -2; // RSA e (RFC 8230 §4)
+// COSE_Key labels (RFC 8152 §7 + RFC 8230 §4 for RSA):
+pub const COSE_KEY_KTY: i64 = 1;
+pub const COSE_KEY_ALG: i64 = 3;
+pub const COSE_KEY_CRV: i64 = -1;
+pub const COSE_KEY_X: i64 = -2;
+pub const COSE_KEY_Y: i64 = -3;
+pub const COSE_KEY_N: i64 = -1; // RSA n (RFC 8230 §4)
+pub const COSE_KEY_E: i64 = -2; // RSA e (RFC 8230 §4)
 
-const COSE_KTY_EC2: i64 = 2;
-const COSE_KTY_RSA: i64 = 3;
-const COSE_CRV_P256: i64 = 1;
+pub const COSE_KTY_EC2: i64 = 2;
+pub const COSE_KTY_RSA: i64 = 3;
+pub const COSE_CRV_P256: i64 = 1;
 
-const COSE_TAG_SIGN1: u64 = 18;
+pub const COSE_TAG_SIGN1: u64 = 18;
 
 #[cfg(feature = "moqt")]
 const MAX_DPOP_WIRE_SIZE: usize = 16 * 1024;
@@ -252,36 +271,42 @@ impl AuthorizationContext {
     }
 }
 
-/// Text-string wire form of a `MoqtAction`, per MOQTransport §9. This is what
-/// the draft's `actx.action` field carries; keep in sync with the enum.
+/// Text-string wire form of a `MoqtAction`, per CAT-4-MOQT §3.1.2 Table 2.
+/// This is what the draft's `actx.action` field carries; keep in sync with the
+/// enum.
+///
+/// Note: `ClientSetup` and `ServerSetup` both serialize to `SETUP` on the wire
+/// per Table 2. The distinction is direction of the underlying MOQT control
+/// message; a DPoP proof issued by a client always carries `SETUP` and is
+/// decoded as `ClientSetup` on the recipient side.
 #[cfg(feature = "moqt")]
 pub fn moqt_action_wire_name(action: MoqtAction) -> &'static str {
     match action {
-        MoqtAction::ClientSetup => "CLIENT_SETUP",
-        MoqtAction::ServerSetup => "SERVER_SETUP",
-        MoqtAction::PublishNamespace => "PUBLISH_NAMESPACE",
-        MoqtAction::SubscribeNamespace => "SUBSCRIBE_NAMESPACE",
+        MoqtAction::ClientSetup | MoqtAction::ServerSetup => "SETUP",
+        MoqtAction::PublishNamespace => "PUB_NS",
+        MoqtAction::SubscribeNamespace => "SUB_NS",
         MoqtAction::Subscribe => "SUBSCRIBE",
-        MoqtAction::RequestUpdate => "REQUEST_UPDATE",
+        MoqtAction::RequestUpdate => "REQ_UPDATE",
         MoqtAction::Publish => "PUBLISH",
         MoqtAction::Fetch => "FETCH",
-        MoqtAction::TrackStatus => "TRACK_STATUS",
+        MoqtAction::TrackStatus => "TRK_STATUS",
     }
 }
 
-/// Parse a MOQTransport §9 action name back into a `MoqtAction`.
+/// Parse a CAT-4-MOQT §3.1.2 action name back into a `MoqtAction`. The wire
+/// form `SETUP` is ambiguous between `ClientSetup` and `ServerSetup`; DPoP
+/// proofs are issued by the client, so `SETUP` decodes to `ClientSetup`.
 #[cfg(feature = "moqt")]
 pub fn moqt_action_from_wire_name(name: &str) -> Result<MoqtAction, CatError> {
     match name {
-        "CLIENT_SETUP" => Ok(MoqtAction::ClientSetup),
-        "SERVER_SETUP" => Ok(MoqtAction::ServerSetup),
-        "PUBLISH_NAMESPACE" => Ok(MoqtAction::PublishNamespace),
-        "SUBSCRIBE_NAMESPACE" => Ok(MoqtAction::SubscribeNamespace),
+        "SETUP" => Ok(MoqtAction::ClientSetup),
+        "PUB_NS" => Ok(MoqtAction::PublishNamespace),
+        "SUB_NS" => Ok(MoqtAction::SubscribeNamespace),
         "SUBSCRIBE" => Ok(MoqtAction::Subscribe),
-        "REQUEST_UPDATE" => Ok(MoqtAction::RequestUpdate),
+        "REQ_UPDATE" => Ok(MoqtAction::RequestUpdate),
         "PUBLISH" => Ok(MoqtAction::Publish),
         "FETCH" => Ok(MoqtAction::Fetch),
-        "TRACK_STATUS" => Ok(MoqtAction::TrackStatus),
+        "TRK_STATUS" => Ok(MoqtAction::TrackStatus),
         other => Err(CatError::InvalidClaimValue(format!(
             "unknown MOQT action '{other}'"
         ))),
@@ -1743,6 +1768,16 @@ pub trait JtiStore: Send + Sync {
     /// (LRU, bounded HashSet) MUST return `false`. Used by
     /// [`DpopValidator::with_jti_store_strict`] to refuse construction
     /// with a non-strict store.
+    ///
+    /// This is a **self-attestation**: it advertises intent, not proof.
+    /// The validator cannot verify from `is_strict() == true` alone that
+    /// the backend is durable across relay restarts, that inserts are
+    /// atomic (insert-if-absent, not check-then-set) across concurrent
+    /// nodes, that TTL is at least the freshness window, or that the
+    /// backend fails closed on outage. Distributed strict deployments
+    /// must satisfy those additional obligations at the store level; see
+    /// [`crate::moqt::MoqtValidator::try_with_strict_dpop_validation`]
+    /// for the full caller contract.
     fn is_strict(&self) -> bool {
         false
     }
