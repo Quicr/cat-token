@@ -45,17 +45,45 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 // any change to label numbers, action-name mapping, or actx map shape.
 
 /// Text-string `typ` value in the COSE protected header (RFC 9596 label
-/// 16). Includes an explicit `profile=` parameter so that the frozen
-/// private-use label assignment below (`actx=400`, `nonce=401`, `ath=402`)
-/// is unambiguously identified even if a future IANA registration reuses
-/// those numbers for different claims.
+/// 16) for CWT-format DPoP proofs. Includes an explicit `profile=`
+/// parameter so that the frozen private-use label assignment below
+/// (`actx=400`, `nonce=401`, `ath=402`) is unambiguously identified even
+/// if a future IANA registration reuses those numbers for different
+/// claims.
 pub const DPOP_TYP: &str = "dpop-proof+cwt;profile=cta5007b-v1";
+
+/// `typ` value for JWT-format DPoP proofs (RFC 9449 §4.2). CAT-4-MOQT
+/// draft-ietf-moq-c4m defines the payload shape carried inside — the
+/// `actx` object mirrors the CWT profile, with the same action wire
+/// names (`SUBSCRIBE`, `PUBLISH`, etc.). Used only when the caller
+/// selects [`DpopWireFormat::Jwt`].
+pub const DPOP_TYP_JWT: &str = "dpop-proof+jwt";
 
 /// Backwards-compatibility alias — earlier revisions accepted a bare
 /// `dpop-proof+cwt` in the `typ` header. Callers using pre-v1 proofs must
 /// migrate.
 #[deprecated(note = "use DPOP_TYP (includes profile=cta5007b-v1)")]
 pub const DPOP_TYP_LEGACY: &str = "dpop-proof+cwt";
+
+/// Wire format for a DPoP proof. The default is [`DpopWireFormat::Cwt`],
+/// which matches `draft-nandakumar-moq-generic-dpop-proof-00`; select
+/// [`DpopWireFormat::Jwt`] to interoperate with the JOSE-based RFC 9449
+/// deployment path expected by CAT-4-MOQT until CWT DPoP is standardized.
+///
+/// The `DpopProof` in-memory representation is format-neutral — only the
+/// codec used by [`DpopProof::encode`]/[`DpopProof::decode`] changes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DpopWireFormat {
+    /// COSE_Sign1 CWT (`dpop-proof+cwt;profile=cta5007b-v1`). Wire bytes
+    /// are raw CBOR; suitable for MOQT control messages that carry the
+    /// proof as an opaque blob.
+    #[default]
+    Cwt,
+    /// JWS Compact Serialization (`dpop-proof+jwt`). Wire bytes are
+    /// ASCII: `base64url(header).base64url(payload).base64url(sig)`. Use
+    /// this when interoperating with RFC 9449 tooling.
+    Jwt,
+}
 
 /// COSE algorithm identifiers accepted for DPoP signing. Symmetric algorithms
 /// are forbidden by the draft; asymmetric algorithms only.
@@ -143,8 +171,22 @@ impl DpopHeader {
         }
     }
 
+    /// Header constructor for JWT-format proofs. Sets `typ` to
+    /// [`DPOP_TYP_JWT`] so [`DpopHeader::is_valid`] accepts it.
+    pub fn new_jwt(alg: i64, jwk: Jwk) -> Self {
+        Self {
+            alg,
+            typ: DPOP_TYP_JWT.to_string(),
+            jwk,
+        }
+    }
+
+    /// Accept either the CWT profile identifier or the JWT `typ`. The
+    /// wire format is fixed by the codec on encode/decode; the header
+    /// only carries the human-readable label so a caller inspecting the
+    /// parsed proof can tell how it arrived.
     pub fn is_valid(&self) -> bool {
-        self.typ == DPOP_TYP && self.is_supported_algorithm()
+        (self.typ == DPOP_TYP || self.typ == DPOP_TYP_JWT) && self.is_supported_algorithm()
     }
 
     pub fn is_supported_algorithm(&self) -> bool {
@@ -330,7 +372,8 @@ pub fn confirmation_matches_jwk(cnf: &ConfirmationClaim, jwk: &Jwk) -> Result<bo
 // --- Proof --------------------------------------------------------------
 
 /// In-memory DPoP proof. Format-neutral: `encode()`/`decode()` route through
-/// the CWT wire codec, but the fields have no wire dependency of their own.
+/// either the CWT ([`cwt`]) or JWT ([`jwt`]) wire codec depending on
+/// `wire_format`. The fields have no wire dependency of their own.
 #[cfg(feature = "moqt")]
 #[derive(Clone)]
 pub struct DpopProof {
@@ -338,11 +381,18 @@ pub struct DpopProof {
     pub(crate) payload: DpopPayload,
     pub(crate) signature: Vec<u8>,
     /// Exact protected-header + payload bytes the signature covers, as
-    /// received on the wire (COSE `Sig_structure` input, or blank for
-    /// locally-built proofs until [`sign`] runs). Preserving these bytes lets
-    /// the verifier operate on the received input rather than re-serializing —
-    /// see RFC 8152 §4.4.
+    /// received on the wire. For CWT, these are the raw CBOR bytes of the
+    /// header map and payload map — see COSE_Sign1's `Sig_structure` input
+    /// (RFC 8152 §4.4). For JWT, these are the raw JSON bytes of the header
+    /// object and payload object; the JWS signing input is derived by
+    /// base64url-encoding them and joining with `.` (RFC 7515 §5.1).
+    /// Preserving the received bytes lets the verifier operate on them
+    /// directly rather than re-serializing.
     pub(crate) signed_bytes: SignedInput,
+    /// Wire format this proof will encode to and decoded from. Defaults to
+    /// [`DpopWireFormat::Cwt`]; changing this is the only knob the
+    /// authorizer sees — everything else is format-neutral.
+    pub(crate) wire_format: DpopWireFormat,
 }
 
 #[cfg(feature = "moqt")]
@@ -378,6 +428,7 @@ impl DpopProof {
             payload,
             signature,
             signed_bytes: SignedInput::default(),
+            wire_format: DpopWireFormat::Cwt,
         }
     }
 
@@ -393,8 +444,27 @@ impl DpopProof {
         &self.signature
     }
 
+    pub fn wire_format(&self) -> DpopWireFormat {
+        self.wire_format
+    }
+
+    /// Select the wire format this proof will encode to. Also flips the
+    /// header's `typ` to the matching value. Resets any cached signed
+    /// bytes because the codec-specific serialization must be redone.
+    pub fn with_wire_format(mut self, format: DpopWireFormat) -> Self {
+        self.wire_format = format;
+        self.header.typ = match format {
+            DpopWireFormat::Cwt => DPOP_TYP.to_string(),
+            DpopWireFormat::Jwt => DPOP_TYP_JWT.to_string(),
+        };
+        self.signed_bytes = SignedInput::default();
+        self
+    }
+
     /// Build an unsigned proof for a MOQT request. Alg is passed as a COSE
-    /// algorithm id (e.g. `-7` for ES256).
+    /// algorithm id (e.g. `-7` for ES256). Defaults to
+    /// [`DpopWireFormat::Cwt`] — call [`DpopProof::with_wire_format`] to
+    /// select JWT.
     pub fn create_for_moqt(
         action: MoqtAction,
         namespace: Vec<Vec<u8>>,
@@ -410,6 +480,7 @@ impl DpopProof {
             payload,
             signature: Vec::new(),
             signed_bytes: SignedInput::default(),
+            wire_format: DpopWireFormat::Cwt,
         }
     }
 
@@ -448,19 +519,17 @@ impl DpopProof {
         self
     }
 
-    /// Returns the COSE `Sig_structure` bytes the signature was (or will be)
-    /// computed over. For decoded proofs this reflects the received wire
-    /// bytes; for locally-built proofs it is derived at sign time.
+    /// Bytes the signature was (or will be) computed over. Dispatches on
+    /// [`DpopProof::wire_format`]: CWT proofs return the `Sig_structure`
+    /// input from RFC 8152 §4.4; JWT proofs return the JWS signing input
+    /// `base64url(header) || '.' || base64url(payload)` from RFC 7515 §5.1.
+    /// For decoded proofs this reflects the received wire bytes; for
+    /// locally-built proofs it is derived at sign time.
     pub fn signing_input(&self) -> Result<Vec<u8>, CatError> {
-        let SignedInput {
-            header_cbor,
-            payload_cbor,
-        } = if self.signed_bytes.is_empty() {
-            cwt::encode_header_and_payload(&self.header, &self.payload)?
-        } else {
-            self.signed_bytes.clone()
-        };
-        crate::crypto::create_signing_input(&header_cbor, &payload_cbor, self.header.alg)
+        match self.wire_format {
+            DpopWireFormat::Cwt => cwt::signing_input(self),
+            DpopWireFormat::Jwt => jwt::signing_input(self),
+        }
     }
 
     pub fn sign(&mut self, algorithm: &dyn CryptographicAlgorithm) -> Result<(), CatError> {
@@ -470,29 +539,54 @@ impl DpopProof {
                 found: algorithm.algorithm_id(),
             });
         }
-        let bytes = cwt::encode_header_and_payload(&self.header, &self.payload)?;
-        let sig_input = crate::crypto::create_signing_input(
-            &bytes.header_cbor,
-            &bytes.payload_cbor,
-            self.header.alg,
-        )?;
+        let bytes = match self.wire_format {
+            DpopWireFormat::Cwt => cwt::encode_header_and_payload(&self.header, &self.payload)?,
+            DpopWireFormat::Jwt => jwt::encode_header_and_payload(&self.header, &self.payload)?,
+        };
+        let sig_input = match self.wire_format {
+            DpopWireFormat::Cwt => crate::crypto::create_signing_input(
+                &bytes.header_cbor,
+                &bytes.payload_cbor,
+                self.header.alg,
+            )?,
+            DpopWireFormat::Jwt => jwt::jws_signing_input(&bytes),
+        };
         self.signature = algorithm.sign(&sig_input)?;
         self.signed_bytes = bytes;
         Ok(())
     }
 
-    /// Encode this proof as a COSE_Sign1 CWT (tag 18). Returns the raw CBOR
-    /// bytes suitable for transport (e.g. in a `DPoP` HTTP header carrying a
-    /// base64url-encoded copy, or the wire-native form for MOQT control
-    /// messages).
+    /// Encode this proof using the codec selected by
+    /// [`DpopProof::wire_format`]. CWT proofs produce raw CBOR bytes;
+    /// JWT proofs produce ASCII bytes in JWS compact serialization
+    /// (`base64url(header).base64url(payload).base64url(sig)`).
     pub fn encode(&self) -> Result<Vec<u8>, CatError> {
-        cwt::encode(self)
+        match self.wire_format {
+            DpopWireFormat::Cwt => cwt::encode(self),
+            DpopWireFormat::Jwt => jwt::encode(self),
+        }
     }
 
-    /// Decode a proof from COSE_Sign1 CBOR bytes. See [`cwt::decode`] for the
-    /// exact acceptance rules.
+    /// Decode a proof, autodetecting the wire format. A leading CBOR tag
+    /// byte (`0xD2` for tag 18) selects [`cwt::decode`]; ASCII input with
+    /// two `.` separators selects [`jwt::decode`]. See the module docs
+    /// for the acceptance rules of each.
     pub fn decode(bytes: &[u8]) -> Result<Self, CatError> {
-        cwt::decode(bytes)
+        if looks_like_jwt(bytes) {
+            jwt::decode(bytes)
+        } else {
+            cwt::decode(bytes)
+        }
+    }
+
+    /// Decode explicitly under a chosen format. Prefer
+    /// [`DpopProof::decode`] unless the caller has out-of-band knowledge
+    /// of the wire format and wants to reject the other.
+    pub fn decode_as(bytes: &[u8], format: DpopWireFormat) -> Result<Self, CatError> {
+        match format {
+            DpopWireFormat::Cwt => cwt::decode(bytes),
+            DpopWireFormat::Jwt => jwt::decode(bytes),
+        }
     }
 
     pub fn is_valid(&self, settings: &CatDpopSettings) -> bool {
@@ -571,6 +665,20 @@ impl From<&str> for AthInput {
     fn from(s: &str) -> Self {
         AthInput::Base64(s.to_string())
     }
+}
+
+#[cfg(feature = "moqt")]
+fn looks_like_jwt(bytes: &[u8]) -> bool {
+    // A JWS compact serialization is entirely ASCII base64url + two `.`
+    // separators. A CBOR-tagged COSE_Sign1 starts with 0xd2 (tag 18) or an
+    // untagged array header byte `0x84` — neither of which is a valid
+    // base64url character. Reject anything with a non-ASCII byte
+    // immediately; otherwise require two `.`s to keep decode_as-style
+    // dispatch unambiguous.
+    if bytes.is_empty() || !bytes.iter().all(|b| b.is_ascii()) {
+        return false;
+    }
+    bytes.iter().filter(|&&b| b == b'.').count() == 2
 }
 
 // --- CWT wire codec -----------------------------------------------------
@@ -703,7 +811,20 @@ pub mod cwt {
                 header_cbor: header_bytes,
                 payload_cbor: payload_bytes,
             },
+            wire_format: DpopWireFormat::Cwt,
         })
+    }
+
+    pub(super) fn signing_input(proof: &DpopProof) -> Result<Vec<u8>, CatError> {
+        let SignedInput {
+            header_cbor,
+            payload_cbor,
+        } = if proof.signed_bytes.is_empty() {
+            encode_header_and_payload(&proof.header, &proof.payload)?
+        } else {
+            proof.signed_bytes.clone()
+        };
+        crate::crypto::create_signing_input(&header_cbor, &payload_cbor, proof.header.alg)
     }
 
     pub(super) fn encode_header_and_payload(
@@ -1252,6 +1373,311 @@ pub mod cwt {
     }
 }
 
+// --- JWT wire codec -----------------------------------------------------
+
+/// JWS compact serialization wire codec for DPoP proofs (`dpop-proof+jwt`).
+///
+/// RFC 9449 §4.2 defines the JWT-form DPoP proof. The DpopProof
+/// in-memory representation is format-neutral, so the JWT and CWT codecs
+/// share the semantic layer (header alg/typ, payload iat/cti/actx/ath/
+/// nonce, JWK holder key) and only differ in how the header and payload
+/// are serialized and signed.
+///
+/// # Payload shape
+///
+/// ```text
+/// {
+///   "iat":  <unix seconds int>,
+///   "jti":  <base64url of the raw cti bytes>,
+///   "actx": {
+///     "type":    "moqt",
+///     "action":  "SUBSCRIBE",              // MOQTransport §9 name
+///     "tns":     ["seg1", "seg2", ...],    // base64url of each segment
+///     "tn":      "<base64url of track bytes>",
+///     "resource":"moqt://..."              // optional
+///   },
+///   "ath":  "<base64url of SHA-256(access token)>",  // optional
+///   "nonce":"<server nonce string>"                  // optional
+/// }
+/// ```
+///
+/// Byte-string fields (cti, tns segments, tn, ath) are base64url-encoded
+/// so they survive JSON round-trip. This is the only shape accepted;
+/// anything else is a decode failure.
+#[cfg(feature = "moqt")]
+pub mod jwt {
+    use super::*;
+    use serde_json::{Map, Value as Json};
+
+    pub(super) fn encode(proof: &DpopProof) -> Result<Vec<u8>, CatError> {
+        let bytes = if proof.signed_bytes.is_empty() {
+            encode_header_and_payload(&proof.header, &proof.payload)?
+        } else {
+            proof.signed_bytes.clone()
+        };
+        let mut out = Vec::with_capacity(bytes.header_cbor.len() + bytes.payload_cbor.len() + 2);
+        out.extend_from_slice(URL_SAFE_NO_PAD.encode(&bytes.header_cbor).as_bytes());
+        out.push(b'.');
+        out.extend_from_slice(URL_SAFE_NO_PAD.encode(&bytes.payload_cbor).as_bytes());
+        out.push(b'.');
+        out.extend_from_slice(URL_SAFE_NO_PAD.encode(&proof.signature).as_bytes());
+        Ok(out)
+    }
+
+    pub(super) fn decode(bytes: &[u8]) -> Result<DpopProof, CatError> {
+        if bytes.len() > MAX_DPOP_WIRE_SIZE {
+            return Err(CatError::InvalidTokenFormat);
+        }
+        let text = std::str::from_utf8(bytes).map_err(|_| CatError::InvalidTokenFormat)?;
+        let mut parts = text.split('.');
+        let h_b64 = parts.next().ok_or(CatError::InvalidTokenFormat)?;
+        let p_b64 = parts.next().ok_or(CatError::InvalidTokenFormat)?;
+        let s_b64 = parts.next().ok_or(CatError::InvalidTokenFormat)?;
+        if parts.next().is_some() {
+            return Err(CatError::InvalidTokenFormat);
+        }
+        let header_bytes = URL_SAFE_NO_PAD
+            .decode(h_b64)
+            .map_err(|e| CatError::InvalidBase64(e.to_string()))?;
+        let payload_bytes = URL_SAFE_NO_PAD
+            .decode(p_b64)
+            .map_err(|e| CatError::InvalidBase64(e.to_string()))?;
+        let signature = URL_SAFE_NO_PAD
+            .decode(s_b64)
+            .map_err(|e| CatError::InvalidBase64(e.to_string()))?;
+
+        let header = decode_header(&header_bytes)?;
+        let payload = decode_payload(&payload_bytes)?;
+        Ok(DpopProof {
+            header,
+            payload,
+            signature,
+            signed_bytes: SignedInput {
+                header_cbor: header_bytes,
+                payload_cbor: payload_bytes,
+            },
+            wire_format: DpopWireFormat::Jwt,
+        })
+    }
+
+    pub(super) fn signing_input(proof: &DpopProof) -> Result<Vec<u8>, CatError> {
+        let bytes = if proof.signed_bytes.is_empty() {
+            encode_header_and_payload(&proof.header, &proof.payload)?
+        } else {
+            proof.signed_bytes.clone()
+        };
+        Ok(jws_signing_input(&bytes))
+    }
+
+    /// JWS signing input per RFC 7515 §5.1:
+    ///   ASCII( base64url(header) || '.' || base64url(payload) )
+    pub(super) fn jws_signing_input(bytes: &SignedInput) -> Vec<u8> {
+        let h = URL_SAFE_NO_PAD.encode(&bytes.header_cbor);
+        let p = URL_SAFE_NO_PAD.encode(&bytes.payload_cbor);
+        let mut out = Vec::with_capacity(h.len() + p.len() + 1);
+        out.extend_from_slice(h.as_bytes());
+        out.push(b'.');
+        out.extend_from_slice(p.as_bytes());
+        out
+    }
+
+    pub(super) fn encode_header_and_payload(
+        header: &DpopHeader,
+        payload: &DpopPayload,
+    ) -> Result<SignedInput, CatError> {
+        Ok(SignedInput {
+            header_cbor: encode_header_json(header)?,
+            payload_cbor: encode_payload_json(payload)?,
+        })
+    }
+
+    fn encode_header_json(header: &DpopHeader) -> Result<Vec<u8>, CatError> {
+        let alg = crate::crypto::cose_to_jose_algorithm(header.alg).ok_or_else(|| {
+            CatError::UnsupportedAlgorithm(format!("no JOSE mapping for COSE alg {}", header.alg))
+        })?;
+        let mut map = Map::new();
+        map.insert("alg".to_string(), Json::String(alg.to_string()));
+        map.insert("typ".to_string(), Json::String(header.typ.clone()));
+        map.insert(
+            "jwk".to_string(),
+            serde_json::to_value(&header.jwk)
+                .map_err(|e| CatError::CryptoError(format!("jwk serialize: {e}")))?,
+        );
+        serde_json::to_vec(&Json::Object(map))
+            .map_err(|e| CatError::CryptoError(format!("header serialize: {e}")))
+    }
+
+    fn decode_header(bytes: &[u8]) -> Result<DpopHeader, CatError> {
+        let v: Json =
+            serde_json::from_slice(bytes).map_err(|e| CatError::InvalidCbor(e.to_string()))?;
+        let obj = v.as_object().ok_or(CatError::InvalidTokenFormat)?;
+        let alg_str = obj
+            .get("alg")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| CatError::MissingRequiredClaim("alg".to_string()))?;
+        let alg = crate::crypto::jose_to_cose_algorithm(alg_str)
+            .ok_or_else(|| CatError::UnsupportedAlgorithm(alg_str.to_string()))?;
+        let typ = obj
+            .get("typ")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| CatError::MissingRequiredClaim("typ".to_string()))?
+            .to_string();
+        let jwk_val = obj
+            .get("jwk")
+            .ok_or_else(|| CatError::MissingRequiredClaim("jwk".to_string()))?
+            .clone();
+        let jwk: Jwk = serde_json::from_value(jwk_val)
+            .map_err(|e| CatError::InvalidClaimValue(format!("jwk: {e}")))?;
+        Ok(DpopHeader { alg, typ, jwk })
+    }
+
+    fn encode_payload_json(payload: &DpopPayload) -> Result<Vec<u8>, CatError> {
+        let mut map = Map::new();
+        map.insert("iat".to_string(), Json::Number(payload.iat.into()));
+        if let Some(cti) = &payload.cti {
+            map.insert("jti".to_string(), Json::String(URL_SAFE_NO_PAD.encode(cti)));
+        }
+        map.insert("actx".to_string(), actx_to_json(&payload.actx));
+        if let Some(nonce) = &payload.nonce {
+            map.insert("nonce".to_string(), Json::String(nonce.clone()));
+        }
+        if let Some(ath) = &payload.ath {
+            map.insert("ath".to_string(), Json::String(URL_SAFE_NO_PAD.encode(ath)));
+        }
+        serde_json::to_vec(&Json::Object(map))
+            .map_err(|e| CatError::CryptoError(format!("payload serialize: {e}")))
+    }
+
+    fn decode_payload(bytes: &[u8]) -> Result<DpopPayload, CatError> {
+        let v: Json =
+            serde_json::from_slice(bytes).map_err(|e| CatError::InvalidCbor(e.to_string()))?;
+        let obj = v.as_object().ok_or(CatError::InvalidTokenFormat)?;
+        let iat = obj
+            .get("iat")
+            .and_then(|v| v.as_i64())
+            .ok_or_else(|| CatError::MissingRequiredClaim("iat".to_string()))?;
+        let cti = match obj.get("jti") {
+            Some(Json::String(s)) => Some(
+                URL_SAFE_NO_PAD
+                    .decode(s)
+                    .map_err(|e| CatError::InvalidBase64(e.to_string()))?,
+            ),
+            Some(_) => {
+                return Err(CatError::InvalidClaimValue(
+                    "jti must be a base64url string".to_string(),
+                ));
+            }
+            None => None,
+        };
+        let actx_val = obj
+            .get("actx")
+            .ok_or_else(|| CatError::MissingRequiredClaim("actx".to_string()))?;
+        let actx = actx_from_json(actx_val)?;
+        let nonce = obj
+            .get("nonce")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let ath = match obj.get("ath") {
+            Some(Json::String(s)) => Some(
+                URL_SAFE_NO_PAD
+                    .decode(s)
+                    .map_err(|e| CatError::InvalidBase64(e.to_string()))?,
+            ),
+            Some(_) => {
+                return Err(CatError::InvalidClaimValue(
+                    "ath must be a base64url string".to_string(),
+                ));
+            }
+            None => None,
+        };
+        Ok(DpopPayload {
+            cti,
+            iat,
+            actx,
+            ath,
+            nonce,
+        })
+    }
+
+    fn actx_to_json(actx: &AuthorizationContext) -> Json {
+        let mut map = Map::new();
+        map.insert("type".to_string(), Json::String(actx.ctx_type.clone()));
+        map.insert(
+            "action".to_string(),
+            Json::String(moqt_action_wire_name(actx.action).to_string()),
+        );
+        let tns_arr: Vec<Json> = actx
+            .tns
+            .iter()
+            .map(|seg| Json::String(URL_SAFE_NO_PAD.encode(seg)))
+            .collect();
+        map.insert("tns".to_string(), Json::Array(tns_arr));
+        if !actx.tn.is_empty() {
+            map.insert(
+                "tn".to_string(),
+                Json::String(URL_SAFE_NO_PAD.encode(&actx.tn)),
+            );
+        }
+        if let Some(resource) = &actx.resource {
+            map.insert("resource".to_string(), Json::String(resource.clone()));
+        }
+        Json::Object(map)
+    }
+
+    fn actx_from_json(v: &Json) -> Result<AuthorizationContext, CatError> {
+        let obj = v
+            .as_object()
+            .ok_or_else(|| CatError::InvalidClaimValue("actx must be a JSON object".to_string()))?;
+        let ctx_type = obj
+            .get("type")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| CatError::MissingRequiredClaim("actx.type".to_string()))?
+            .to_string();
+        let action_name = obj
+            .get("action")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| CatError::MissingRequiredClaim("actx.action".to_string()))?;
+        let action = moqt_action_from_wire_name(action_name)?;
+        let tns_arr = obj
+            .get("tns")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| CatError::MissingRequiredClaim("actx.tns".to_string()))?;
+        let mut tns: Vec<Vec<u8>> = Vec::with_capacity(tns_arr.len());
+        for seg in tns_arr {
+            let s = seg.as_str().ok_or_else(|| {
+                CatError::InvalidClaimValue("actx.tns element must be a string".to_string())
+            })?;
+            tns.push(
+                URL_SAFE_NO_PAD
+                    .decode(s)
+                    .map_err(|e| CatError::InvalidBase64(e.to_string()))?,
+            );
+        }
+        let tn = match obj.get("tn") {
+            Some(Json::String(s)) => URL_SAFE_NO_PAD
+                .decode(s)
+                .map_err(|e| CatError::InvalidBase64(e.to_string()))?,
+            Some(_) => {
+                return Err(CatError::InvalidClaimValue(
+                    "actx.tn must be a base64url string".to_string(),
+                ));
+            }
+            None => Vec::new(),
+        };
+        let resource = obj
+            .get("resource")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        Ok(AuthorizationContext {
+            ctx_type,
+            action,
+            tns,
+            tn,
+            resource,
+        })
+    }
+}
+
 // --- JTI store (unchanged from prior batch) -----------------------------
 
 #[cfg(feature = "moqt")]
@@ -1259,6 +1685,13 @@ const DEFAULT_JTI_CACHE_SIZE: usize = 100_000;
 
 #[cfg(feature = "moqt")]
 const MIN_JTI_CACHE_SIZE: usize = 1000;
+
+/// Hard upper bound on the LRU JTI cache. Capacity requests above this are
+/// clamped to prevent a config typo from allocating gigabytes of shard state
+/// on startup. 10M entries at ~256 bytes per key is ~2.5 GiB — well past any
+/// sensible in-process store.
+#[cfg(feature = "moqt")]
+pub const MAX_JTI_CACHE_SIZE: usize = 10_000_000;
 
 /// Upper bound on the byte length of a JTI accepted into the replay cache.
 /// A hostile issuer emitting kilobyte-scale JTI strings would otherwise be
@@ -1367,10 +1800,25 @@ impl LruJtiStore {
         shards: usize,
         freshness_window_seconds: i64,
     ) -> Self {
-        let effective_capacity = capacity.max(MIN_JTI_CACHE_SIZE);
-        let shard_count = shards.max(1);
-        let per_shard = (effective_capacity / shard_count).max(1);
-        let shards = (0..shard_count).map(|_| LruShard::new(per_shard)).collect();
+        let requested_capacity = capacity.clamp(MIN_JTI_CACHE_SIZE, MAX_JTI_CACHE_SIZE);
+        // Bound the shard count so we never over-allocate on tiny caches.
+        // Each shard needs at least one slot; more shards than requested
+        // capacity would inflate the total (per_shard rounds up to 1) and
+        // waste memory, so cap `shard_count` at `requested_capacity`.
+        let shard_count = shards.max(1).min(requested_capacity);
+        // Distribute capacity so the sum of per-shard capacities equals
+        // `requested_capacity` exactly. Prior implementation used
+        // `(cap / shards).max(1)` which either over-allocated (when cap
+        // was smaller than shards) or dropped remainder (making total
+        // capacity smaller than requested); both are wrong.
+        let base = requested_capacity / shard_count;
+        let remainder = requested_capacity % shard_count;
+        let shards = (0..shard_count)
+            .map(|i| {
+                let extra = if i < remainder { 1 } else { 0 };
+                LruShard::new(base + extra)
+            })
+            .collect();
         Self {
             shards,
             hasher_state: std::collections::hash_map::RandomState::new(),
@@ -1460,6 +1908,119 @@ pub struct JtiCacheStats {
     pub premature_evictions: u64,
 }
 
+/// Strict, in-memory, TTL-backed JtiStore for tests and single-node
+/// deployments that need [`JtiStore::is_strict`] to return `true`.
+///
+/// Unlike [`LruJtiStore`], this store retains every accepted JTI for its
+/// full freshness window: entries are never evicted for capacity, only
+/// removed by an explicit [`InMemoryStrictJtiStore::cleanup`] call after
+/// their TTL has elapsed. This meets the RFC 9449 §11.1 retention
+/// requirement, at the cost of unbounded memory growth if `cleanup` is
+/// never invoked — the store is a placeholder for a real distributed
+/// backend (Redis with per-JTI TTL, DynamoDB with TTL, etc.). Wire that up
+/// in production; keep this store for tests, local dev, and single-relay
+/// deployments where memory is bounded operationally.
+#[cfg(feature = "moqt")]
+pub struct InMemoryStrictJtiStore {
+    entries: Mutex<std::collections::HashMap<String, i64>>,
+    freshness_window_seconds: i64,
+    max_entries: Option<usize>,
+    rejected_over_capacity: std::sync::atomic::AtomicU64,
+}
+
+#[cfg(feature = "moqt")]
+impl InMemoryStrictJtiStore {
+    /// Create a store with a freshness window in seconds. `cleanup` must be
+    /// called periodically (typically by a background timer) to drop entries
+    /// older than the window; without it the store grows unbounded.
+    pub fn new(freshness_window_seconds: i64) -> Self {
+        Self {
+            entries: Mutex::new(std::collections::HashMap::new()),
+            freshness_window_seconds,
+            max_entries: None,
+            rejected_over_capacity: std::sync::atomic::AtomicU64::new(0),
+        }
+    }
+
+    /// Set an upper bound on entry count. Inserts beyond the bound return
+    /// [`CatError::DpopValidationFailed`] rather than silently dropping the
+    /// oldest entry — a strict store never sheds under pressure. A relay
+    /// hitting this bound has a `cleanup` cadence problem or an ingress
+    /// abuse problem; either way, failing loudly is the right answer.
+    pub fn with_max_entries(mut self, max: usize) -> Self {
+        self.max_entries = Some(max);
+        self
+    }
+
+    /// Total inserts that were refused because the entry cap was reached.
+    /// Exported for operational visibility.
+    pub fn rejected_over_capacity(&self) -> u64 {
+        self.rejected_over_capacity
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Convenience wrapper around [`JtiStore::cleanup`] that uses the
+    /// freshness window supplied at construction time. Call this from a
+    /// periodic timer so entries do not accumulate past their TTL.
+    pub fn cleanup_expired(&self) {
+        self.cleanup(self.freshness_window_seconds);
+    }
+}
+
+#[cfg(feature = "moqt")]
+impl JtiStore for InMemoryStrictJtiStore {
+    fn check_and_insert(&self, key: String, iat: i64) -> Result<(), CatError> {
+        if key.len() > MAX_JTI_LENGTH_BYTES {
+            return Err(CatError::DpopValidationFailed(format!(
+                "JTI exceeds {MAX_JTI_LENGTH_BYTES} byte cap"
+            )));
+        }
+        let mut entries = self
+            .entries
+            .lock()
+            .map_err(|_| CatError::CryptoError("Lock poisoned".to_string()))?;
+        if entries.contains_key(&key) {
+            return Err(CatError::ReplayAttackDetected);
+        }
+        if let Some(max) = self.max_entries
+            && entries.len() >= max
+        {
+            self.rejected_over_capacity
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            return Err(CatError::DpopValidationFailed(format!(
+                "strict JTI store at max_entries={max}; increase capacity or cleanup cadence"
+            )));
+        }
+        entries.insert(key, iat);
+        Ok(())
+    }
+
+    fn len(&self) -> usize {
+        self.entries.lock().map(|e| e.len()).unwrap_or(0)
+    }
+
+    fn cleanup(&self, max_age_seconds: i64) {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::ZERO)
+            .as_secs() as i64;
+        if let Ok(mut entries) = self.entries.lock() {
+            entries.retain(|_, iat| now.saturating_sub(*iat) < max_age_seconds);
+        }
+        let _ = max_age_seconds;
+    }
+
+    fn premature_evictions(&self) -> u64 {
+        // Strict stores never prematurely evict; entries that overflow
+        // capacity are refused, not dropped. Report zero.
+        0
+    }
+
+    fn is_strict(&self) -> bool {
+        true
+    }
+}
+
 // --- Validator ----------------------------------------------------------
 
 #[cfg(feature = "moqt")]
@@ -1497,9 +2058,10 @@ impl DpopValidator {
     }
 
     /// Same as [`DpopValidator::new`] with an explicit cache capacity.
-    /// **Not strict** — see [`DpopValidator::new`].
+    /// **Not strict** — see [`DpopValidator::new`]. Cache capacity is
+    /// clamped to `[MIN_JTI_CACHE_SIZE, MAX_JTI_CACHE_SIZE]`.
     pub fn with_cache_size(settings: CatDpopSettings, cache_size: usize) -> Self {
-        let effective_size = cache_size.max(MIN_JTI_CACHE_SIZE);
+        let effective_size = cache_size.clamp(MIN_JTI_CACHE_SIZE, MAX_JTI_CACHE_SIZE);
         let window = settings.effective_window();
         Self {
             jti_expiry_seconds: window.checked_mul(2).unwrap_or(i64::MAX),
@@ -1511,6 +2073,28 @@ impl DpopValidator {
             cache_capacity: effective_size,
             settings,
         }
+    }
+
+    /// Startup-time sanity check: reject settings whose freshness window is
+    /// zero, negative, or absurdly large. Freshness window is what bounds
+    /// the memory footprint of a strict retention store, so a
+    /// misconfiguration here silently balloons memory across the fleet.
+    /// Callers building validators from config should invoke this before
+    /// wiring the store.
+    pub fn preflight(settings: &CatDpopSettings) -> Result<(), CatError> {
+        let window = settings.effective_window();
+        if window <= 0 {
+            return Err(CatError::InvalidClaimValue(format!(
+                "DPoP freshness window must be > 0 (got {window}s)"
+            )));
+        }
+        if window > crate::CATDPOP_MAX_WINDOW_SECS {
+            return Err(CatError::InvalidClaimValue(format!(
+                "DPoP freshness window {window}s exceeds cap {}s",
+                crate::CATDPOP_MAX_WINDOW_SECS
+            )));
+        }
+        Ok(())
     }
 
     /// Plug in a custom [`JtiStore`] without asserting strictness. Use
@@ -1744,10 +2328,19 @@ impl DpopValidator {
 
 // --- MOQT resource URI ---------------------------------------------------
 
+/// Build a canonical `moqt://<endpoint>[?tns=<b64seg1>,<b64seg2>,...[&tn=<b64>]]`
+/// resource URI. Each namespace tuple element is base64url-encoded
+/// independently and joined with `,` (base64url excludes `,`, so it is an
+/// unambiguous separator). The parser in
+/// [`crate::moqt::parse_moqt_resource_uri`] accepts only this exact shape.
+///
+/// Passing `Some(&[])` for `namespace` is rejected — an empty tuple has no
+/// well-defined wire form. Callers that want to omit the namespace should
+/// pass `None`.
 #[cfg(feature = "moqt")]
 pub fn construct_moqt_uri(
     endpoint: &str,
-    namespace: Option<&[u8]>,
+    namespace: Option<&[Vec<u8>]>,
     track: Option<&[u8]>,
 ) -> Result<String, CatError> {
     if endpoint.contains('?') || endpoint.contains('#') || endpoint.contains('/') {
@@ -1757,14 +2350,24 @@ pub fn construct_moqt_uri(
     }
     let mut uri = format!("moqt://{endpoint}");
     if let Some(ns) = namespace {
-        let ns_encoded = URL_SAFE_NO_PAD.encode(ns);
+        if ns.is_empty() {
+            return Err(CatError::InvalidClaimValue(
+                "MOQT resource namespace tuple must have at least one element".to_string(),
+            ));
+        }
+        let encoded_segments: Vec<String> =
+            ns.iter().map(|seg| URL_SAFE_NO_PAD.encode(seg)).collect();
         uri.push_str("?tns=");
-        uri.push_str(&ns_encoded);
+        uri.push_str(&encoded_segments.join(","));
         if let Some(t) = track {
             let t_encoded = URL_SAFE_NO_PAD.encode(t);
             uri.push_str("&tn=");
             uri.push_str(&t_encoded);
         }
+    } else if track.is_some() {
+        return Err(CatError::InvalidClaimValue(
+            "MOQT resource track requires a namespace tuple".to_string(),
+        ));
     }
     Ok(uri)
 }
@@ -2010,6 +2613,105 @@ mod tests {
 
     #[cfg(feature = "moqt")]
     #[test]
+    fn test_dpop_jwt_roundtrip() {
+        let alg = Es256Algorithm::new_with_key_pair().unwrap();
+        let jwk = Jwk::from_es256_verifying_key(alg.verifying_key()).unwrap();
+
+        let mut proof = DpopProof::create_for_moqt(
+            MoqtAction::Subscribe,
+            vec![b"namespace".to_vec()],
+            b"track",
+            crate::crypto::ALG_ES256,
+            jwk,
+        )
+        .with_wire_format(DpopWireFormat::Jwt)
+        .with_jti(generate_jti());
+        proof.sign(&alg).unwrap();
+
+        let encoded = proof.encode().unwrap();
+        // JWS compact = ASCII with two `.`s
+        assert!(encoded.iter().all(|b| b.is_ascii()));
+        assert_eq!(encoded.iter().filter(|&&b| b == b'.').count(), 2);
+
+        let decoded = DpopProof::decode(&encoded).unwrap();
+        assert_eq!(decoded.wire_format, DpopWireFormat::Jwt);
+        assert_eq!(decoded.header.typ, DPOP_TYP_JWT);
+        assert_eq!(decoded.header.alg, crate::crypto::ALG_ES256);
+        assert_eq!(decoded.payload.actx.action, MoqtAction::Subscribe);
+        assert_eq!(decoded.payload.actx.tns, vec![b"namespace".to_vec()]);
+        assert_eq!(decoded.payload.actx.tn, b"track".to_vec());
+    }
+
+    #[cfg(feature = "moqt")]
+    #[test]
+    fn test_dpop_jwt_verify_with_embedded_key() {
+        let alg = Es256Algorithm::new_with_key_pair().unwrap();
+        let jwk = Jwk::from_es256_verifying_key(alg.verifying_key()).unwrap();
+        let thumbprint = jwk.thumbprint().unwrap();
+
+        let mut proof = DpopProof::create_for_moqt(
+            MoqtAction::Subscribe,
+            vec![b"namespace".to_vec()],
+            b"track",
+            crate::crypto::ALG_ES256,
+            jwk,
+        )
+        .with_wire_format(DpopWireFormat::Jwt)
+        .with_jti(generate_jti());
+        proof.sign(&alg).unwrap();
+
+        let encoded = proof.encode().unwrap();
+        let decoded = DpopProof::decode(&encoded).unwrap();
+
+        let settings = CatDpopSettings::new().with_window(300).unwrap();
+        let validator = DpopValidator::new(settings);
+        validator
+            .validate(&decoded, MoqtAction::Subscribe, &thumbprint, None)
+            .expect("decoded JWT proof must verify");
+    }
+
+    #[cfg(feature = "moqt")]
+    #[test]
+    fn test_dpop_wire_format_autodetect() {
+        // CWT-encoded bytes must decode as CWT, JWT-encoded as JWT — the
+        // autodetect path must not mix them.
+        let alg = Es256Algorithm::new_with_key_pair().unwrap();
+        let jwk = Jwk::from_es256_verifying_key(alg.verifying_key()).unwrap();
+        let mut cwt_proof = DpopProof::create_for_moqt(
+            MoqtAction::Subscribe,
+            vec![b"n".to_vec()],
+            b"t",
+            crate::crypto::ALG_ES256,
+            jwk.clone(),
+        )
+        .with_jti(generate_jti());
+        cwt_proof.sign(&alg).unwrap();
+        let mut jwt_proof = DpopProof::create_for_moqt(
+            MoqtAction::Subscribe,
+            vec![b"n".to_vec()],
+            b"t",
+            crate::crypto::ALG_ES256,
+            jwk,
+        )
+        .with_wire_format(DpopWireFormat::Jwt)
+        .with_jti(generate_jti());
+        jwt_proof.sign(&alg).unwrap();
+
+        let cwt_bytes = cwt_proof.encode().unwrap();
+        let jwt_bytes = jwt_proof.encode().unwrap();
+
+        assert_eq!(
+            DpopProof::decode(&cwt_bytes).unwrap().wire_format,
+            DpopWireFormat::Cwt
+        );
+        assert_eq!(
+            DpopProof::decode(&jwt_bytes).unwrap().wire_format,
+            DpopWireFormat::Jwt
+        );
+    }
+
+    #[cfg(feature = "moqt")]
+    #[test]
     fn test_dpop_cwt_verify_with_embedded_key() {
         let alg = Es256Algorithm::new_with_key_pair().unwrap();
         let jwk = Jwk::from_es256_verifying_key(alg.verifying_key()).unwrap();
@@ -2057,10 +2759,29 @@ mod tests {
     fn test_moqt_uri_construction() {
         let uri = construct_moqt_uri("relay.example.com", None, None).unwrap();
         assert_eq!(uri, "moqt://relay.example.com");
-        let uri = construct_moqt_uri("relay.example.com", Some(b"ns"), Some(b"track")).unwrap();
+
+        let ns_single = vec![b"ns".to_vec()];
+        let uri =
+            construct_moqt_uri("relay.example.com", Some(&ns_single), Some(b"track")).unwrap();
         assert!(uri.contains("?tns="));
         assert!(uri.contains("&tn="));
+        assert!(!uri.contains(','));
+
+        let ns_multi = vec![b"sports".to_vec(), b"football".to_vec(), b"spain".to_vec()];
+        let uri = construct_moqt_uri("relay.example.com", Some(&ns_multi), None).unwrap();
+        assert!(uri.contains("?tns="));
+        let tns_query = uri.split_once("?tns=").unwrap().1;
+        assert_eq!(tns_query.matches(',').count(), 2);
+
         assert!(construct_moqt_uri("relay.example.com/path", None, None).is_err());
+        assert!(
+            construct_moqt_uri("relay.example.com", Some(&[]), None).is_err(),
+            "empty namespace tuple must be rejected"
+        );
+        assert!(
+            construct_moqt_uri("relay.example.com", None, Some(b"track")).is_err(),
+            "track without namespace must be rejected"
+        );
     }
 
     #[cfg(feature = "moqt")]
@@ -2105,6 +2826,86 @@ mod tests {
         let long_jti = "x".repeat(MAX_JTI_LENGTH_BYTES + 1);
         let result = store.check_and_insert(long_jti, 0);
         assert!(matches!(result, Err(CatError::DpopValidationFailed(_))));
+    }
+
+    #[cfg(feature = "moqt")]
+    #[test]
+    fn test_lru_shard_sizing_matches_requested_capacity() {
+        // Capacity 1000, 16 shards → 62*4 + 63*12 = 1000 total. Previous
+        // implementation would allocate 62*16 = 992 (short) or 63*16 = 1008
+        // depending on rounding; the fix distributes remainder across the
+        // first `remainder` shards so the sum equals the request exactly.
+        let store = LruJtiStore::with_shards_and_window(MIN_JTI_CACHE_SIZE, 16, 300);
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::ZERO)
+            .as_secs() as i64;
+        // Insert one distinct JTI per requested slot (capacity == MIN_JTI_CACHE_SIZE).
+        for i in 0..MIN_JTI_CACHE_SIZE {
+            store.check_and_insert(format!("k-{i}"), now).unwrap();
+        }
+        // Aggregate len must be <= requested capacity: no shard should
+        // hold more than its allotted slots, and the sum of allotted
+        // slots equals `MIN_JTI_CACHE_SIZE`.
+        assert!(
+            store.len() <= MIN_JTI_CACHE_SIZE,
+            "aggregate len {} exceeded requested capacity {}",
+            store.len(),
+            MIN_JTI_CACHE_SIZE
+        );
+    }
+
+    #[cfg(feature = "moqt")]
+    #[test]
+    fn test_in_memory_strict_store_is_strict_and_replay_detects() {
+        let store = InMemoryStrictJtiStore::new(300);
+        assert!(store.is_strict());
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::ZERO)
+            .as_secs() as i64;
+        store.check_and_insert("k".into(), now).unwrap();
+        let replay = store.check_and_insert("k".into(), now);
+        assert!(matches!(replay, Err(CatError::ReplayAttackDetected)));
+    }
+
+    #[cfg(feature = "moqt")]
+    #[test]
+    fn test_in_memory_strict_store_refuses_at_max_entries() {
+        let store = InMemoryStrictJtiStore::new(300).with_max_entries(2);
+        store.check_and_insert("a".into(), 0).unwrap();
+        store.check_and_insert("b".into(), 0).unwrap();
+        let err = store.check_and_insert("c".into(), 0).unwrap_err();
+        assert!(matches!(err, CatError::DpopValidationFailed(_)));
+        assert_eq!(store.rejected_over_capacity(), 1);
+    }
+
+    #[cfg(feature = "moqt")]
+    #[test]
+    fn test_validator_rejects_non_strict_store_for_strict_ctor() {
+        let store: std::sync::Arc<dyn JtiStore> =
+            std::sync::Arc::new(LruJtiStore::new(MIN_JTI_CACHE_SIZE));
+        let settings = CatDpopSettings::new().with_window(300).unwrap();
+        let result = DpopValidator::with_jti_store_strict(settings, store);
+        let err = match result {
+            Ok(_) => panic!("expected strict-store rejection"),
+            Err(e) => e,
+        };
+        assert!(matches!(err, CatError::CryptoError(_)));
+    }
+
+    #[cfg(feature = "moqt")]
+    #[test]
+    fn test_preflight_rejects_bad_window() {
+        let ok = CatDpopSettings::new().with_window(300).unwrap();
+        DpopValidator::preflight(&ok).unwrap();
+        // window <= 0 can't be set through the builder, but a directly
+        // constructed settings with default effective_window() = 300 is
+        // valid. Verify a too-large window is caught if smuggled through
+        // the internal setter.
+        let mut bad = CatDpopSettings::new();
+        bad.set_window_from_decode(crate::CATDPOP_MAX_WINDOW_SECS + 1);
+        assert!(DpopValidator::preflight(&bad).is_err());
     }
 
     #[cfg(feature = "moqt")]

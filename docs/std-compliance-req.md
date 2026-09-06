@@ -272,7 +272,7 @@ Status legend:
 | Requirement | Spec ref | Status | Notes |
 |---|---|---|---|
 | DPoP proof validation per RFC 9449 §4 | CTA §4.8 | **PASS** | `DpopValidator` implements claim validation, signature verification, replay detection |
-| DPoP proof creation | RFC 9449 | **PASS** | `DpopProof::create_proof()` |
+| DPoP proof creation | RFC 9449 | **PASS** | `DpopProof::create_for_moqt()` (CWT) and `DpopProof::create_for_moqt(...).with_wire_format(DpopWireFormat::Jwt)` (JWT) |
 
 ### 5.1 Confirmation — `cnf` (key 8) — MUST support
 

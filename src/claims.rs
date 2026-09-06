@@ -1197,6 +1197,44 @@ impl MoqtAction {
     pub fn is_valid(value: i32) -> bool {
         (0..=8).contains(&value)
     }
+
+    /// Return the [`MoqtResourceShape`] the action operates on. Callers use
+    /// this to enforce that a DPoP proof's `actx.resource` (and the request
+    /// context) carry only the fields relevant to the action — setup actions
+    /// carry an endpoint only, namespace actions carry endpoint plus
+    /// namespace, and track actions carry endpoint, namespace, and track.
+    pub fn resource_shape(&self) -> MoqtResourceShape {
+        match self {
+            MoqtAction::ClientSetup | MoqtAction::ServerSetup => MoqtResourceShape::Endpoint,
+            MoqtAction::PublishNamespace | MoqtAction::SubscribeNamespace => {
+                MoqtResourceShape::Namespace
+            }
+            MoqtAction::Subscribe
+            | MoqtAction::RequestUpdate
+            | MoqtAction::Publish
+            | MoqtAction::Fetch
+            | MoqtAction::TrackStatus => MoqtResourceShape::Track,
+        }
+    }
+}
+
+/// The set of resource identifiers a MOQT action operates on.
+///
+/// - `Endpoint`: only the relay endpoint is meaningful. Setup actions
+///   (`CLIENT_SETUP`, `SERVER_SETUP`) fit here — they establish the
+///   connection itself, not a specific namespace or track.
+/// - `Namespace`: endpoint plus a namespace tuple. Namespace-level actions
+///   (`PUBLISH_NAMESPACE`, `SUBSCRIBE_NAMESPACE`) operate on all tracks
+///   below a namespace.
+/// - `Track`: endpoint, namespace tuple, and a specific track name. Track
+///   actions (`SUBSCRIBE`, `PUBLISH`, `FETCH`, `REQUEST_UPDATE`,
+///   `TRACK_STATUS`) target one full track.
+#[cfg(feature = "moqt")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MoqtResourceShape {
+    Endpoint,
+    Namespace,
+    Track,
 }
 
 #[cfg(feature = "moqt")]

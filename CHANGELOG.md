@@ -1,5 +1,85 @@
 # Changelog
 
+## 0.4.0 — 2026-09-05
+
+CDN deployment readiness release. Closes round-2 audit findings around
+JTI backend contracts, resource-URI shape enforcement, and dual-format
+DPoP support.
+
+### Breaking
+
+- `MoqtResourceUri.namespace` is now `Option<Vec<Vec<u8>>>` (was
+  `Vec<u8>`) to model the tuple form of MOQT namespaces. Track resources
+  require a namespace; namespace-only actions have `track == None`;
+  endpoint-only actions have both `None`.
+- `parse_moqt_resource_uri` now parses comma-separated base64url
+  segments per MOQTransport §1.5.1 and rejects mixed shapes for the
+  requested action.
+- `construct_moqt_uri` signature now takes `Option<&[Vec<u8>]>` for
+  namespace tuples; passing `Some(&[])` or a track without a namespace
+  is rejected.
+- `DpopProof` gained a `wire_format: DpopWireFormat` field and
+  `with_wire_format()` builder. `encode`/`decode` dispatch on it;
+  default remains CWT.
+
+### Added
+
+- **JWT DPoP wire format** (RFC 9449 compact form) as a sibling to
+  the CWT profile. `DpopWireFormat::Jwt` produces
+  `base64url(header).base64url(payload).base64url(sig)` with the same
+  `actx`/`ath`/`jti` semantics as CWT. `decode` autodetects wire format;
+  `decode_as` forces a specific format. See `src/dpop.rs::jwt`.
+- `MoqtValidator::try_with_strict_dpop_validation(settings, store)` —
+  construction fails unless the JtiStore returns `is_strict() == true`.
+  Prevents accidentally wiring an LRU-evicting cache into a
+  fail-closed CDN authorization path.
+- `MoqtValidator::with_dpop_validator(validator)` — accept a
+  pre-configured `DpopValidator` for advanced deployments.
+- `InMemoryStrictJtiStore` — unbounded HashMap with TTL-based cleanup.
+  `is_strict()` returns `true`. Optional `with_max_entries(cap)`
+  refuses (not evicts) inserts at capacity and increments
+  `rejected_over_capacity()`. Suitable as a reference strict backend
+  for single-relay deployments and for tests.
+- Unconditional actx-shape enforcement in `MoqtValidator::authorize`:
+  each `MoqtAction` has a `resource_shape()` (Endpoint / Namespace /
+  Track) that is checked against the parsed URI *and* against the
+  DPoP proof's `actx` before any request is authorized. Endpoint
+  actions must not carry `tns`/`tn`; namespace actions must carry
+  `tns` but not `tn`; track actions must carry both.
+- `MoqtAction::resource_shape()` and `MoqtResourceShape` enum.
+- `DpopValidator::preflight(&settings)` — startup validator for the
+  freshness window bounds. Fails loud at construction time instead of
+  silently accepting proofs that would never validate.
+- Fault-injection test suite (`tests/test_replay_fault_injection.rs`)
+  documenting the JtiStore failure contract:
+  - JTI is burned on first success; retry with same JTI fails as
+    replay.
+  - Transient backend errors surface as `CryptoError` and do NOT poison
+    the cache — retry with a fresh JTI must succeed.
+  - Relay restart with an in-memory strict store loses replay state
+    (documented trade-off; distributed strict backends don't have
+    this).
+  - Strict store at `max_entries` refuses new inserts loudly.
+
+### Fixed
+
+- `LruJtiStore::with_shards_and_window` now distributes capacity
+  exactly across shards. Previously the requested capacity could be
+  silently rounded down (shards × floor(capacity/shards)); the last
+  shard now absorbs the remainder.
+- Introduced `MAX_JTI_CACHE_SIZE = 10_000_000` upper clamp so
+  pathological configuration cannot trigger unbounded allocation.
+- Namespace comparison in `MoqtValidator::authorize` now compares the
+  full tuple (`proof.payload.actx.tns != *ns`) instead of only the
+  first segment.
+- `docs/std-compliance-req.md`: stale `DpopProof::create_proof()`
+  reference replaced with the current `DpopProof::create_for_moqt` +
+  `with_wire_format` construction.
+- `README.md`: "Full CTA-5007-B CAT token support" reworded to
+  reflect that this crate is a strict narrow-profile recipient, not a
+  full CTA-5007-B implementation.
+- `spin` bumped from 0.9.8 to 0.9.9 (transitive; 0.9.8 was yanked).
+
 ## 0.3.0 — 2026-09-05
 
 Breaking release. Introduces the CWT/COSE DPoP profile from

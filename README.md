@@ -22,9 +22,9 @@ cargo add cat-token
 
 ## Features
 
-- Full CTA-5007-B CAT token support with CBOR/CWT encoding
+- Strict narrow-profile CAT recipient over CBOR/CWT (single-form parser, fail-closed authorization; see [docs/PROFILE.md](docs/PROFILE.md))
 - MOQT-specific claims: namespace/track authorization with binary matching
-- DPoP (Demonstrating Proof-of-Possession) support per RFC 9449
+- DPoP (Demonstrating Proof-of-Possession) — CWT profile (draft-nandakumar-moq-generic-dpop-proof-00) and RFC 9449 JWT compact form
 - Cryptographic algorithms: HMAC-SHA256, ES256, PS256
 - COSE_Encrypt0 encryption (AES-128-GCM, AES-256-GCM)
 - URI and header matching with exact, prefix, suffix, contains, regex (POSIX ERE), SHA-256, and SHA-512/256 match types

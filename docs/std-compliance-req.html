@@ -1329,7 +1329,9 @@ verification, replay detection</td>
 <td>DPoP proof creation</td>
 <td>RFC 9449</td>
 <td><strong>PASS</strong></td>
-<td><code>DpopProof::create_proof()</code></td>
+<td><code>DpopProof::create_for_moqt()</code> (CWT) and
+<code>DpopProof::create_for_moqt(...).with_wire_format(DpopWireFormat::Jwt)</code>
+(JWT)</td>
 </tr>
 </tbody>
 </table>

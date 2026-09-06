@@ -191,9 +191,45 @@ impl MoqtValidator {
         self
     }
 
-    /// Enable DPoP validation with settings
+    /// Enable DPoP validation backed by the in-process eviction-based
+    /// [`crate::LruJtiStore`].
+    ///
+    /// **Not strict.** RFC 9449 §11.1 requires every accepted JTI be
+    /// retained for at least the freshness window; the LRU-backed default
+    /// evicts under pressure. CDN-scale deployments MUST call
+    /// [`MoqtValidator::try_with_strict_dpop_validation`] or
+    /// [`MoqtValidator::with_dpop_validator`] instead, passing a store that
+    /// returns `true` from [`crate::JtiStore::is_strict`].
     pub fn with_dpop_validation(mut self, settings: CatDpopSettings) -> Self {
         self.dpop_validator = Some(DpopValidator::new(settings));
+        self
+    }
+
+    /// Enable DPoP validation with a caller-supplied strict [`JtiStore`].
+    /// The store MUST return `true` from [`crate::JtiStore::is_strict`];
+    /// otherwise this returns [`CatError::CryptoError`] rather than
+    /// silently accept a store that could shed retained JTIs.
+    ///
+    /// Use this constructor for any deployment that shares replay state
+    /// across relays or that must survive a single-relay restart without
+    /// losing replay defense. The strict-mode contract is a hard
+    /// prerequisite for that guarantee.
+    pub fn try_with_strict_dpop_validation(
+        mut self,
+        settings: CatDpopSettings,
+        store: std::sync::Arc<dyn crate::JtiStore>,
+    ) -> Result<Self, CatError> {
+        self.dpop_validator = Some(DpopValidator::with_jti_store_strict(settings, store)?);
+        Ok(self)
+    }
+
+    /// Plug in a pre-constructed [`DpopValidator`]. The caller is
+    /// responsible for choosing the underlying [`JtiStore`] and for the
+    /// strictness guarantee — use this when the surrounding application
+    /// already owns a `DpopValidator` (e.g. shared across multiple
+    /// authorization pipelines).
+    pub fn with_dpop_validator(mut self, validator: DpopValidator) -> Self {
+        self.dpop_validator = Some(validator);
         self
     }
 
@@ -467,10 +503,10 @@ impl MoqtValidator {
                     )));
                 }
                 if let Some(ref ns) = parsed.namespace
-                    && (proof.payload.actx.tns.len() != 1 || &proof.payload.actx.tns[0] != ns)
+                    && proof.payload.actx.tns != *ns
                 {
                     return Err(CatError::DpopValidationFailed(
-                        "DPoP proof resource namespace disagrees with actx.tns".to_string(),
+                        "DPoP proof resource namespace tuple disagrees with actx.tns".to_string(),
                     ));
                 }
                 if let Some(ref tn) = parsed.track
@@ -480,7 +516,16 @@ impl MoqtValidator {
                         "DPoP proof resource track disagrees with actx.tn".to_string(),
                     ));
                 }
+                enforce_resource_shape(ctx.action, &parsed)?;
             }
+
+            // Whether or not the proof carries a resource URI, the fields
+            // that DO appear in it (or in actx.tns/actx.tn) must be
+            // action-appropriate. A setup action carrying a namespace or
+            // track is malformed; a track action missing a track name is
+            // ambiguous. This guard runs even when the proof omits the
+            // resource URI, using actx directly.
+            enforce_actx_shape(ctx.action, &proof.payload.actx)?;
 
             Some((validator, proof, cnf, issuer))
         } else {
@@ -748,9 +793,10 @@ pub mod roles {
     }
 }
 
-/// Parsed components of a `moqt://<endpoint>?tns=<b64>&tn=<b64>` resource URI
-/// as produced by [`crate::dpop::construct_moqt_uri`]. Used to cross-validate
-/// a DPoP proof's `actx.resource` against its own `actx.tns`/`actx.tn`.
+/// Parsed components of a `moqt://<endpoint>[?tns=<b64seg1>,<b64seg2>...[&tn=<b64>]]`
+/// resource URI as produced by [`crate::dpop::construct_moqt_uri`]. Used to
+/// cross-validate a DPoP proof's `actx.resource` against its own
+/// `actx.tns`/`actx.tn`.
 ///
 /// The parser accepts only the strict shape emitted by the constructor. A
 /// resource URI with additional query parameters, path components, fragments,
@@ -759,7 +805,9 @@ pub mod roles {
 /// through fields the crate does not inspect.
 struct MoqtResourceUri {
     endpoint: String,
-    namespace: Option<Vec<u8>>,
+    /// The namespace tuple, one `Vec<u8>` per tuple segment. `None` means the
+    /// resource URI did not carry a namespace at all.
+    namespace: Option<Vec<Vec<u8>>>,
     track: Option<Vec<u8>>,
 }
 
@@ -786,8 +834,8 @@ fn parse_moqt_resource_uri(uri: &str) -> Result<MoqtResourceUri, CatError> {
             "DPoP proof resource endpoint is empty".to_string(),
         ));
     }
-    let mut namespace = None;
-    let mut track = None;
+    let mut namespace: Option<Vec<Vec<u8>>> = None;
+    let mut track: Option<Vec<u8>> = None;
     if let Some(q) = query {
         for pair in q.split('&') {
             let (k, v) = pair.split_once('=').ok_or_else(|| {
@@ -795,14 +843,32 @@ fn parse_moqt_resource_uri(uri: &str) -> Result<MoqtResourceUri, CatError> {
                     "DPoP proof resource query segment has no '='".to_string(),
                 )
             })?;
-            let decoded = URL_SAFE_NO_PAD.decode(v).map_err(|e| {
-                CatError::DpopValidationFailed(format!(
-                    "DPoP proof resource query segment '{k}' base64 decode: {e}"
-                ))
-            })?;
             match k {
-                "tns" if namespace.is_none() => namespace = Some(decoded),
-                "tn" if track.is_none() => track = Some(decoded),
+                "tns" if namespace.is_none() => {
+                    if v.is_empty() {
+                        return Err(CatError::DpopValidationFailed(
+                            "DPoP proof resource tns value is empty".to_string(),
+                        ));
+                    }
+                    let mut segments: Vec<Vec<u8>> = Vec::new();
+                    for seg in v.split(',') {
+                        let decoded = URL_SAFE_NO_PAD.decode(seg).map_err(|e| {
+                            CatError::DpopValidationFailed(format!(
+                                "DPoP proof resource tns segment base64 decode: {e}"
+                            ))
+                        })?;
+                        segments.push(decoded);
+                    }
+                    namespace = Some(segments);
+                }
+                "tn" if track.is_none() => {
+                    let decoded = URL_SAFE_NO_PAD.decode(v).map_err(|e| {
+                        CatError::DpopValidationFailed(format!(
+                            "DPoP proof resource tn base64 decode: {e}"
+                        ))
+                    })?;
+                    track = Some(decoded);
+                }
                 _ => {
                     return Err(CatError::DpopValidationFailed(format!(
                         "DPoP proof resource has unexpected or repeated query key '{k}'"
@@ -811,11 +877,99 @@ fn parse_moqt_resource_uri(uri: &str) -> Result<MoqtResourceUri, CatError> {
             }
         }
     }
+    if track.is_some() && namespace.is_none() {
+        return Err(CatError::DpopValidationFailed(
+            "DPoP proof resource carries tn without tns".to_string(),
+        ));
+    }
     Ok(MoqtResourceUri {
         endpoint,
         namespace,
         track,
     })
+}
+
+/// Reject resource URIs whose shape doesn't match the requested action.
+/// Setup actions must not name a namespace or track; namespace actions must
+/// name a namespace but no track; track actions must name both.
+fn enforce_resource_shape(action: MoqtAction, parsed: &MoqtResourceUri) -> Result<(), CatError> {
+    use crate::MoqtResourceShape::*;
+    match action.resource_shape() {
+        Endpoint => {
+            if parsed.namespace.is_some() || parsed.track.is_some() {
+                return Err(CatError::DpopValidationFailed(format!(
+                    "DPoP proof resource carries namespace/track for setup action {:?}",
+                    action
+                )));
+            }
+        }
+        Namespace => {
+            if parsed.namespace.is_none() {
+                return Err(CatError::DpopValidationFailed(format!(
+                    "DPoP proof resource missing namespace for {:?}",
+                    action
+                )));
+            }
+            if parsed.track.is_some() {
+                return Err(CatError::DpopValidationFailed(format!(
+                    "DPoP proof resource carries track for namespace action {:?}",
+                    action
+                )));
+            }
+        }
+        Track => {
+            if parsed.namespace.is_none() || parsed.track.is_none() {
+                return Err(CatError::DpopValidationFailed(format!(
+                    "DPoP proof resource missing namespace or track for track action {:?}",
+                    action
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Reject `actx` maps whose shape doesn't match the requested action. Runs
+/// unconditionally so a proof that omits the optional `resource` URI still
+/// cannot smuggle e.g. a track name into a setup action.
+fn enforce_actx_shape(
+    action: MoqtAction,
+    actx: &crate::dpop::AuthorizationContext,
+) -> Result<(), CatError> {
+    use crate::MoqtResourceShape::*;
+    match action.resource_shape() {
+        Endpoint => {
+            if !actx.tn.is_empty() {
+                return Err(CatError::DpopValidationFailed(format!(
+                    "DPoP actx carries track for setup action {:?}",
+                    action
+                )));
+            }
+        }
+        Namespace => {
+            if actx.tns.is_empty() {
+                return Err(CatError::DpopValidationFailed(format!(
+                    "DPoP actx missing namespace for {:?}",
+                    action
+                )));
+            }
+            if !actx.tn.is_empty() {
+                return Err(CatError::DpopValidationFailed(format!(
+                    "DPoP actx carries track for namespace action {:?}",
+                    action
+                )));
+            }
+        }
+        Track => {
+            if actx.tns.is_empty() || actx.tn.is_empty() {
+                return Err(CatError::DpopValidationFailed(format!(
+                    "DPoP actx missing namespace or track for track action {:?}",
+                    action
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
