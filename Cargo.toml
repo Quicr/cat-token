@@ -82,6 +82,11 @@ name = "trie_bench"
 harness = false
 required-features = ["builtin-trie"]
 
+[[bench]]
+name = "async_scale_bench"
+harness = false
+required-features = ["async"]
+
 [[example]]
 name = "quickstart"
 required-features = ["moqt"]

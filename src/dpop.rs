@@ -56,18 +56,25 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 /// claims.
 pub const DPOP_TYP: &str = "dpop-proof+cwt;profile=cta5007b-v1";
 
-/// `typ` value for JWT-format DPoP proofs (RFC 9449 §4.2). CAT-4-MOQT
-/// draft-ietf-moq-c4m defines the payload shape carried inside — the
-/// `actx` object mirrors the CWT profile, with the same action wire
-/// names (`SUBSCRIBE`, `PUBLISH`, etc.). Used only when the caller
-/// selects [`DpopWireFormat::Jwt`].
-pub const DPOP_TYP_JWT: &str = "dpop-proof+jwt";
+/// `typ` value for JWT-format DPoP proofs (RFC 9449 §4.2), with the same
+/// explicit `profile=cta5007b-v1` identifier as the CWT form. Freezing
+/// the profile in the header means a future v2 shape (different label
+/// layout, different action mnemonics, different accepted claim
+/// combinations) cannot be confused with a v1 proof by a header-only
+/// inspection: peers agree on the exact profile string or the header
+/// fails validation. See the module-level note on
+/// [`DPOP_TYP`] for the rationale — this is the JWT sibling of the same
+/// contract.
+pub const DPOP_TYP_JWT: &str = "dpop-proof+jwt;profile=cta5007b-v1";
 
-/// Backwards-compatibility alias — earlier revisions accepted a bare
-/// `dpop-proof+cwt` in the `typ` header. Callers using pre-v1 proofs must
-/// migrate.
+/// Backwards-compatibility aliases — earlier revisions accepted bare
+/// `dpop-proof+cwt` / `dpop-proof+jwt` in the `typ` header without a
+/// profile identifier. Callers using pre-v1 proofs must migrate.
 #[deprecated(note = "use DPOP_TYP (includes profile=cta5007b-v1)")]
 pub const DPOP_TYP_LEGACY: &str = "dpop-proof+cwt";
+
+#[deprecated(note = "use DPOP_TYP_JWT (includes profile=cta5007b-v1)")]
+pub const DPOP_TYP_JWT_LEGACY: &str = "dpop-proof+jwt";
 
 /// Wire format for a DPoP proof. The default is [`DpopWireFormat::Cwt`],
 /// which matches `draft-nandakumar-moq-generic-dpop-proof-00`; select
@@ -83,9 +90,12 @@ pub enum DpopWireFormat {
     /// proof as an opaque blob.
     #[default]
     Cwt,
-    /// JWS Compact Serialization (`dpop-proof+jwt`). Wire bytes are
-    /// ASCII: `base64url(header).base64url(payload).base64url(sig)`. Use
-    /// this when interoperating with RFC 9449 tooling.
+    /// JWS Compact Serialization (`dpop-proof+jwt;profile=cta5007b-v1`).
+    /// Wire bytes are ASCII: `base64url(header).base64url(payload).base64url(sig)`.
+    /// Use this when interoperating with RFC 9449 tooling. The frozen
+    /// `profile=` parameter is REQUIRED — a bare `dpop-proof+jwt` header
+    /// is rejected so a future v2 shape can't be silently accepted as
+    /// v1.
     Jwt,
 }
 
@@ -2854,6 +2864,110 @@ mod tests {
 
         let ath_b64 = payload_json.get("ath").unwrap().as_str().unwrap();
         assert_eq!(URL_SAFE_NO_PAD.decode(ath_b64).unwrap(), ath);
+    }
+
+    /// The JWT header MUST carry `dpop-proof+jwt;profile=cta5007b-v1`
+    /// verbatim. Freezing the profile at construction time is what stops
+    /// a future v2 shape from being silently accepted as v1 by a peer
+    /// that only inspects the header. Bare `dpop-proof+jwt` was accepted
+    /// pre-v0.4.2 and is rejected now — this vector locks the new
+    /// contract in.
+    #[cfg(feature = "moqt")]
+    #[test]
+    fn test_dpop_jwt_typ_carries_frozen_profile() {
+        let alg = Es256Algorithm::new_with_key_pair().unwrap();
+        let jwk = Jwk::from_es256_verifying_key(alg.verifying_key()).unwrap();
+        let mut proof = DpopProof::create_for_moqt(
+            MoqtAction::Subscribe,
+            vec![b"ns".to_vec()],
+            b"tn",
+            crate::crypto::ALG_ES256,
+            jwk,
+        )
+        .with_wire_format(DpopWireFormat::Jwt)
+        .with_jti(generate_jti());
+        proof.sign(&alg).unwrap();
+
+        let encoded = proof.encode().unwrap();
+        let parts: Vec<&[u8]> = encoded.split(|&b| b == b'.').collect();
+        let header_bytes = URL_SAFE_NO_PAD.decode(parts[0]).unwrap();
+        let header_json: serde_json::Value = serde_json::from_slice(&header_bytes).unwrap();
+        assert_eq!(
+            header_json.get("typ").unwrap().as_str().unwrap(),
+            "dpop-proof+jwt;profile=cta5007b-v1",
+            "JWT typ MUST include the frozen profile identifier"
+        );
+
+        // Locally-decoded proof carries the frozen typ.
+        let decoded = DpopProof::decode(&encoded).unwrap();
+        assert_eq!(decoded.header.typ, DPOP_TYP_JWT);
+        assert!(decoded.header.is_valid());
+    }
+
+    /// A proof arriving with the pre-v0.4.2 bare `dpop-proof+jwt` typ
+    /// must be rejected — the profile freeze is only enforceable if the
+    /// missing-profile case fails validation.
+    #[cfg(feature = "moqt")]
+    #[test]
+    fn test_dpop_jwt_bare_typ_rejected() {
+        let alg = Es256Algorithm::new_with_key_pair().unwrap();
+        let jwk = Jwk::from_es256_verifying_key(alg.verifying_key()).unwrap();
+
+        // Forge a header with the legacy bare typ.
+        let mut header = serde_json::Map::new();
+        header.insert(
+            "alg".to_string(),
+            serde_json::Value::String("ES256".to_string()),
+        );
+        header.insert(
+            "typ".to_string(),
+            serde_json::Value::String("dpop-proof+jwt".to_string()),
+        );
+        header.insert("jwk".to_string(), serde_json::to_value(&jwk).unwrap());
+        let header_bytes = serde_json::to_vec(&serde_json::Value::Object(header)).unwrap();
+
+        let mut payload = serde_json::Map::new();
+        payload.insert("iat".to_string(), serde_json::Value::Number(1.into()));
+        let mut actx = serde_json::Map::new();
+        actx.insert(
+            "type".to_string(),
+            serde_json::Value::String("moqt".to_string()),
+        );
+        actx.insert(
+            "action".to_string(),
+            serde_json::Value::String("SUBSCRIBE".to_string()),
+        );
+        actx.insert(
+            "tns".to_string(),
+            serde_json::Value::Array(vec![serde_json::Value::String("ns".to_string())]),
+        );
+        actx.insert(
+            "tn".to_string(),
+            serde_json::Value::String("tn".to_string()),
+        );
+        payload.insert("actx".to_string(), serde_json::Value::Object(actx));
+        let payload_bytes = serde_json::to_vec(&serde_json::Value::Object(payload)).unwrap();
+
+        let mut wire = Vec::new();
+        wire.extend_from_slice(URL_SAFE_NO_PAD.encode(&header_bytes).as_bytes());
+        wire.push(b'.');
+        wire.extend_from_slice(URL_SAFE_NO_PAD.encode(&payload_bytes).as_bytes());
+        wire.push(b'.');
+        // Signature bytes over the signing input, but the header check
+        // fires before signature verification — an empty sig is fine
+        // for the shape test.
+        wire.extend_from_slice(URL_SAFE_NO_PAD.encode(b"").as_bytes());
+
+        // Decoding succeeds (the header parses) but is_valid() rejects
+        // the bare typ. This is the enforcement point every codepath
+        // that gates on DpopHeader::is_valid picks up.
+        let decoded = DpopProof::decode(&wire).unwrap();
+        let _ = &alg; // signed input is not exercised here.
+        assert!(
+            !decoded.header.is_valid(),
+            "bare `dpop-proof+jwt` typ must fail header validation \
+             so a pre-v1 proof cannot masquerade as the frozen profile"
+        );
     }
 
     /// A JWT-encoded proof with binary (non-UTF-8) namespace bytes must be

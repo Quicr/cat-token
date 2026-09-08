@@ -10,6 +10,8 @@ pub mod dpop;
 pub mod encrypt;
 pub mod error;
 pub mod geo;
+#[cfg(feature = "moqt")]
+pub mod jti_contract;
 pub mod jwk;
 pub mod key_resolver;
 #[cfg(feature = "moqt")]

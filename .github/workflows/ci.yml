@@ -74,6 +74,13 @@ jobs:
           - "builtin-trie,moqt"
           - "qp-trie"
           - "qp-trie,moqt"
+          # `async` implies `moqt` (see Cargo.toml); listed explicitly
+          # so the async trait surface is gated on the same clippy/test
+          # bar as the sync surface. Adding either combination is what
+          # keeps AsyncMoqtValidator / AsyncJtiStore / AsyncReplayGuard
+          # from silently regressing when the sync side is refactored.
+          - "moqt,async"
+          - "builtin-trie,moqt,async"
 
     steps:
     - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

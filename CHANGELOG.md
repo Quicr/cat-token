@@ -9,10 +9,43 @@ draft-nandakumar-moq-generic-dpop-proof-00 §3.2 (text `tns`/`tn`/`jti`),
 closes the DPoP-protected setup authorization gap for endpoint-only
 actions, and enforces the strict JTI-store contract at
 `AsyncMoqtValidator` construction time so a non-strict backend cannot
-slip past into a CDN deployment.
+slip past into a CDN deployment. Freezes the JWT DPoP profile
+identifier, ships the CDN-scale replay contract harness distributed
+backends must pass before deployment, extends CI to the async surface,
+and adds a scale bench for `authorize_async` under simulated backend
+latency.
 
 ### Added
 
+- **Frozen JWT DPoP profile identifier.** JWT proofs now pin
+  `dpop-proof+jwt;profile=cta5007b-v1` in the `typ` header, matching
+  the CWT sibling. A bare `dpop-proof+jwt` header (pre-v0.4.2) is
+  rejected at `DpopHeader::is_valid` so a future v2 shape cannot
+  masquerade as v1 to a peer that inspects the header only. Positive
+  and negative wire vectors (`test_dpop_jwt_typ_carries_frozen_profile`,
+  `test_dpop_jwt_bare_typ_rejected`) lock the contract in.
+- **`jti_contract` module** — the property-test harness every strict
+  `JtiStore` / `AsyncJtiStore` implementation must pass before it is
+  deployed at CDN scale. Public assertions cover TTL retention
+  (`assert_no_dropped_insert_within_ttl`), sharding hygiene
+  (`assert_distinct_keys_never_collide`), insert-if-absent atomicity
+  under contention (`assert_atomic_insert_if_absent`), and outage
+  fail-closed behaviour (`assert_fail_closed_on_backend_outage`).
+  Async siblings live under `jti_contract::asynchronous` when built
+  with `--features async`. Backend implementers fork
+  `tests/test_jti_contract.rs`, swap in their Redis/DynamoDB store,
+  and run the same suite — the harness demonstrates the contract is
+  satisfiable and catches regressions; a real 100k soak still needs
+  production-shaped infrastructure the crate cannot ship.
+- **`async_scale_bench`** (`--bench async_scale_bench --features async`)
+  drives 512 concurrent `authorize_async` calls against a
+  latency-injecting store, sweeping 0/100/1000 μs simulated backend
+  RTTs. Catches regressions in the pre-commit/commit split that would
+  otherwise only surface under real network delay — the CI-runnable
+  half of the 100k-flow readiness gate.
+- **Async feature matrix in CI.** `.github/workflows/ci.yml` now
+  builds and tests the `moqt,async` and `builtin-trie,moqt,async`
+  cells so the async surface is gated on the same bar as sync.
 - **Async authorize surface** behind the new `async` feature
   (`--features async`, pulls in `async-trait`; no runtime dependency).
   - `AsyncMoqtValidator::authorize_async` — mirrors
