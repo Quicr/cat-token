@@ -6,8 +6,10 @@ Round-4 audit follow-up. Adds an async authorize path so production
 relays can integrate cat-token without wrapping every replay commit in
 `spawn_blocking`, tightens the DPoP JWT wire format to match
 draft-nandakumar-moq-generic-dpop-proof-00 §3.2 (text `tns`/`tn`/`jti`),
-and closes the DPoP-protected setup authorization gap for
-endpoint-only actions.
+closes the DPoP-protected setup authorization gap for endpoint-only
+actions, and enforces the strict JTI-store contract at
+`AsyncMoqtValidator` construction time so a non-strict backend cannot
+slip past into a CDN deployment.
 
 ### Added
 
@@ -50,7 +52,16 @@ endpoint-only actions.
   strings per draft-nandakumar-moq-generic-dpop-proof-00 §3.2. Non-
   UTF-8 namespace or track bytes surface as `InvalidClaimValue` at
   sign time instead of producing an off-spec proof. CWT wire form is
-  unchanged.
+  unchanged. Stale module rustdoc that described `tns`/`tn` as
+  base64url is corrected — the doc drift had been an interop hazard
+  for peers built against the header.
+- **AsyncMoqtValidator strict-store construction contract.**
+  `AsyncMoqtValidator::from_sync` is replaced by two intent-explicit
+  constructors: `try_from_sync_strict` refuses stores that report
+  `is_strict() == false` (the CDN deployment path), and
+  `from_sync_best_effort` is the opt-in for local development. This
+  mirrors the sync `MoqtValidator::try_with_strict_dpop_validation`
+  contract that previously had no async equivalent.
 
 ## 0.4.1 — 2026-09-06
 

@@ -14,6 +14,10 @@
 //! 3. How to implement `AsyncReplayGuard` for the `catreplay` cti check.
 //! 4. How the pre-commit / commit split lets `authorize_async` reuse every
 //!    non-storage check from the sync pipeline.
+//! 5. How `AsyncMoqtValidator::try_from_sync_strict` enforces the strict
+//!    JTI-store contract at construction time — a non-strict backend is
+//!    refused up front rather than being allowed to shed retained JTIs
+//!    at runtime.
 //!
 //! Run with: `cargo run --example async_relay_validator --features async`
 
@@ -117,7 +121,11 @@ async fn main() {
 
     let jti_store: Arc<dyn AsyncJtiStore> = Arc::new(MyAsyncJtiStore::new());
     let replay_guard = MyAsyncReplayGuard::new();
-    let async_validator = AsyncMoqtValidator::from_sync(moqt_validator, jti_store);
+    // Custom store advertises is_strict() = true, so we take the CDN path.
+    // Non-strict stores would be rejected here — the example intentionally
+    // uses the strict constructor to show the production wiring.
+    let async_validator = AsyncMoqtValidator::try_from_sync_strict(moqt_validator, jti_store)
+        .expect("MyAsyncJtiStore advertises is_strict() = true");
 
     // --- Build a DPoP-bound token issued to the demo holder key. ---
     let holder_alg = Es256Algorithm::new_with_key_pair().unwrap();

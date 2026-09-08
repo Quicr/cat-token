@@ -1423,25 +1423,32 @@ pub mod cwt {
 ///
 /// # Payload shape
 ///
+/// Matches draft-nandakumar-moq-generic-dpop-proof-00 §3.2. `tns`, `tn`,
+/// and `jti` are UTF-8 text — not base64url — so external JOSE tooling
+/// reading this proof can walk the JSON without a custom decoder. Only
+/// `ath` remains base64url because SHA-256 output is arbitrary bytes with
+/// no text representation the draft mandates.
+///
 /// ```text
 /// {
 ///   "iat":  <unix seconds int>,
-///   "jti":  <base64url of the raw cti bytes>,
+///   "jti":  "<utf-8 text>",                          // draft §3.2
 ///   "actx": {
 ///     "type":    "moqt",
-///     "action":  "SUBSCRIBE",              // MOQTransport §9 name
-///     "tns":     ["seg1", "seg2", ...],    // base64url of each segment
-///     "tn":      "<base64url of track bytes>",
-///     "resource":"moqt://..."              // optional
+///     "action":  "SUBSCRIBE",                        // CAT-4-MOQT §3.1.2 mnemonic
+///     "tns":     ["seg1", "seg2", ...],              // each seg is UTF-8 text
+///     "tn":      "<utf-8 track name>",
+///     "resource":"moqt://..."                        // optional
 ///   },
 ///   "ath":  "<base64url of SHA-256(access token)>",  // optional
 ///   "nonce":"<server nonce string>"                  // optional
 /// }
 /// ```
 ///
-/// Byte-string fields (cti, tns segments, tn, ath) are base64url-encoded
-/// so they survive JSON round-trip. This is the only shape accepted;
-/// anything else is a decode failure.
+/// This is the only shape accepted; anything else is a decode failure.
+/// Callers whose namespaces or track names are not valid UTF-8 must use
+/// the CWT wire format (which permits byte strings) instead — encoding
+/// will error rather than emit a lossy or non-interoperable JWT.
 #[cfg(feature = "moqt")]
 pub mod jwt {
     use super::*;

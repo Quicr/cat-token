@@ -104,9 +104,10 @@ impl AsyncJtiStore for AsyncJtiStoreAdapter {
 /// Async validator that shares its policy config with a sync
 /// [`MoqtValidator`] but commits through async traits.
 ///
-/// Construct via [`AsyncMoqtValidator::from_sync`], supplying the async
-/// JTI store (usually an [`AsyncJtiStoreAdapter`] over the same store the
-/// sync validator uses, or a natively-async distributed store). Sync and
+/// Construct via [`AsyncMoqtValidator::try_from_sync_strict`] (rejects
+/// non-strict stores) for CDN/multi-relay deployments, or
+/// [`AsyncMoqtValidator::from_sync_best_effort`] for development and
+/// single-tenant tests where eviction under load is acceptable. Sync and
 /// async paths must share the same store instance if the deployment ever
 /// mixes them — otherwise a JTI accepted on one path can be replayed on
 /// the other.
@@ -117,14 +118,45 @@ pub struct AsyncMoqtValidator {
 }
 
 impl AsyncMoqtValidator {
-    /// Build the async validator from a fully-configured sync
-    /// [`MoqtValidator`]. The `jti_store` is used for the async DPoP JTI
-    /// commit; the sync validator's own JTI store is not touched by the
-    /// async pipeline. Callers deploying a hybrid sync/async relay must
-    /// wire both paths to the same underlying store (e.g. wrap the same
-    /// [`crate::dpop::InMemoryStrictJtiStore`] in
-    /// [`AsyncJtiStoreAdapter`]) to avoid split-brain replay state.
-    pub fn from_sync(sync: MoqtValidator, jti_store: Arc<dyn AsyncJtiStore>) -> Self {
+    /// Build the async validator with a strict JTI store — the CDN
+    /// deployment path. The store MUST return `true` from
+    /// [`AsyncJtiStore::is_strict`]; otherwise this returns
+    /// [`CatError::CryptoError`] rather than silently accept a backend
+    /// that could shed retained JTIs.
+    ///
+    /// The `is_strict()` bit is *self-attestation*, matching the sync
+    /// contract on [`MoqtValidator::try_with_strict_dpop_validation`]. A
+    /// distributed backend must additionally guarantee atomic
+    /// insert-if-absent across nodes, TTL ≥ freshness window + skew, no
+    /// silent eviction inside that TTL, and fail-closed on outage
+    /// (surfaced as [`CatError::CryptoError`] from `check_and_insert`).
+    /// The reference [`AsyncInMemoryStrictJtiStore`] satisfies these for
+    /// a single-relay deployment; distributed backends must be audited
+    /// against the same list before deployment.
+    pub fn try_from_sync_strict(
+        sync: MoqtValidator,
+        jti_store: Arc<dyn AsyncJtiStore>,
+    ) -> Result<Self, CatError> {
+        if !jti_store.is_strict() {
+            return Err(CatError::CryptoError(
+                "AsyncJtiStore::is_strict() returned false; strict CDN \
+                 deployments require a store that retains every accepted \
+                 JTI for the DPoP freshness window. Use \
+                 AsyncMoqtValidator::from_sync_best_effort for local \
+                 development."
+                    .to_string(),
+            ));
+        }
+        Ok(Self { sync, jti_store })
+    }
+
+    /// Build the async validator without checking store strictness. Use
+    /// only for local development, single-tenant tests, or intentionally
+    /// best-effort replay defense — a store that evicts under memory
+    /// pressure will let a previously-accepted JTI replay. Multi-relay
+    /// production deployments MUST use
+    /// [`AsyncMoqtValidator::try_from_sync_strict`] instead.
+    pub fn from_sync_best_effort(sync: MoqtValidator, jti_store: Arc<dyn AsyncJtiStore>) -> Self {
         Self { sync, jti_store }
     }
 
