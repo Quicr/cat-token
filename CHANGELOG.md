@@ -1,5 +1,55 @@
 # Changelog
 
+## 0.4.3 — 2026-09-08
+
+Fixes the test-vector pipeline into `draft-ietf-moq-c4m`. Hand-copying
+hex from `tests/test_data/*.json` into Appendix A of the draft
+introduced mid-hex whitespace, byte-string / text-string type
+mismatches, and truncated fields (see the Copilot review on
+moq-wg/CAT-4-MOQT#47). The generator now emits a draft-shaped
+markdown block with every hex field on a single line, and a `--verify`
+mode fetches the draft's own `draft-ietf-moq-c4m.md` and diffs it
+against what cat.rs currently produces. CI runs the emitter against
+itself as a strict self-check and against the draft `main` branch as
+an advisory drift report.
+
+### Added
+
+- **`generate-test-vectors --emit draft-md`** writes an
+  Appendix-A-shaped markdown file (`tests/test_data/draft_appendix_a.md`
+  by default; `--out PATH` overrides) whose fenced `~~~ json` blocks
+  keep every `cose_hex` / `payload_cbor_hex` / `tag_hex` /
+  `signature_hex` / `cnf_jkt_hex` / `key_hex` / `public_key_*_hex` /
+  `private_key_hex` field on a single line. The block is intended to
+  be pasted verbatim into the draft; do not hand-wrap.
+- **`generate-test-vectors --verify`** loads a `draft-ietf-moq-c4m.md`
+  copy (`--from URL`, default `https://raw.githubusercontent.com/moq-wg/CAT-4-MOQT/main/draft-ietf-moq-c4m.md`,
+  or `--from-file PATH`), unwraps line-continued JSON string literals,
+  parses every fenced JSON block under Appendix A, and diffs each
+  vector's hex-shaped fields against what cat.rs currently emits.
+  Exits non-zero on any mismatch or JSON parse error under the
+  appendix.
+- **CI job `draft-vectors`** runs the emitter and verifies its own
+  output on every push (strict gate — a broken emitter fails CI). A
+  second, `continue-on-error: true` step diffs against the live draft
+  `main` for advisory drift reporting; the failure is the signal that
+  the draft needs a refresh from the emitter output.
+
+### Fixed
+
+- **`dpop_jwk_binding` vector JKT** is now the real RFC 7638 JWK
+  thumbprint of the fixed ES256 test key. The previous value was a
+  literal `a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1`
+  with a `]` sentinel patched to `0` via `str::replace`, which
+  produced meaningless bytes. Any consumer replaying the previous
+  vector's cnf-jkt should regenerate against 0.4.3.
+- **`token_hmac_full` claim metadata** now reports `catv: 1` and the
+  concrete `catu` path prefix rule that the encoded CBOR actually
+  contains. The previous metadata carried `catv: "CAT-v1"` (never
+  encoded) and a phantom `catu: 10` (also never encoded), so a peer
+  reading only the JSON annotations would build a mismatched
+  expectation of the CBOR payload.
+
 ## 0.4.2 — 2026-09-07
 
 Round-4 audit follow-up. Adds an async authorize path so production
@@ -47,9 +97,22 @@ embedding relay still owns.
   cells so the async surface is gated on the same bar as sync.
 - **`docs/RELAY-OBLIGATIONS.md`** — checklist of what the embedding
   relay must still prove before promoting a `cat-token` integration
-  to 100k+ CDN scale (distributed replay backend, CPU-bound crypto
-  isolation, JTI/cti two-phase-commit failure model, soak/failover,
-  `cattpk` pinning).
+  to 100k+ CDN scale. Covers distributed replay backends (JTI + cti),
+  CPU-bound crypto isolation via the `authorize_precommit` /
+  `commit_async` split with concrete `spawn_blocking` shape and event-
+  loop lag monitoring, JTI/cti two-phase-commit failure model,
+  soak/failover, `cattpk` pinning + upstream RFC 5280 path validation,
+  and `moqt-reval` deadline enforcement + `catr` renewal threading.
+- **`AsyncReplayGuard::is_strict()`** — self-attestation mirror of
+  the JTI-store strict-store contract, with
+  `AsyncMoqtValidator::require_strict_replay_guard()` refusing a
+  best-effort guard at the `catreplay` commit surface. Closes the
+  gap where a CDN deployment could pin JTI strictness but silently
+  degrade the second commit through a leaky `cti` backend.
+- **`AsyncMoqtValidator` rustdoc example** documenting the
+  `spawn_blocking(precommit) → commit_async(reactor)` offload
+  shape so integrators do not have to derive it from the trait
+  surface.
 - **`docs/PROFILE.md` DPoP section** — pins the wire `typ` values to
   the draft verbatim and documents the private-use CBOR label
   numbers (400/401/402 for `actx`/`nonce`/`ath`) that peers must
@@ -90,13 +153,20 @@ embedding relay still owns.
 
 ### Fixed
 
-- **DPoP JWT wire format** now emits `tns`/`tn`/`jti` as UTF-8 text
-  strings per draft-nandakumar-moq-generic-dpop-proof-00 §3.2. Non-
-  UTF-8 namespace or track bytes surface as `InvalidClaimValue` at
-  sign time instead of producing an off-spec proof. CWT wire form is
-  unchanged. Stale module rustdoc that described `tns`/`tn` as
-  base64url is corrected — the doc drift had been an interop hazard
-  for peers built against the header.
+- **DPoP JWT wire format** now emits `tns` and `tn` as single UTF-8
+  text strings using the MOQTransport §1.5.1 canonical serialization
+  (safe ASCII passes through, other bytes escape as `.HH`; segments
+  join with `-`), matching the CWT byte-string form
+  semantically and matching
+  draft-nandakumar-moq-generic-dpop-proof-00 §3.2 verbatim. Decode
+  rejects the pre-0.4.2 JSON-array `tns` shape as
+  `InvalidClaimValue` so a peer emitting the old form cannot silently
+  authorize. `jti` is a UTF-8 text string; `ath` remains base64url.
+  Non-UTF-8 namespace/track bytes are no longer sign-time errors —
+  they round-trip through the canonical `.HH` escape. Stale module
+  rustdoc that described `tns`/`tn` as base64url is corrected — the
+  doc drift had been an interop hazard for peers built against the
+  header.
 - **AsyncMoqtValidator strict-store construction contract.**
   `AsyncMoqtValidator::from_sync` is replaced by two intent-explicit
   constructors: `try_from_sync_strict` refuses stores that report
