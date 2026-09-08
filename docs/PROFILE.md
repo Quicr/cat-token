@@ -95,8 +95,13 @@ generic-DPoP peers interoperate without a private opt-in:
 - CWT (default). `typ=dpop-proof+cwt` per draft §3.1, COSE_Sign1
   wrapper, CBOR payload.
 - JWT. `typ=dpop-proof+jwt` per draft §3.2 and RFC 9449 §4.2, JWS
-  compact serialization. `tns`/`tn`/`jti` are UTF-8 text strings;
-  `ath` remains base64url.
+  compact serialization. `tns` and `tn` are single UTF-8 text
+  strings in MOQTransport §1.5.1 canonical form (safe ASCII
+  `[A-Za-z0-9_]` passes through, every other byte is escaped as
+  `.HH`; namespace segments are joined by a literal `-`). `jti` is a
+  UTF-8 text string; `ath` remains base64url. Array or non-canonical
+  `tns` shapes are rejected on decode — the two wire forms carry
+  identical `actx` semantics down to the byte.
 
 The draft leaves CBOR label numbers for `actx`/`nonce`/`ath` TBD. This
 crate assigns 400/401/402 as private-use labels and matches them

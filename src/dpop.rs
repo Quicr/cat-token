@@ -1195,7 +1195,7 @@ pub mod cwt {
         parts.join("-")
     }
 
-    fn moq_element_from_canonical(s: &str) -> Result<Vec<u8>, CatError> {
+    pub(super) fn moq_element_from_canonical(s: &str) -> Result<Vec<u8>, CatError> {
         let bytes = s.as_bytes();
         let mut out = Vec::with_capacity(bytes.len());
         let mut i = 0;
@@ -1223,7 +1223,7 @@ pub mod cwt {
         Ok(out)
     }
 
-    fn moq_tns_from_canonical(s: &str) -> Result<Vec<Vec<u8>>, CatError> {
+    pub(super) fn moq_tns_from_canonical(s: &str) -> Result<Vec<Vec<u8>>, CatError> {
         s.split('-')
             .map(moq_element_from_canonical)
             .collect::<Result<Vec<_>, _>>()
@@ -1421,11 +1421,12 @@ pub mod cwt {
 ///
 /// # Payload shape
 ///
-/// Matches draft-nandakumar-moq-generic-dpop-proof-00 §3.2. `tns`, `tn`,
-/// and `jti` are UTF-8 text — not base64url — so external JOSE tooling
-/// reading this proof can walk the JSON without a custom decoder. Only
-/// `ath` remains base64url because SHA-256 output is arbitrary bytes with
-/// no text representation the draft mandates.
+/// Matches draft-nandakumar-moq-generic-dpop-proof-00 §3.2. `tns` and
+/// `tn` are single UTF-8 text strings in MOQTransport §1.5.1 canonical
+/// form (safe ASCII `[A-Za-z0-9_]` passes through, other bytes escape as
+/// `.HH`; namespace segments join with `-`). `jti` is a UTF-8 text
+/// string. Only `ath` remains base64url because SHA-256 output is
+/// arbitrary bytes with no text representation the draft mandates.
 ///
 /// ```text
 /// {
@@ -1434,8 +1435,8 @@ pub mod cwt {
 ///   "actx": {
 ///     "type":    "moqt",
 ///     "action":  "SUBSCRIBE",                        // CAT-4-MOQT §3.1.2 mnemonic
-///     "tns":     ["seg1", "seg2", ...],              // each seg is UTF-8 text
-///     "tn":      "<utf-8 track name>",
+///     "tns":     "seg1-seg2",                        // MOQ canonical single string
+///     "tn":      "<canonical track name>",
 ///     "resource":"moqt://..."                        // optional
 ///   },
 ///   "ath":  "<base64url of SHA-256(access token)>",  // optional
@@ -1443,10 +1444,10 @@ pub mod cwt {
 /// }
 /// ```
 ///
-/// This is the only shape accepted; anything else is a decode failure.
-/// Callers whose namespaces or track names are not valid UTF-8 must use
-/// the CWT wire format (which permits byte strings) instead — encoding
-/// will error rather than emit a lossy or non-interoperable JWT.
+/// This is the only shape accepted; a JSON-array `tns` (or any non-text
+/// value on `tns`/`tn`) is rejected on decode. Non-UTF-8 namespace bytes
+/// round-trip through the `.HH` escape without loss — the two wire
+/// forms carry identical `actx` semantics.
 #[cfg(feature = "moqt")]
 pub mod jwt {
     use super::*;
@@ -1655,12 +1656,12 @@ pub mod jwt {
     }
 
     /// Serialize `actx` into JWT-form JSON per
-    /// draft-nandakumar-moq-generic-dpop-proof-00 §3.2. `tns` is an array of
-    /// text strings and `tn` is a text string; namespaces and track names
-    /// that are not valid UTF-8 must be carried in the CWT wire format
-    /// (which permits byte strings) instead. This mirrors the constraint
-    /// callers already accept when they encode any HTTP-adjacent identifier
-    /// through JSON.
+    /// draft-nandakumar-moq-generic-dpop-proof-00 §3.2. `tns` and `tn` are
+    /// single UTF-8 text strings using the MOQTransport §1.5.1 canonical
+    /// serialization (safe ASCII passed through, other bytes escaped as
+    /// `.HH`; namespace segments joined by `-`) so the JWT wire form
+    /// carries the same information as the CWT byte-string form without
+    /// requiring JSON callers to reason about a nested array of tuples.
     fn actx_to_json(actx: &AuthorizationContext) -> Result<Json, CatError> {
         let mut map = Map::new();
         map.insert("type".to_string(), Json::String(actx.ctx_type.clone()));
@@ -1668,29 +1669,15 @@ pub mod jwt {
             "action".to_string(),
             Json::String(moqt_action_wire_name(actx.action).to_string()),
         );
-        let mut tns_arr: Vec<Json> = Vec::with_capacity(actx.tns.len());
-        for seg in &actx.tns {
-            let s = std::str::from_utf8(seg).map_err(|_| {
-                CatError::InvalidClaimValue(
-                    "JWT DPoP encoding requires actx.tns segments to be UTF-8 \
-                     text (draft-nandakumar-moq-generic-dpop-proof-00 §3.2). \
-                     For binary namespace bytes, use the CWT wire format."
-                        .to_string(),
-                )
-            })?;
-            tns_arr.push(Json::String(s.to_string()));
-        }
-        map.insert("tns".to_string(), Json::Array(tns_arr));
+        map.insert(
+            "tns".to_string(),
+            Json::String(cwt::moq_canonical_tns(&actx.tns)),
+        );
         if !actx.tn.is_empty() {
-            let tn_str = std::str::from_utf8(&actx.tn).map_err(|_| {
-                CatError::InvalidClaimValue(
-                    "JWT DPoP encoding requires actx.tn to be UTF-8 text \
-                     (draft-nandakumar-moq-generic-dpop-proof-00 §3.2). For \
-                     binary track names, use the CWT wire format."
-                        .to_string(),
-                )
-            })?;
-            map.insert("tn".to_string(), Json::String(tn_str.to_string()));
+            map.insert(
+                "tn".to_string(),
+                Json::String(cwt::moq_canonical_element(&actx.tn)),
+            );
         }
         if let Some(resource) = &actx.resource {
             map.insert("resource".to_string(), Json::String(resource.clone()));
@@ -1712,22 +1699,33 @@ pub mod jwt {
             .and_then(|v| v.as_str())
             .ok_or_else(|| CatError::MissingRequiredClaim("actx.action".to_string()))?;
         let action = moqt_action_from_wire_name(action_name)?;
-        let tns_arr = obj
-            .get("tns")
-            .and_then(|v| v.as_array())
-            .ok_or_else(|| CatError::MissingRequiredClaim("actx.tns".to_string()))?;
-        let mut tns: Vec<Vec<u8>> = Vec::with_capacity(tns_arr.len());
-        for seg in tns_arr {
-            let s = seg.as_str().ok_or_else(|| {
-                CatError::InvalidClaimValue("actx.tns element must be a string".to_string())
-            })?;
-            tns.push(s.as_bytes().to_vec());
-        }
-        let tn = match obj.get("tn") {
-            Some(Json::String(s)) => s.as_bytes().to_vec(),
+        // draft §3.2: `tns` is a single text string in MOQ canonical form.
+        // An empty string decodes to a single empty segment — endpoint
+        // shapes (`SETUP`) carry an empty `tns`, so reject those upstream
+        // via the actx-shape check, not here.
+        let tns_str = match obj.get("tns") {
+            Some(Json::String(s)) => s.as_str(),
             Some(_) => {
                 return Err(CatError::InvalidClaimValue(
-                    "actx.tn must be a string".to_string(),
+                    "actx.tns must be a text string in MOQ canonical form; \
+                     array forms are not part of draft-nandakumar-moq-generic\
+                     -dpop-proof-00 §3.2"
+                        .to_string(),
+                ));
+            }
+            None => return Err(CatError::MissingRequiredClaim("actx.tns".to_string())),
+        };
+        let tns = if tns_str.is_empty() {
+            Vec::new()
+        } else {
+            cwt::moq_tns_from_canonical(tns_str)?
+        };
+        let tn = match obj.get("tn") {
+            Some(Json::String(s)) if s.is_empty() => Vec::new(),
+            Some(Json::String(s)) => cwt::moq_element_from_canonical(s)?,
+            Some(_) => {
+                return Err(CatError::InvalidClaimValue(
+                    "actx.tn must be a text string".to_string(),
                 ));
             }
             None => Vec::new(),
@@ -2808,10 +2806,12 @@ mod tests {
     }
 
     /// Verifies the JWT payload shape matches the generic-DPoP draft: `tns`
-    /// is an array of text strings (not base64url), `tn` is a text string,
-    /// `jti` is a text string, `ath` is base64url of the raw hash. External
-    /// tooling reading this proof must be able to walk the JSON without
-    /// custom decoding.
+    /// and `tn` are single UTF-8 text strings in MOQTransport §1.5.1
+    /// canonical form (safe ASCII passed through, other bytes as `.HH`,
+    /// segments joined by `-`), `jti` is a text string, `ath` is base64url
+    /// of the raw hash. External tooling reading this proof walks the JSON
+    /// with the same canonical decoder the CWT side uses — the two wire
+    /// forms carry identical `tns`/`tn` semantics.
     #[cfg(feature = "moqt")]
     #[test]
     fn test_dpop_jwt_wire_shape_is_text_per_draft() {
@@ -2838,10 +2838,19 @@ mod tests {
         let payload_json: serde_json::Value = serde_json::from_slice(&payload_bytes).unwrap();
 
         let actx = payload_json.get("actx").unwrap().as_object().unwrap();
-        let tns = actx.get("tns").unwrap().as_array().unwrap();
-        assert_eq!(tns.len(), 2);
-        assert_eq!(tns[0].as_str().unwrap(), "example");
-        assert_eq!(tns[1].as_str().unwrap(), "com-app-scope-video");
+        // Canonical form: `-` inside a segment becomes `.2d`; segments are
+        // joined by a literal `-`. So the two-segment tns
+        // [ "example", "com-app-scope-video" ] serializes to a single
+        // string with the inner hyphens escaped.
+        assert_eq!(
+            actx.get("tns").unwrap().as_str().unwrap(),
+            "example-com.2dapp.2dscope.2dvideo",
+            "tns must be a single canonical text string, not a JSON array"
+        );
+        assert!(
+            actx.get("tns").unwrap().as_array().is_none(),
+            "tns array form is not part of draft §3.2"
+        );
         assert_eq!(actx.get("tn").unwrap().as_str().unwrap(), "camera1");
         assert_eq!(actx.get("action").unwrap().as_str().unwrap(), "SUBSCRIBE");
 
@@ -2852,6 +2861,16 @@ mod tests {
 
         let ath_b64 = payload_json.get("ath").unwrap().as_str().unwrap();
         assert_eq!(URL_SAFE_NO_PAD.decode(ath_b64).unwrap(), ath);
+
+        // Round-trip through decode: the canonical string must reconstitute
+        // the original two-segment tns bytes so authorize() sees the same
+        // shape it saw before encoding.
+        let decoded = DpopProof::decode(&encoded).unwrap();
+        assert_eq!(
+            decoded.payload.actx.tns,
+            vec![b"example".to_vec(), b"com-app-scope-video".to_vec()]
+        );
+        assert_eq!(decoded.payload.actx.tn, b"camera1".to_vec());
     }
 
     /// The JWT header MUST carry `dpop-proof+jwt` verbatim, per
@@ -2889,26 +2908,97 @@ mod tests {
         assert!(decoded.header.is_valid());
     }
 
-    /// A JWT-encoded proof with binary (non-UTF-8) namespace bytes must be
-    /// rejected rather than emitted with a lossy or non-interoperable form.
-    /// Callers with binary namespaces must use CWT. Failure surfaces on
-    /// signing_input because sign() must serialize the payload to sign it.
+    /// A JWT proof with binary (non-UTF-8) namespace bytes must round-trip
+    /// through the MOQ canonical encoding without loss — every byte outside
+    /// `[A-Za-z0-9_]` (including 0xFF/0xFE/0xFD) becomes `.HH`, and decode
+    /// reconstitutes the original bytes exactly. This is the guarantee that
+    /// makes CWT and JWT byte-identical at the `actx` semantic layer.
     #[cfg(feature = "moqt")]
     #[test]
-    fn test_dpop_jwt_rejects_non_utf8_namespace() {
+    fn test_dpop_jwt_binary_namespace_round_trips_via_canonical_encoding() {
         let alg = Es256Algorithm::new_with_key_pair().unwrap();
         let jwk = Jwk::from_es256_verifying_key(alg.verifying_key()).unwrap();
+        let ns_bytes = vec![0xFF, 0xFE, 0xFD];
         let mut proof = DpopProof::create_for_moqt(
             MoqtAction::Subscribe,
-            vec![vec![0xFF, 0xFE, 0xFD]], // not valid UTF-8
+            vec![ns_bytes.clone()],
             b"track",
             crate::crypto::ALG_ES256,
             jwk,
         )
         .with_wire_format(DpopWireFormat::Jwt)
         .with_jti(generate_jti());
-        let err = proof.sign(&alg).unwrap_err();
-        assert!(matches!(err, CatError::InvalidClaimValue(_)));
+        proof.sign(&alg).unwrap();
+
+        let encoded = proof.encode().unwrap();
+        let parts: Vec<&[u8]> = encoded.split(|&b| b == b'.').collect();
+        let payload_bytes = URL_SAFE_NO_PAD.decode(parts[1]).unwrap();
+        let payload_json: serde_json::Value = serde_json::from_slice(&payload_bytes).unwrap();
+        assert_eq!(
+            payload_json
+                .get("actx")
+                .and_then(|a| a.get("tns"))
+                .and_then(|t| t.as_str())
+                .unwrap(),
+            ".ff.fe.fd",
+            "non-UTF-8 bytes must serialize as escaped canonical form"
+        );
+
+        let decoded = DpopProof::decode(&encoded).unwrap();
+        assert_eq!(decoded.payload.actx.tns, vec![ns_bytes]);
+    }
+
+    /// A JWT proof whose `actx.tns` is a JSON array (the pre-canonical wire
+    /// form this crate used to emit) MUST be rejected on decode. Otherwise
+    /// a peer emitting the wrong shape would silently authorize with an
+    /// off-spec proof. This is the negative half of
+    /// `test_dpop_jwt_wire_shape_is_text_per_draft`.
+    #[cfg(feature = "moqt")]
+    #[test]
+    fn test_dpop_jwt_rejects_tns_array_form() {
+        use serde_json::json;
+        let alg = Es256Algorithm::new_with_key_pair().unwrap();
+        let jwk = Jwk::from_es256_verifying_key(alg.verifying_key()).unwrap();
+        let mut proof = DpopProof::create_for_moqt(
+            MoqtAction::Subscribe,
+            vec![b"a".to_vec(), b"b".to_vec()],
+            b"tn",
+            crate::crypto::ALG_ES256,
+            jwk,
+        )
+        .with_wire_format(DpopWireFormat::Jwt)
+        .with_jti(generate_jti());
+        proof.sign(&alg).unwrap();
+
+        // Take the real signed proof, splice a hostile JSON payload into
+        // the middle segment. Signature won't verify — but decode must
+        // reject on shape first, before any signature check.
+        let encoded = proof.encode().unwrap();
+        let parts: Vec<&[u8]> = encoded.split(|&b| b == b'.').collect();
+        let header_b64 = std::str::from_utf8(parts[0]).unwrap();
+        let sig_b64 = std::str::from_utf8(parts[2]).unwrap();
+
+        let hostile_payload = json!({
+            "htm": "MOQT",
+            "htu": "moqt://relay",
+            "iat": 0,
+            "jti": "test",
+            "actx": {
+                "type": "moqt",
+                "action": "SUBSCRIBE",
+                "tns": ["a", "b"],
+                "tn": "tn"
+            }
+        });
+        let hostile_b64 =
+            URL_SAFE_NO_PAD.encode(serde_json::to_vec(&hostile_payload).unwrap().as_slice());
+        let hostile_wire = format!("{header_b64}.{hostile_b64}.{sig_b64}");
+
+        let err = DpopProof::decode(hostile_wire.as_bytes()).unwrap_err();
+        assert!(
+            matches!(&err, CatError::InvalidClaimValue(msg) if msg.contains("tns")),
+            "expected InvalidClaimValue referencing tns, got {err:?}"
+        );
     }
 
     #[cfg(feature = "moqt")]
