@@ -35,8 +35,17 @@
             "value": "203.0.113.50"
           }
         ],
-        "catu": 10,
-        "catv": "CAT-v1",
+        "catu": [
+          {
+            "component": "path",
+            "matches": [
+              {
+                "prefix": "/live/"
+              }
+            ]
+          }
+        ],
+        "catv": 1,
         "cti": "vector-002",
         "exp": 1700086400,
         "iat": 1700000000,

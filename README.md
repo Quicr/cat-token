@@ -98,10 +98,34 @@ cargo run --example relay_validator --features moqt
 ```bash
 # Generate MOQT tokens
 cargo run --bin cat-cli -- moqt-token --key private.pem --endpoint relay.example.com
-
-# Generate test vectors
-cargo run --bin generate-test-vectors
 ```
+
+## Test vectors
+
+`cat-token` owns the reference vectors for `draft-ietf-moq-c4m`
+Appendix A. The `generate-test-vectors` binary drives three modes,
+all backed by the same deterministic generator:
+
+```bash
+# Emit JSON fixtures (default). Writes tests/test_data/*.json.
+cargo run --bin generate-test-vectors --features moqt
+
+# Emit an Appendix-A-shaped markdown block that can be pasted
+# verbatim into draft-ietf-moq-c4m.md. Hex fields stay on a single
+# line so the draft cannot introduce mid-hex whitespace on paste.
+cargo run --bin generate-test-vectors --features moqt -- --emit draft-md
+
+# Verify that the draft's embedded vectors still match cat.rs.
+# Default source is https://raw.githubusercontent.com/moq-wg/CAT-4-MOQT/main/draft-ietf-moq-c4m.md.
+cargo run --bin generate-test-vectors --features moqt -- --verify
+cargo run --bin generate-test-vectors --features moqt -- --verify --from-file /path/to/draft.md
+```
+
+CI runs the emitter as a strict self-check on every push, plus an
+advisory drift check against the live draft `main`. See
+[`docs/TEST-VECTORS.md`](docs/TEST-VECTORS.md) for the full workflow,
+determinism guarantees, exit-code semantics, and the list of
+recognised vector categories.
 
 ## Quick Start
 

@@ -161,6 +161,33 @@ jobs:
     - name: Run doc tests
       run: cargo test --locked --doc --all-features
 
+  draft-vectors:
+    name: Draft Vector Emission
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+
+    # Strict gate: cat.rs must produce a draft-md block that its own verify
+    # command can round-trip. This catches emitter regressions (wrapping,
+    # hex truncation, missing fields) before they reach the draft repo.
+    - name: Emit Appendix A and self-verify
+      run: |
+        cargo run --locked --bin generate-test-vectors --features moqt -- --emit draft-md --out /tmp/draft_appendix_a.md
+        cargo run --locked --bin generate-test-vectors --features moqt -- --verify --from-file /tmp/draft_appendix_a.md
+
+    # Advisory gate: report drift against the current CAT-4-MOQT main
+    # branch. Cannot be strict — cat.rs is the source of truth, so any
+    # cat.rs bump that changes a vector will drift main until the draft
+    # is updated. The report is what tells us the draft needs a refresh.
+    - name: Compare against draft-ietf-moq-c4m main (advisory)
+      continue-on-error: true
+      run: |
+        cargo run --locked --bin generate-test-vectors --features moqt -- \
+          --verify --from https://raw.githubusercontent.com/moq-wg/CAT-4-MOQT/main/draft-ietf-moq-c4m.md
+
   coverage:
     name: Code Coverage
     runs-on: ubuntu-latest
