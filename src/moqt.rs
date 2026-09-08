@@ -4,9 +4,76 @@
 use crate::{
     BinaryMatch, CatDpopSettings, CatError, CatIfAction, CatPorBlockList, CatRenewal, CatToken,
     DpopProof, DpopValidator, MoqtAction, MoqtScope, NamespaceMatch, ReplayGuard, ValidatedToken,
-    confirmation_matches_jwk, enforce_catnip, enforce_catpor, enforce_catreplay, enforce_catu,
-    validate_all_headers, validate_method,
+    confirmation_matches_jwk, enforce_catnip, enforce_catpor, enforce_catu, validate_all_headers,
+    validate_method,
 };
+
+/// Replay-commit obligation carried out of the sync pre-commit pipeline. Two
+/// variants because [`crate::ReplayProtection::Prohibited`] converts a
+/// duplicate `cti` into a hard error while `ReuseDetection` records
+/// duplicate observations without failing the request.
+///
+/// Consumed by [`MoqtValidator::commit`] and the async equivalent so both
+/// paths honour the same JTI-then-`cti` ordering (see [`MoqtValidator::authorize`]).
+#[derive(Debug, Clone)]
+pub enum CatReplayObligation {
+    /// Duplicate `cti` MUST fail the request with
+    /// [`CatError::ReplayAttackDetected`].
+    Prohibited(Vec<u8>),
+    /// Duplicate `cti` sets `reuse_detected = true` on the authorization
+    /// result but does not fail. Caller decides whether to log/audit.
+    ReuseDetection(Vec<u8>),
+}
+
+/// Everything the sync pipeline decided before touching a replay store.
+///
+/// Produced by [`MoqtValidator::authorize_precommit`]; consumed by
+/// [`MoqtValidator::commit`] (sync) or
+/// [`crate::r#async::AsyncMoqtValidator::commit_async`] (async). Splitting
+/// the pipeline this way lets async integrations reuse every non-storage
+/// check without duplicating ~250 lines of policy logic.
+#[derive(Debug, Clone)]
+pub struct PreCommit {
+    scope_index: usize,
+    renewal: Option<CatRenewal>,
+    revalidation: Option<f64>,
+    /// Composite JTI-store key + `iat`, when the DPoP profile requires a
+    /// commit. `None` when the token carries no `cnf`, when JTI honouring is
+    /// off, or when the proof carries no `cti`.
+    jti_commit: Option<(String, i64)>,
+    replay: Option<CatReplayObligation>,
+}
+
+impl PreCommit {
+    pub fn matched_scope_index(&self) -> usize {
+        self.scope_index
+    }
+
+    pub fn dpop_jti_key(&self) -> Option<(&str, i64)> {
+        self.jti_commit.as_ref().map(|(k, iat)| (k.as_str(), *iat))
+    }
+
+    pub fn replay_obligation(&self) -> Option<&CatReplayObligation> {
+        self.replay.as_ref()
+    }
+
+    /// Turn the pre-commit outcome into the final [`AuthorizedRequest`]
+    /// after both replay commits have succeeded. Exposed so async callers
+    /// ([`crate::r#async::AsyncMoqtValidator::commit_async`]) can produce
+    /// the same response shape without touching the sync commit helpers.
+    pub fn finalize(self, reuse_detected: bool) -> AuthorizedRequest {
+        let mut authorized = AuthorizedRequest::allowed(self.scope_index);
+        authorized.reuse_detected = reuse_detected;
+        authorized.renewal = self.renewal;
+        if let Some(interval) = self.revalidation
+            && interval > 0.0
+        {
+            authorized.requires_revalidation = true;
+            authorized.revalidation_interval = Some(interval);
+        }
+        authorized
+    }
+}
 /// IANA-registered token type for C4M (CAT for MoQ) AUTHORIZATION TOKEN parameter.
 pub const C4M_TOKEN_TYPE: u64 = 0x01;
 
@@ -80,6 +147,12 @@ pub struct RelayRequestContext {
     /// Peer autonomous system number. Required if the token's `catnip`
     /// contains any ASN-typed identifier.
     pub peer_asn: Option<u32>,
+    /// Server-issued DPoP nonce challenge for this request (RFC 9449 §8).
+    /// When set, the DPoP proof MUST carry a matching `nonce` claim;
+    /// otherwise authorization fails closed with
+    /// [`CatError::DpopValidationFailed`]. `None` disables the check —
+    /// callers that don't rotate nonces per-request leave this unset.
+    pub expected_dpop_nonce: Option<String>,
 }
 
 impl RelayRequestContext {
@@ -102,6 +175,7 @@ impl RelayRequestContext {
             request_headers: Vec::new(),
             peer_ip: None,
             peer_asn: None,
+            expected_dpop_nonce: None,
         }
     }
 
@@ -142,6 +216,17 @@ impl RelayRequestContext {
 
     pub fn with_peer_asn(mut self, asn: u32) -> Self {
         self.peer_asn = Some(asn);
+        self
+    }
+
+    /// Require the DPoP proof to echo the supplied server nonce (RFC 9449
+    /// §8). Call this after the relay has generated (or rotated) a per-
+    /// request challenge and included it in the `DPoP-Nonce` response
+    /// header that induced this proof. When set, a proof lacking a nonce
+    /// or carrying a mismatched nonce is rejected with
+    /// [`CatError::DpopValidationFailed`].
+    pub fn with_expected_dpop_nonce(mut self, nonce: impl Into<String>) -> Self {
+        self.expected_dpop_nonce = Some(nonce.into());
         self
     }
 }
@@ -341,6 +426,28 @@ impl MoqtValidator {
         replay_guard: Option<&G>,
         catpor_block_list: Option<&CatPorBlockList>,
     ) -> Result<AuthorizedRequest, CatError> {
+        let pre =
+            self.authorize_precommit(token, ctx, replay_guard.is_some(), catpor_block_list)?;
+        self.commit(token.claims(), pre, replay_guard)
+    }
+
+    /// Run every non-storage authorization check and return the commit
+    /// obligations. Split out so async integrations can await the two
+    /// storage commits (DPoP JTI, catreplay cti) via
+    /// [`crate::r#async::AsyncMoqtValidator::commit_async`] without
+    /// duplicating the policy pipeline. Sync callers should use
+    /// [`MoqtValidator::authorize`] directly.
+    ///
+    /// `replay_guard_configured` mirrors whether a [`ReplayGuard`] will be
+    /// supplied at commit — required so the pre-commit phase can fail
+    /// closed on a token that mandates one when none is configured.
+    pub fn authorize_precommit(
+        &self,
+        token: &ValidatedToken,
+        ctx: &RelayRequestContext,
+        replay_guard_configured: bool,
+        catpor_block_list: Option<&CatPorBlockList>,
+    ) -> Result<PreCommit, CatError> {
         let claims = token.claims();
 
         // 1. Structural MOQT validation (scope actions, moqt-reval policy).
@@ -429,19 +536,39 @@ impl MoqtValidator {
             enforce_catpor(claims, block_list)?;
         }
 
-        // 10. catreplay — verify the guard is configured when the token
-        //     demands one. The commit is deferred to the end of the pipeline
-        //     so that a request that fails downstream checks does not consume
-        //     the token's cti.
+        // 10. catreplay — verify a guard has been configured when the token
+        //     demands one. The commit itself is deferred to [`Self::commit`]
+        //     so that a request that fails downstream checks does not
+        //     consume the token's cti. Callers who take the async pipeline
+        //     signal the same guard/no-guard decision via
+        //     `replay_guard_configured`.
         let replay_mode = claims.cat.catreplay;
-        let replay_guard_for_commit = match replay_mode {
-            Some(crate::ReplayProtection::Prohibited)
-            | Some(crate::ReplayProtection::ReuseDetection) => {
-                Some(replay_guard.ok_or_else(|| {
-                    CatError::InvalidClaimValue(
+        let replay_obligation = match replay_mode {
+            Some(crate::ReplayProtection::Prohibited) => {
+                if !replay_guard_configured {
+                    return Err(CatError::InvalidClaimValue(
                         "token asserts catreplay but no replay guard configured".to_string(),
+                    ));
+                }
+                let cti = claims.core.cti.as_ref().ok_or_else(|| {
+                    CatError::MissingRequiredClaim(
+                        "cti required when catreplay=Prohibited".to_string(),
                     )
-                })?)
+                })?;
+                Some(CatReplayObligation::Prohibited(cti.clone()))
+            }
+            Some(crate::ReplayProtection::ReuseDetection) => {
+                if !replay_guard_configured {
+                    return Err(CatError::InvalidClaimValue(
+                        "token asserts catreplay but no replay guard configured".to_string(),
+                    ));
+                }
+                let cti = claims.core.cti.as_ref().ok_or_else(|| {
+                    CatError::MissingRequiredClaim(
+                        "cti required when catreplay=ReuseDetection".to_string(),
+                    )
+                })?;
+                Some(CatReplayObligation::ReuseDetection(cti.clone()))
             }
             _ => None,
         };
@@ -488,15 +615,24 @@ impl MoqtValidator {
                 Some(&ath_expected),
             )?;
 
-            if proof.payload.actx.tns != ctx.namespace {
-                return Err(CatError::DpopValidationFailed(
-                    "DPoP proof namespace does not match request".to_string(),
-                ));
-            }
-            if proof.payload.actx.tn != ctx.track {
-                return Err(CatError::DpopValidationFailed(
-                    "DPoP proof track does not match request".to_string(),
-                ));
+            // Setup actions are endpoint-only: tns/tn are meaningless and
+            // must be empty on both sides (enforced by enforce_actx_shape
+            // below). Skipping the equality checks here lets a well-formed
+            // setup proof authorize without a fake matching namespace.
+            match ctx.action.resource_shape() {
+                crate::MoqtResourceShape::Endpoint => {}
+                _ => {
+                    if proof.payload.actx.tns != ctx.namespace {
+                        return Err(CatError::DpopValidationFailed(
+                            "DPoP proof namespace does not match request".to_string(),
+                        ));
+                    }
+                    if proof.payload.actx.tn != ctx.track {
+                        return Err(CatError::DpopValidationFailed(
+                            "DPoP proof track does not match request".to_string(),
+                        ));
+                    }
+                }
             }
 
             if let Some(ref expected) = self.expected_resource {
@@ -557,52 +693,103 @@ impl MoqtValidator {
             // resource URI, using actx directly.
             enforce_actx_shape(ctx.action, &proof.payload.actx)?;
 
-            Some((validator, proof, cnf, issuer))
+            // RFC 9449 §8 nonce challenge. When the relay has pinned an
+            // expected nonce for this request the proof MUST carry it
+            // verbatim. Missing nonce or mismatch is treated the same —
+            // both indicate the client did not obey the server's
+            // rotation, and continuing would trust an unrotated proof.
+            if let Some(expected) = ctx.expected_dpop_nonce.as_deref() {
+                match proof.payload.nonce.as_deref() {
+                    Some(actual) if actual == expected => {}
+                    Some(_) => {
+                        return Err(CatError::DpopValidationFailed(
+                            "DPoP proof nonce does not match server challenge".to_string(),
+                        ));
+                    }
+                    None => {
+                        return Err(CatError::DpopValidationFailed(
+                            "DPoP proof missing required server nonce".to_string(),
+                        ));
+                    }
+                }
+            }
+
+            validator.dpop_commit_key(proof, &cnf.jkt, issuer)
         } else {
             None
         };
 
-        // 13. Commit phase. All authorization checks above have passed; only
-        //     now do we consume replay-state resources so an unauthorized
-        //     request cannot burn a legitimate token's cti.
-        //
-        // Commit the in-memory DPoP JTI first, then the CAT cti. The two
-        // stores are independent; without a two-phase transaction the crate
-        // must pick an ordering. JTI first is safer because:
-        //   - The default JTI store is in-process and rarely fails
-        //     transiently (lock poisoning is the only real failure surface).
-        //   - The `cti` store is often a distributed backend behind the
-        //     `ReplayGuard` trait and its failures can be transient.
-        //   - If the cti commit fails after JTI commit, the client retries
-        //     with a fresh JTI (required per RFC 9449) so no state is
-        //     leaked: the second attempt sees a virgin cti store and
-        //     succeeds. The reverse ordering (cti first) would leave the
-        //     cti consumed on a JTI failure and turn every transient JTI
-        //     hiccup into a permanent replay error on the caller's retry.
-        //   - If a caller needs strict atomicity between the two stores,
-        //     they can bind both to the same backend behind `ReplayGuard`
-        //     and issue a single transactional commit inside
-        //     `check_and_record`.
-        if let Some((validator, proof, cnf, issuer)) = dpop_commit {
-            validator.commit_jti(proof, &cnf.jkt, issuer)?;
+        Ok(PreCommit {
+            scope_index,
+            renewal: claims.request.catr.clone(),
+            revalidation: claims.moqt.moqt_reval,
+            jti_commit: dpop_commit,
+            replay: replay_obligation,
+        })
+    }
+
+    /// Sync commit phase. All authorization checks in
+    /// [`Self::authorize_precommit`] have passed by the time this runs;
+    /// this method touches the two replay stores in the JTI-then-`cti`
+    /// order documented on [`Self::authorize`]. The async equivalent is
+    /// [`crate::r#async::AsyncMoqtValidator::commit_async`].
+    ///
+    /// Commit the in-memory DPoP JTI first, then the CAT cti. The two
+    /// stores are independent; without a two-phase transaction the crate
+    /// must pick an ordering. JTI first is safer because:
+    ///   - The default JTI store is in-process and rarely fails
+    ///     transiently (lock poisoning is the only real failure surface).
+    ///   - The `cti` store is often a distributed backend behind the
+    ///     `ReplayGuard` trait and its failures can be transient.
+    ///   - If the cti commit fails after JTI commit, the client retries
+    ///     with a fresh JTI (required per RFC 9449) so no state is
+    ///     leaked: the second attempt sees a virgin cti store and
+    ///     succeeds. The reverse ordering (cti first) would leave the
+    ///     cti consumed on a JTI failure and turn every transient JTI
+    ///     hiccup into a permanent replay error on the caller's retry.
+    ///   - If a caller needs strict atomicity between the two stores,
+    ///     they can bind both to the same backend behind `ReplayGuard`
+    ///     and issue a single transactional commit inside
+    ///     `check_and_record`.
+    pub fn commit<G: ReplayGuard + ?Sized>(
+        &self,
+        _claims: &CatToken,
+        pre: PreCommit,
+        replay_guard: Option<&G>,
+    ) -> Result<AuthorizedRequest, CatError> {
+        if let Some((key, iat)) = pre.jti_commit.clone() {
+            let validator = self.dpop_validator.as_ref().ok_or_else(|| {
+                CatError::DpopValidationFailed(
+                    "DPoP JTI commit requested but validator not configured".to_string(),
+                )
+            })?;
+            validator.jti_store().check_and_insert(key, iat)?;
         }
 
-        let reuse_detected = if let Some(guard) = replay_guard_for_commit {
-            enforce_catreplay(claims, guard)?
-        } else {
-            false
+        let reuse_detected = match pre.replay.clone() {
+            Some(CatReplayObligation::Prohibited(cti)) => {
+                let guard = replay_guard.ok_or_else(|| {
+                    CatError::InvalidClaimValue(
+                        "token asserts catreplay but no replay guard configured".to_string(),
+                    )
+                })?;
+                if guard.check_and_record(&cti)? {
+                    return Err(CatError::ReplayAttackDetected);
+                }
+                false
+            }
+            Some(CatReplayObligation::ReuseDetection(cti)) => {
+                let guard = replay_guard.ok_or_else(|| {
+                    CatError::InvalidClaimValue(
+                        "token asserts catreplay but no replay guard configured".to_string(),
+                    )
+                })?;
+                guard.check_and_record(&cti)?
+            }
+            None => false,
         };
 
-        let mut authorized = AuthorizedRequest::allowed(scope_index);
-        authorized.reuse_detected = reuse_detected;
-        authorized.renewal = claims.request.catr.clone();
-        if let Some(reval) = claims.moqt.moqt_reval
-            && reval > 0.0
-        {
-            authorized.requires_revalidation = true;
-            authorized.revalidation_interval = Some(reval);
-        }
-        Ok(authorized)
+        Ok(pre.finalize(reuse_detected))
     }
 
     /// Look up the `catif` action associated with a given claim key. Callers
@@ -969,6 +1156,12 @@ fn enforce_actx_shape(
     use crate::MoqtResourceShape::*;
     match action.resource_shape() {
         Endpoint => {
+            if !actx.tns.is_empty() {
+                return Err(CatError::DpopValidationFailed(format!(
+                    "DPoP actx carries namespace for setup action {:?}",
+                    action
+                )));
+            }
             if !actx.tn.is_empty() {
                 return Err(CatError::DpopValidationFailed(format!(
                     "DPoP actx carries track for setup action {:?}",

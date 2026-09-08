@@ -175,160 +175,6 @@
 <header id="title-block-header">
 <h1 class="title">CTA-5007-B Compliance — cat.rs</h1>
 </header>
-<nav id="TOC" role="doc-toc">
-<ul>
-<li><a href="#standards-compliance-requirements--catrs"
-id="toc-standards-compliance-requirements--catrs">Standards Compliance
-Requirements — cat.rs</a>
-<ul>
-<li><a href="#1-token-format--cose-structure"
-id="toc-1-token-format--cose-structure">1. Token Format &amp; COSE
-Structure</a>
-<ul>
-<li><a href="#rfc-8392--cbor-web-token-cwt"
-id="toc-rfc-8392--cbor-web-token-cwt">RFC 8392 — CBOR Web Token
-(CWT)</a></li>
-<li><a href="#rfc-9052--cose-structures-and-process"
-id="toc-rfc-9052--cose-structures-and-process">RFC 9052 — COSE
-Structures and Process</a></li>
-<li><a href="#rfc-8949--cbor-encoding"
-id="toc-rfc-8949--cbor-encoding">RFC 8949 — CBOR Encoding</a></li>
-</ul></li>
-<li><a href="#2-algorithms" id="toc-2-algorithms">2. Algorithms</a>
-<ul>
-<li><a href="#rfc-9053--cose-initial-algorithms"
-id="toc-rfc-9053--cose-initial-algorithms">RFC 9053 — COSE Initial
-Algorithms</a></li>
-<li><a href="#rfc-8230--rsa-with-cose"
-id="toc-rfc-8230--rsa-with-cose">RFC 8230 — RSA with COSE</a></li>
-<li><a href="#fips-180-4--secure-hash-standard"
-id="toc-fips-180-4--secure-hash-standard">FIPS 180-4 — Secure Hash
-Standard</a></li>
-</ul></li>
-<li><a href="#3-core-claims-cta-46" id="toc-3-core-claims-cta-46">3.
-Core Claims (CTA §4.6)</a>
-<ul>
-<li><a href="#31-issuer--iss-key-1--must-support"
-id="toc-31-issuer--iss-key-1--must-support">3.1 Issuer —
-<code>iss</code> (key 1) — MUST support</a></li>
-<li><a href="#32-audience--aud-key-3--must-support"
-id="toc-32-audience--aud-key-3--must-support">3.2 Audience —
-<code>aud</code> (key 3) — MUST support</a></li>
-<li><a href="#33-expiration--exp-key-4--must-support"
-id="toc-33-expiration--exp-key-4--must-support">3.3 Expiration —
-<code>exp</code> (key 4) — MUST support</a></li>
-<li><a href="#34-not-before--nbf-key-5--must-support"
-id="toc-34-not-before--nbf-key-5--must-support">3.4 Not Before —
-<code>nbf</code> (key 5) — MUST support</a></li>
-<li><a href="#35-cwt-id--cti-key-7--must-support"
-id="toc-35-cwt-id--cti-key-7--must-support">3.5 CWT ID —
-<code>cti</code> (key 7) — MUST support</a></li>
-<li><a href="#36-replay--catreplay-key-308--may-support"
-id="toc-36-replay--catreplay-key-308--may-support">3.6 Replay —
-<code>catreplay</code> (key 308) — MAY support</a></li>
-<li><a href="#37-probability-of-rejection--catpor-key-309--may-support"
-id="toc-37-probability-of-rejection--catpor-key-309--may-support">3.7
-Probability of Rejection — <code>catpor</code> (key 309) — MAY
-support</a></li>
-<li><a href="#38-version--catv-key-310--must-support"
-id="toc-38-version--catv-key-310--must-support">3.8 Version —
-<code>catv</code> (key 310) — MUST support</a></li>
-<li><a href="#39-network-ip--catnip-key-311--must-support"
-id="toc-39-network-ip--catnip-key-311--must-support">3.9 Network IP —
-<code>catnip</code> (key 311) — MUST support</a></li>
-<li><a href="#310-uri--catu-key-312--must-support"
-id="toc-310-uri--catu-key-312--must-support">3.10 URI —
-<code>catu</code> (key 312) — MUST support</a></li>
-<li><a href="#311-methods--catm-key-313--must-support"
-id="toc-311-methods--catm-key-313--must-support">3.11 Methods —
-<code>catm</code> (key 313) — MUST support</a></li>
-<li><a href="#312-alpn--catalpn-key-314--may-support"
-id="toc-312-alpn--catalpn-key-314--may-support">3.12 ALPN —
-<code>catalpn</code> (key 314) — MAY support</a></li>
-<li><a href="#313-header--cath-key-315--must-support"
-id="toc-313-header--cath-key-315--must-support">3.13 Header —
-<code>cath</code> (key 315) — MUST support</a></li>
-<li><a
-href="#314-geographic-iso-3166--catgeoiso3166-key-316--may-support"
-id="toc-314-geographic-iso-3166--catgeoiso3166-key-316--may-support">3.14
-Geographic ISO 3166 — <code>catgeoiso3166</code> (key 316) — MAY
-support</a></li>
-<li><a
-href="#315-geographic-coordinate--catgeocoord-key-317--may-support"
-id="toc-315-geographic-coordinate--catgeocoord-key-317--may-support">3.15
-Geographic Coordinate — <code>catgeocoord</code> (key 317) — MAY
-support</a></li>
-<li><a href="#316-geohash--geohash-key-282--may-support"
-id="toc-316-geohash--geohash-key-282--may-support">3.16 Geohash —
-<code>geohash</code> (key 282) — MAY support</a></li>
-<li><a href="#317-altitude--catgeoalt-key-318--may-support"
-id="toc-317-altitude--catgeoalt-key-318--may-support">3.17 Altitude —
-<code>catgeoalt</code> (key 318) — MAY support</a></li>
-<li><a href="#318-tls-public-key--cattpk-key-319--may-support"
-id="toc-318-tls-public-key--cattpk-key-319--may-support">3.18 TLS Public
-Key — <code>cattpk</code> (key 319) — MAY support</a></li>
-</ul></li>
-<li><a href="#4-informational-claims-cta-47"
-id="toc-4-informational-claims-cta-47">4. Informational Claims (CTA
-§4.7)</a>
-<ul>
-<li><a href="#41-subject--sub-key-2--must-support"
-id="toc-41-subject--sub-key-2--must-support">4.1 Subject —
-<code>sub</code> (key 2) — MUST support</a></li>
-<li><a href="#42-issued-at--iat-key-6--must-support"
-id="toc-42-issued-at--iat-key-6--must-support">4.2 Issued At —
-<code>iat</code> (key 6) — MUST support</a></li>
-<li><a href="#43-if-data--catifdata-key-320--may-support"
-id="toc-43-if-data--catifdata-key-320--may-support">4.3 If Data —
-<code>catifdata</code> (key 320) — MAY support</a></li>
-</ul></li>
-<li><a href="#5-dpop-claims-cta-48" id="toc-5-dpop-claims-cta-48">5.
-DPoP Claims (CTA §4.8)</a>
-<ul>
-<li><a href="#rfc-9449--oauth-20-dpop"
-id="toc-rfc-9449--oauth-20-dpop">RFC 9449 — OAuth 2.0 DPoP</a></li>
-<li><a href="#51-confirmation--cnf-key-8--must-support"
-id="toc-51-confirmation--cnf-key-8--must-support">5.1 Confirmation —
-<code>cnf</code> (key 8) — MUST support</a></li>
-<li><a href="#rfc-7638--jwk-thumbprint"
-id="toc-rfc-7638--jwk-thumbprint">RFC 7638 — JWK Thumbprint</a></li>
-<li><a href="#rfc-9679--cose-key-thumbprint"
-id="toc-rfc-9679--cose-key-thumbprint">RFC 9679 — COSE Key
-Thumbprint</a></li>
-<li><a href="#52-dpop-settings--catdpop-key-321--must-support"
-id="toc-52-dpop-settings--catdpop-key-321--must-support">5.2 DPoP
-Settings — <code>catdpop</code> (key 321) — MUST support</a></li>
-<li><a href="#rfc-8747--pop-key-semantics-for-cwts"
-id="toc-rfc-8747--pop-key-semantics-for-cwts">RFC 8747 — PoP Key
-Semantics for CWTs</a></li>
-</ul></li>
-<li><a href="#6-request-claims-cta-49"
-id="toc-6-request-claims-cta-49">6. Request Claims (CTA §4.9)</a>
-<ul>
-<li><a href="#61-if--catif-key-322--may-support"
-id="toc-61-if--catif-key-322--may-support">6.1 If — <code>catif</code>
-(key 322) — MAY support</a></li>
-<li><a href="#62-renewal--catr-key-323--may-support"
-id="toc-62-renewal--catr-key-323--may-support">6.2 Renewal —
-<code>catr</code> (key 323) — MAY support</a></li>
-</ul></li>
-<li><a href="#7-composite-claims-draft-lemmons-composite-claims"
-id="toc-7-composite-claims-draft-lemmons-composite-claims">7. Composite
-Claims (draft-lemmons-composite-claims)</a></li>
-<li><a href="#8-moqt-claims-draft-ietf-moq-c4m"
-id="toc-8-moqt-claims-draft-ietf-moq-c4m">8. MOQT Claims
-(draft-ietf-moq-c4m)</a></li>
-<li><a href="#9-security-requirements-cta-410"
-id="toc-9-security-requirements-cta-410">9. Security Requirements (CTA
-§4.10)</a></li>
-<li><a href="#10-referenced-standards--implementation-status-summary"
-id="toc-10-referenced-standards--implementation-status-summary">10.
-Referenced Standards — Implementation Status Summary</a></li>
-<li><a href="#11-compliance-summary" id="toc-11-compliance-summary">11.
-Compliance Summary</a></li>
-</ul></li>
-</ul>
-</nav>
 <h1 id="standards-compliance-requirements--catrs">Standards Compliance
 Requirements — cat.rs</h1>
 <p><strong>Project:</strong> cat-token (Rust) <strong>Spec
@@ -1779,11 +1625,16 @@ Claims (draft-lemmons-composite-claims)</h2>
 <td>DPoP integration with MOQT actions</td>
 <td>draft-ietf-moq-c4m</td>
 <td><strong>PARTIAL</strong></td>
-<td>Uses the private CWT/COSE DPoP profile from
-draft-nandakumar-moq-generic-dpop-proof-00 with
-<code>typ=dpop-proof+cwt;profile=cta5007b-v1</code> (not the JWT DPoP
-form CAT-4-MOQT currently references). Interop with a peer requires that
-both sides adopt this profile. See §11 for the JWT plug-in slot.</td>
+<td>Supports both the CWT/COSE DPoP profile from
+draft-nandakumar-moq-generic-dpop-proof-00
+(<code>typ=dpop-proof+cwt;profile=cta5007b-v1</code>, default) and a
+sibling JWT profile (RFC 9449 compact form with
+<code>actx</code>/<code>ath</code>/<code>jti</code> payload fields as
+text strings per draft §3.2).
+<code>DpopProof::with_wire_format(DpopWireFormat::Jwt)</code> selects
+the JWT form; <code>decode</code> autodetects. Interop still requires
+both peers to adopt the same profile — CAT-4-MOQT does not itself
+specify a DPoP proof shape.</td>
 </tr>
 <tr>
 <td>C4M token type <code>0x63346d</code></td>
@@ -2013,11 +1864,13 @@ non-ERE patterns</td>
 <td><strong>draft-ietf-moq-c4m</strong></td>
 <td>CAT for MoQ Transport</td>
 <td><strong>PARTIAL</strong> — token-side claims (scopes, moqt-reval,
-actions) implemented. DPoP proof format uses the CWT profile from
-draft-nandakumar-moq-generic-dpop-proof-00
-(<code>typ=dpop-proof+cwt;profile=cta5007b-v1</code>), not the JWT form
-CAT-4-MOQT currently references. Both peers must adopt this profile for
-interop.</td>
+actions) implemented. Both DPoP wire forms from
+draft-nandakumar-moq-generic-dpop-proof-00 are supported: CWT
+(<code>typ=dpop-proof+cwt;profile=cta5007b-v1</code>, default) and JWT
+(RFC 9449 compact form with text
+<code>tns</code>/<code>tn</code>/<code>jti</code>). CAT-4-MOQT itself
+does not pin a DPoP profile; both peers must agree on which form to use.
+Action mnemonics follow CAT-4-MOQT §3.1.2 Table 2.</td>
 </tr>
 </tbody>
 </table>
@@ -2029,28 +1882,45 @@ transport-layer or application-layer concerns. Items marked
 <strong>PARTIAL</strong> deviate from the referenced spec in ways that a
 deploying integrator MUST understand:</p>
 <ul>
-<li><strong>DPoP wire format (§5, §8, §10):</strong> proofs use the
-CWT/COSE profile from draft-nandakumar-moq-generic-dpop-proof-00,
-identified by the frozen <code>typ</code> string
-<code>dpop-proof+cwt;profile=cta5007b-v1</code>. Label numbers
-400/401/402 are private-use until IANA registration lands; a peer that
-speaks only the JWT form referenced by CAT-4-MOQT cannot interoperate on
-the DPoP proof without a JWT plug-in module (the crate's
-<code>dpop.rs</code> is structured so a sibling <code>jwt</code> module
-can be added without touching validator logic).</li>
+<li><strong>DPoP wire format (§5, §8, §10):</strong> two profiles from
+draft-nandakumar-moq-generic-dpop-proof-00 ship in parallel:
+<ul>
+<li>CWT (default): COSE_Sign1 over the private CWT profile identified by
+<code>typ=dpop-proof+cwt;profile=cta5007b-v1</code>. Label numbers
+400/401/402 (<code>actx</code>/<code>nonce</code>/<code>ath</code>) are
+private-use until IANA registration lands.</li>
+<li>JWT: RFC 9449 compact form
+(<code>base64url(header).base64url(payload).base64url(sig)</code>) with
+<code>actx</code>/<code>ath</code>/<code>jti</code> in the JSON payload.
+<code>tns</code>/<code>tn</code>/<code>jti</code> are UTF-8 text strings
+per draft §3.2.
+<code>DpopProof::with_wire_format(DpopWireFormat::Jwt)</code> selects
+JWT on construction; <code>decode</code> autodetects wire form and
+<code>decode_as</code> forces one. CAT-4-MOQT itself does not specify a
+DPoP proof format — interop still requires both peers to agree on the
+same profile.</li>
+</ul></li>
 <li><strong>RFC 9449 §11.1 replay retention:</strong> the default
 <code>LruJtiStore</code> evicts under memory pressure. CDN-scale
 deployments MUST supply a strict TTL-backed store via
 <code>DpopValidator::with_jti_store_strict</code>; the constructor
 refuses non-strict stores.</li>
-<li><strong>CAT-4-MOQT §DPoP integration:</strong> action-name mapping
-and actx label assignments follow the generic-DPoP draft, not the
-CAT-4-MOQT PUB_NS / SUB_NS mnemonics. Update this section when either
-draft advances.</li>
+<li><strong>RFC 9449 §8 nonce challenge:</strong> the crate accepts and
+echoes the <code>nonce</code> claim on both wire forms.
+<code>RelayRequestContext::with_expected_dpop_nonce</code> enforces
+server-side rotation — a proof lacking a nonce or carrying a mismatched
+nonce is rejected with <code>DpopValidationFailed</code>. Callers that
+don't rotate leave the field unset and the check is a no-op.</li>
+<li><strong>CAT-4-MOQT §3.1.2 action mnemonics:</strong> action-name
+mapping follows CAT-4-MOQT §3.1.2 Table 2 (<code>PUB_NS</code>,
+<code>SUB_NS</code>, <code>SETUP</code>, etc.). actx label assignments
+follow the generic-DPoP draft. Update this section when either draft
+advances.</li>
 </ul>
-<p><strong>Test coverage:</strong> 530+ tests covering claims,
+<p><strong>Test coverage:</strong> 550+ tests covering claims,
 algorithms, encoding, validation, DPoP CWT strictness (duplicate keys,
-trailing data, cti byte-string enforcement), and cross-endpoint proof
-binding.</p>
+trailing data, cti byte-string enforcement), JWT wire-form shape and
+non-UTF-8 rejection, DPoP nonce enforcement, cross-endpoint proof
+binding, async authorize end-to-end, and JtiStore fault injection.</p>
 </body>
 </html>

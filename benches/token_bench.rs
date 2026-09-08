@@ -312,12 +312,95 @@ fn bench_moqt_throughput(c: &mut Criterion) {
     group.finish();
 }
 
+/// Concurrent authorize throughput. Fans a batch of pre-built requests
+/// across N worker threads sharing one `MoqtValidator` + `ValidatedToken`.
+/// The lack of storage state on the validator means near-linear scaling is
+/// the expected outcome; any degradation as `threads` grows is a red flag
+/// for accidental locking on the sync authorize path. Runs against tokens
+/// without DPoP or catreplay — those have deliberate serialization points
+/// (JTI store, `cti` store) benched separately as their own workloads.
+fn bench_moqt_concurrent_authorize(c: &mut Criterion) {
+    use std::sync::Arc;
+    use std::thread;
+
+    let mut group = c.benchmark_group("moqt_concurrent_authorize");
+
+    let scope = MoqtScopeBuilder::new()
+        .full_access()
+        .namespace_prefix(b"cdn.")
+        .build();
+    let token = CatTokenBuilder::new()
+        .issuer("https://auth.example.com")
+        .moqt_scope(scope)
+        .build()
+        .unwrap();
+    let validator = Arc::new(MoqtValidator::new().allow_missing_audience());
+    let validated = Arc::new(make_validated(&token));
+
+    // Fixed per-thread batch. Total ops = threads * batch, so throughput
+    // per second scales cleanly when contention is absent.
+    const BATCH_PER_THREAD: usize = 5_000;
+
+    for &threads in [1usize, 2, 4, 8].iter() {
+        group.throughput(criterion::Throughput::Elements(
+            (threads * BATCH_PER_THREAD) as u64,
+        ));
+        group.bench_with_input(
+            BenchmarkId::new("threads", threads),
+            &threads,
+            |b, &threads| {
+                // Pre-build requests once per configuration so the timer
+                // measures authorization work only.
+                let requests: Arc<Vec<RelayRequestContext>> = Arc::new(
+                    (0..BATCH_PER_THREAD)
+                        .map(|i| {
+                            RelayRequestContext::new(
+                                "relay",
+                                MoqtAction::Publish,
+                                vec![b"cdn.example.com".to_vec()],
+                                format!("/stream/{i}").into_bytes(),
+                            )
+                        })
+                        .collect(),
+                );
+
+                b.iter(|| {
+                    let handles: Vec<_> = (0..threads)
+                        .map(|_| {
+                            let validator = Arc::clone(&validator);
+                            let validated = Arc::clone(&validated);
+                            let requests = Arc::clone(&requests);
+                            thread::spawn(move || {
+                                let mut authorized = 0usize;
+                                for req in requests.iter() {
+                                    if validator
+                                        .authorize::<dyn ReplayGuard>(&validated, req, None, None)
+                                        .is_ok()
+                                    {
+                                        authorized += 1;
+                                    }
+                                }
+                                authorized
+                            })
+                        })
+                        .collect();
+                    let total: usize = handles.into_iter().map(|h| h.join().unwrap()).sum();
+                    black_box(total)
+                })
+            },
+        );
+    }
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_token_creation,
     bench_token_validation,
     bench_token_cloning,
     bench_moqt_authorization,
-    bench_moqt_throughput
+    bench_moqt_throughput,
+    bench_moqt_concurrent_authorize
 );
 criterion_main!(benches);

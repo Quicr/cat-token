@@ -261,11 +261,24 @@ impl AuthorizationContext {
         self
     }
 
+    /// Basic well-formedness for the actx map. The tns/tn presence
+    /// requirements are action-dependent (setup actions carry only an
+    /// endpoint); enforcement of resource shape happens at the authorization
+    /// layer via [`crate::MoqtAction::resource_shape`].
     pub fn is_valid(&self) -> bool {
-        self.ctx_type == "moqt" && !self.tns.is_empty()
+        if self.ctx_type != "moqt" {
+            return false;
+        }
+        match self.action.resource_shape() {
+            crate::MoqtResourceShape::Endpoint => true,
+            crate::MoqtResourceShape::Namespace | crate::MoqtResourceShape::Track => {
+                !self.tns.is_empty()
+            }
+        }
     }
 
-    /// MOQTransport §9 action name as it appears in the CBOR-serialized `action`.
+    /// CAT-4-MOQT §3.1.2 action name as it appears in the serialized
+    /// `action` field of `actx`.
     pub fn action_string(&self) -> &'static str {
         moqt_action_wire_name(self.action)
     }
@@ -1560,13 +1573,29 @@ pub mod jwt {
         let mut map = Map::new();
         map.insert("iat".to_string(), Json::Number(payload.iat.into()));
         if let Some(cti) = &payload.cti {
-            map.insert("jti".to_string(), Json::String(URL_SAFE_NO_PAD.encode(cti)));
+            // RFC 9449 §4.2: jti is a JSON string. The in-memory `cti` field is
+            // typed as bytes because CWT (RFC 8392 §3.1.7) requires a byte
+            // string; for JWT we need a text form. UUIDs and base64url tokens
+            // are ASCII-compatible; interpret the stored bytes as UTF-8 and
+            // reject non-UTF-8 payloads rather than silently base64url-
+            // encoding them (that would produce non-interoperable wire bytes).
+            let jti = std::str::from_utf8(cti).map_err(|_| {
+                CatError::InvalidClaimValue(
+                    "JWT encoding requires jti to be UTF-8 text; the in-memory \
+                     cti bytes are not valid UTF-8. Use text-form jti (e.g. \
+                     generate_jti()) or the CWT wire format."
+                        .to_string(),
+                )
+            })?;
+            map.insert("jti".to_string(), Json::String(jti.to_string()));
         }
-        map.insert("actx".to_string(), actx_to_json(&payload.actx));
+        map.insert("actx".to_string(), actx_to_json(&payload.actx)?);
         if let Some(nonce) = &payload.nonce {
             map.insert("nonce".to_string(), Json::String(nonce.clone()));
         }
         if let Some(ath) = &payload.ath {
+            // RFC 9449 §4.2: ath is base64url of the SHA-256 of the access
+            // token. `payload.ath` holds the raw hash bytes; encode here.
             map.insert("ath".to_string(), Json::String(URL_SAFE_NO_PAD.encode(ath)));
         }
         serde_json::to_vec(&Json::Object(map))
@@ -1582,14 +1611,10 @@ pub mod jwt {
             .and_then(|v| v.as_i64())
             .ok_or_else(|| CatError::MissingRequiredClaim("iat".to_string()))?;
         let cti = match obj.get("jti") {
-            Some(Json::String(s)) => Some(
-                URL_SAFE_NO_PAD
-                    .decode(s)
-                    .map_err(|e| CatError::InvalidBase64(e.to_string()))?,
-            ),
+            Some(Json::String(s)) => Some(s.as_bytes().to_vec()),
             Some(_) => {
                 return Err(CatError::InvalidClaimValue(
-                    "jti must be a base64url string".to_string(),
+                    "jti must be a string".to_string(),
                 ));
             }
             None => None,
@@ -1624,29 +1649,48 @@ pub mod jwt {
         })
     }
 
-    fn actx_to_json(actx: &AuthorizationContext) -> Json {
+    /// Serialize `actx` into JWT-form JSON per
+    /// draft-nandakumar-moq-generic-dpop-proof-00 §3.2. `tns` is an array of
+    /// text strings and `tn` is a text string; namespaces and track names
+    /// that are not valid UTF-8 must be carried in the CWT wire format
+    /// (which permits byte strings) instead. This mirrors the constraint
+    /// callers already accept when they encode any HTTP-adjacent identifier
+    /// through JSON.
+    fn actx_to_json(actx: &AuthorizationContext) -> Result<Json, CatError> {
         let mut map = Map::new();
         map.insert("type".to_string(), Json::String(actx.ctx_type.clone()));
         map.insert(
             "action".to_string(),
             Json::String(moqt_action_wire_name(actx.action).to_string()),
         );
-        let tns_arr: Vec<Json> = actx
-            .tns
-            .iter()
-            .map(|seg| Json::String(URL_SAFE_NO_PAD.encode(seg)))
-            .collect();
+        let mut tns_arr: Vec<Json> = Vec::with_capacity(actx.tns.len());
+        for seg in &actx.tns {
+            let s = std::str::from_utf8(seg).map_err(|_| {
+                CatError::InvalidClaimValue(
+                    "JWT DPoP encoding requires actx.tns segments to be UTF-8 \
+                     text (draft-nandakumar-moq-generic-dpop-proof-00 §3.2). \
+                     For binary namespace bytes, use the CWT wire format."
+                        .to_string(),
+                )
+            })?;
+            tns_arr.push(Json::String(s.to_string()));
+        }
         map.insert("tns".to_string(), Json::Array(tns_arr));
         if !actx.tn.is_empty() {
-            map.insert(
-                "tn".to_string(),
-                Json::String(URL_SAFE_NO_PAD.encode(&actx.tn)),
-            );
+            let tn_str = std::str::from_utf8(&actx.tn).map_err(|_| {
+                CatError::InvalidClaimValue(
+                    "JWT DPoP encoding requires actx.tn to be UTF-8 text \
+                     (draft-nandakumar-moq-generic-dpop-proof-00 §3.2). For \
+                     binary track names, use the CWT wire format."
+                        .to_string(),
+                )
+            })?;
+            map.insert("tn".to_string(), Json::String(tn_str.to_string()));
         }
         if let Some(resource) = &actx.resource {
             map.insert("resource".to_string(), Json::String(resource.clone()));
         }
-        Json::Object(map)
+        Ok(Json::Object(map))
     }
 
     fn actx_from_json(v: &Json) -> Result<AuthorizationContext, CatError> {
@@ -1672,19 +1716,13 @@ pub mod jwt {
             let s = seg.as_str().ok_or_else(|| {
                 CatError::InvalidClaimValue("actx.tns element must be a string".to_string())
             })?;
-            tns.push(
-                URL_SAFE_NO_PAD
-                    .decode(s)
-                    .map_err(|e| CatError::InvalidBase64(e.to_string()))?,
-            );
+            tns.push(s.as_bytes().to_vec());
         }
         let tn = match obj.get("tn") {
-            Some(Json::String(s)) => URL_SAFE_NO_PAD
-                .decode(s)
-                .map_err(|e| CatError::InvalidBase64(e.to_string()))?,
+            Some(Json::String(s)) => s.as_bytes().to_vec(),
             Some(_) => {
                 return Err(CatError::InvalidClaimValue(
-                    "actx.tn must be a base64url string".to_string(),
+                    "actx.tn must be a string".to_string(),
                 ));
             }
             None => Vec::new(),
@@ -2232,22 +2270,42 @@ impl DpopValidator {
         Ok(())
     }
 
+    /// Compute the composite (issuer, holder-key, cti) JTI-store key that
+    /// [`Self::commit_jti`] would insert for this proof, or `None` if the
+    /// configured settings don't honour JTIs or the proof carries no cti.
+    ///
+    /// Exposed so async integrations
+    /// ([`crate::r#async::MoqtValidator::authorize_async`]) can build the same
+    /// key and commit against an [`crate::r#async::AsyncJtiStore`] without
+    /// duplicating the key-shape logic.
+    pub fn dpop_commit_key(
+        &self,
+        proof: &DpopProof,
+        thumbprint: &[u8],
+        issuer: Option<&str>,
+    ) -> Option<(String, i64)> {
+        if !self.settings.should_honor_jti() {
+            return None;
+        }
+        let cti = proof.payload.cti.as_ref()?;
+        let iss = issuer.unwrap_or("_");
+        // Composite key: (issuer, holder-key, cti bytes hex). Hex of cti
+        // keeps the key printable and bounded regardless of the raw byte
+        // content (which may include NULs or non-UTF-8 sequences).
+        Some((
+            format!("{}:{}:{}", iss, hex::encode(thumbprint), hex::encode(cti)),
+            proof.payload.iat,
+        ))
+    }
+
     fn insert_jti(
         &self,
         proof: &DpopProof,
         thumbprint: &[u8],
         issuer: Option<&str>,
     ) -> Result<(), CatError> {
-        if self.settings.should_honor_jti()
-            && let Some(ref cti) = proof.payload.cti
-        {
-            let iss = issuer.unwrap_or("_");
-            // Composite key: (issuer, holder-key, cti bytes hex). Hex of cti
-            // keeps the key printable and bounded regardless of the raw byte
-            // content (which may include NULs or non-UTF-8 sequences).
-            let composite_key = format!("{}:{}:{}", iss, hex::encode(thumbprint), hex::encode(cti));
-            self.jti_store
-                .check_and_insert(composite_key, proof.payload.iat)?;
+        if let Some((composite_key, iat)) = self.dpop_commit_key(proof, thumbprint, issuer) {
+            self.jti_store.check_and_insert(composite_key, iat)?;
         }
         Ok(())
     }
@@ -2300,13 +2358,12 @@ impl DpopValidator {
         Ok(())
     }
 
-    pub(crate) fn commit_jti(
-        &self,
-        proof: &DpopProof,
-        thumbprint: &[u8],
-        issuer: Option<&str>,
-    ) -> Result<(), CatError> {
-        self.insert_jti(proof, thumbprint, issuer)
+    /// Direct handle to the JTI store. Exposed for async integrations that
+    /// commit through an [`crate::r#async::AsyncJtiStore`] adapter — sync
+    /// callers should prefer [`DpopValidator::validate`] or the
+    /// [`crate::moqt::MoqtValidator::authorize`] pipeline.
+    pub fn jti_store(&self) -> &Arc<dyn JtiStore> {
+        &self.jti_store
     }
 
     pub fn validate(
@@ -2743,6 +2800,75 @@ mod tests {
             DpopProof::decode(&jwt_bytes).unwrap().wire_format,
             DpopWireFormat::Jwt
         );
+    }
+
+    /// Verifies the JWT payload shape matches the generic-DPoP draft: `tns`
+    /// is an array of text strings (not base64url), `tn` is a text string,
+    /// `jti` is a text string, `ath` is base64url of the raw hash. External
+    /// tooling reading this proof must be able to walk the JSON without
+    /// custom decoding.
+    #[cfg(feature = "moqt")]
+    #[test]
+    fn test_dpop_jwt_wire_shape_is_text_per_draft() {
+        let alg = Es256Algorithm::new_with_key_pair().unwrap();
+        let jwk = Jwk::from_es256_verifying_key(alg.verifying_key()).unwrap();
+
+        let ath = crate::crypto::hash_sha256(b"the-access-token-bytes");
+        let mut proof = DpopProof::create_for_moqt(
+            MoqtAction::Subscribe,
+            vec![b"example".to_vec(), b"com-app-scope-video".to_vec()],
+            b"camera1",
+            crate::crypto::ALG_ES256,
+            jwk,
+        )
+        .with_wire_format(DpopWireFormat::Jwt)
+        .with_jti("550e8400-e29b-41d4-a716-446655440000".to_string())
+        .with_access_token_hash(ath.clone());
+        proof.sign(&alg).unwrap();
+
+        let encoded = proof.encode().unwrap();
+        let parts: Vec<&[u8]> = encoded.split(|&b| b == b'.').collect();
+        assert_eq!(parts.len(), 3);
+        let payload_bytes = URL_SAFE_NO_PAD.decode(parts[1]).unwrap();
+        let payload_json: serde_json::Value = serde_json::from_slice(&payload_bytes).unwrap();
+
+        let actx = payload_json.get("actx").unwrap().as_object().unwrap();
+        let tns = actx.get("tns").unwrap().as_array().unwrap();
+        assert_eq!(tns.len(), 2);
+        assert_eq!(tns[0].as_str().unwrap(), "example");
+        assert_eq!(tns[1].as_str().unwrap(), "com-app-scope-video");
+        assert_eq!(actx.get("tn").unwrap().as_str().unwrap(), "camera1");
+        assert_eq!(actx.get("action").unwrap().as_str().unwrap(), "SUBSCRIBE");
+
+        assert_eq!(
+            payload_json.get("jti").unwrap().as_str().unwrap(),
+            "550e8400-e29b-41d4-a716-446655440000"
+        );
+
+        let ath_b64 = payload_json.get("ath").unwrap().as_str().unwrap();
+        assert_eq!(URL_SAFE_NO_PAD.decode(ath_b64).unwrap(), ath);
+    }
+
+    /// A JWT-encoded proof with binary (non-UTF-8) namespace bytes must be
+    /// rejected rather than emitted with a lossy or non-interoperable form.
+    /// Callers with binary namespaces must use CWT. Failure surfaces on
+    /// signing_input because sign() must serialize the payload to sign it.
+    #[cfg(feature = "moqt")]
+    #[test]
+    fn test_dpop_jwt_rejects_non_utf8_namespace() {
+        let alg = Es256Algorithm::new_with_key_pair().unwrap();
+        let jwk = Jwk::from_es256_verifying_key(alg.verifying_key()).unwrap();
+        let mut proof = DpopProof::create_for_moqt(
+            MoqtAction::Subscribe,
+            vec![vec![0xFF, 0xFE, 0xFD]], // not valid UTF-8
+            b"track",
+            crate::crypto::ALG_ES256,
+            jwk,
+        )
+        .with_wire_format(DpopWireFormat::Jwt)
+        .with_jti(generate_jti());
+        let err = proof.sign(&alg).unwrap_err();
+        assert!(matches!(err, CatError::InvalidClaimValue(_)));
     }
 
     #[cfg(feature = "moqt")]

@@ -1,5 +1,57 @@
 # Changelog
 
+## 0.4.2 — 2026-09-07
+
+Round-4 audit follow-up. Adds an async authorize path so production
+relays can integrate cat-token without wrapping every replay commit in
+`spawn_blocking`, tightens the DPoP JWT wire format to match
+draft-nandakumar-moq-generic-dpop-proof-00 §3.2 (text `tns`/`tn`/`jti`),
+and closes the DPoP-protected setup authorization gap for
+endpoint-only actions.
+
+### Added
+
+- **Async authorize surface** behind the new `async` feature
+  (`--features async`, pulls in `async-trait`; no runtime dependency).
+  - `AsyncMoqtValidator::authorize_async` — mirrors
+    `MoqtValidator::authorize` but awaits the two replay commits
+    (DPoP JTI, `catreplay` cti). Pre-commit checks share the sync
+    implementation; only the storage effects diverge.
+  - `AsyncJtiStore` and `AsyncReplayGuard` traits — async siblings of
+    `JtiStore` / `ReplayGuard` with identical fail-closed contracts.
+  - `AsyncJtiStoreAdapter` — wrap a sync `JtiStore` for callers that
+    keep replay state in-process. Distributed backends should
+    implement `AsyncJtiStore` natively.
+  - `AsyncInMemoryStrictJtiStore` — reference strict backend for tests
+    and single-node deployments; `is_strict() == true`.
+  - `MoqtValidator::authorize_precommit` and
+    `MoqtValidator::commit` — the sync pipeline is now factored into
+    a pre-commit / commit split so sync and async paths share the
+    policy code. `PreCommit`, `CatReplayObligation`, and
+    `DpopValidator::dpop_commit_key` are exposed for the same reason.
+  - Integration test `tests/test_async_authorize.rs` exercises the
+    happy path, JTI replay, `catreplay` commit, and store-outage
+    fail-closed contract.
+- **DPoP nonce challenge enforcement** (RFC 9449 §8).
+  `RelayRequestContext::with_expected_dpop_nonce` pins a per-request
+  server nonce; a proof lacking a nonce or carrying a mismatched
+  nonce is rejected with `DpopValidationFailed`. Callers that don't
+  rotate nonces leave it unset and the check is a no-op.
+- **DPoP-protected setup authorization**. `ClientSetup` /
+  `ServerSetup` proofs can now round-trip through
+  `MoqtValidator::authorize` with empty `tns`/`tn` on both proof and
+  request context (endpoint-shape actions per CAT-4-MOQT §3.1.2). A
+  setup proof that smuggles a namespace or track is rejected as
+  before.
+
+### Fixed
+
+- **DPoP JWT wire format** now emits `tns`/`tn`/`jti` as UTF-8 text
+  strings per draft-nandakumar-moq-generic-dpop-proof-00 §3.2. Non-
+  UTF-8 namespace or track bytes surface as `InvalidClaimValue` at
+  sign time instead of producing an off-spec proof. CWT wire form is
+  unchanged.
+
 ## 0.4.1 — 2026-09-06
 
 Post-audit follow-up. Fixes the CI feature-matrix compile break introduced

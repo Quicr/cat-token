@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2022 Quicr
 // SPDX-License-Identifier: BSD-2-Clause
 
+#[cfg(feature = "async")]
+pub mod r#async;
 pub mod claims;
 pub mod crypto;
 pub mod cwt;
@@ -32,6 +34,8 @@ mod trie;
 #[cfg(all(feature = "builtin-trie", not(feature = "qp-trie")))]
 pub use trie::*;
 
+#[cfg(feature = "async")]
+pub use r#async::*;
 pub use claims::*;
 pub use crypto::*;
 pub use cwt::*;

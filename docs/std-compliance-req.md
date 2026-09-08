@@ -357,7 +357,7 @@ Status legend:
 | Binary match types: exact, prefix, suffix | draft-ietf-moq-c4m | **PASS** | All three implemented |
 | Namespace tuple prefix semantics | draft-ietf-moq-c4m | **PASS** | Trailing elements allowed |
 | First-match-wins scope evaluation | draft-ietf-moq-c4m | **PASS** | Implemented |
-| DPoP integration with MOQT actions | draft-ietf-moq-c4m | **PARTIAL** | Uses the private CWT/COSE DPoP profile from draft-nandakumar-moq-generic-dpop-proof-00 with `typ=dpop-proof+cwt;profile=cta5007b-v1` (not the JWT DPoP form CAT-4-MOQT currently references). Interop with a peer requires that both sides adopt this profile. See §11 for the JWT plug-in slot. |
+| DPoP integration with MOQT actions | draft-ietf-moq-c4m | **PARTIAL** | Supports both the CWT/COSE DPoP profile from draft-nandakumar-moq-generic-dpop-proof-00 (`typ=dpop-proof+cwt;profile=cta5007b-v1`, default) and a sibling JWT profile (RFC 9449 compact form with `actx`/`ath`/`jti` payload fields as text strings per draft §3.2). `DpopProof::with_wire_format(DpopWireFormat::Jwt)` selects the JWT form; `decode` autodetects. Interop still requires both peers to adopt the same profile — CAT-4-MOQT does not itself specify a DPoP proof shape. |
 | C4M token type `0x63346d` | draft-ietf-moq-c4m | **PASS** | Defined as `C4M_TOKEN_TYPE` |
 
 ---
@@ -405,7 +405,7 @@ Status legend:
 | **ETSI TS 104 002** | DASH-IF watermarking token | **N/A** — out of scope |
 | **IEEE 1003.1-2017** | POSIX ERE for regex matching | **PASS** — `validate_posix_ere()` rejects non-ERE patterns |
 | **draft-lemmons-composite-claims** | Composite token claims | **PASS** |
-| **draft-ietf-moq-c4m** | CAT for MoQ Transport | **PARTIAL** — token-side claims (scopes, moqt-reval, actions) implemented. DPoP proof format uses the CWT profile from draft-nandakumar-moq-generic-dpop-proof-00 (`typ=dpop-proof+cwt;profile=cta5007b-v1`), not the JWT form CAT-4-MOQT currently references. Both peers must adopt this profile for interop. |
+| **draft-ietf-moq-c4m** | CAT for MoQ Transport | **PARTIAL** — token-side claims (scopes, moqt-reval, actions) implemented. Both DPoP wire forms from draft-nandakumar-moq-generic-dpop-proof-00 are supported: CWT (`typ=dpop-proof+cwt;profile=cta5007b-v1`, default) and JWT (RFC 9449 compact form with text `tns`/`tn`/`jti`). CAT-4-MOQT itself does not pin a DPoP profile; both peers must agree on which form to use. Action mnemonics follow CAT-4-MOQT §3.1.2 Table 2. |
 
 ---
 
@@ -413,19 +413,35 @@ Status legend:
 
 All CTA-5007-B claim-side MUST and SHOULD requirements are implemented and tested. Items marked **N/A** are transport-layer or application-layer concerns. Items marked **PARTIAL** deviate from the referenced spec in ways that a deploying integrator MUST understand:
 
-- **DPoP wire format (§5, §8, §10):** proofs use the CWT/COSE profile from
-  draft-nandakumar-moq-generic-dpop-proof-00, identified by the frozen
-  `typ` string `dpop-proof+cwt;profile=cta5007b-v1`. Label numbers 400/401/402
-  are private-use until IANA registration lands; a peer that speaks only the
-  JWT form referenced by CAT-4-MOQT cannot interoperate on the DPoP proof
-  without a JWT plug-in module (the crate's `dpop.rs` is structured so a
-  sibling `jwt` module can be added without touching validator logic).
+- **DPoP wire format (§5, §8, §10):** two profiles from
+  draft-nandakumar-moq-generic-dpop-proof-00 ship in parallel:
+  - CWT (default): COSE_Sign1 over the private CWT profile identified
+    by `typ=dpop-proof+cwt;profile=cta5007b-v1`. Label numbers 400/401/402
+    (`actx`/`nonce`/`ath`) are private-use until IANA registration lands.
+  - JWT: RFC 9449 compact form (`base64url(header).base64url(payload).base64url(sig)`)
+    with `actx`/`ath`/`jti` in the JSON payload. `tns`/`tn`/`jti` are
+    UTF-8 text strings per draft §3.2.
+  `DpopProof::with_wire_format(DpopWireFormat::Jwt)` selects JWT on
+  construction; `decode` autodetects wire form and `decode_as` forces
+  one. CAT-4-MOQT itself does not specify a DPoP proof format —
+  interop still requires both peers to agree on the same profile.
 - **RFC 9449 §11.1 replay retention:** the default `LruJtiStore` evicts
   under memory pressure. CDN-scale deployments MUST supply a strict
   TTL-backed store via `DpopValidator::with_jti_store_strict`; the
   constructor refuses non-strict stores.
-- **CAT-4-MOQT §DPoP integration:** action-name mapping and actx label
-  assignments follow the generic-DPoP draft, not the CAT-4-MOQT PUB_NS /
-  SUB_NS mnemonics. Update this section when either draft advances.
+- **RFC 9449 §8 nonce challenge:** the crate accepts and echoes the
+  `nonce` claim on both wire forms.
+  `RelayRequestContext::with_expected_dpop_nonce` enforces server-side
+  rotation — a proof lacking a nonce or carrying a mismatched nonce is
+  rejected with `DpopValidationFailed`. Callers that don't rotate leave
+  the field unset and the check is a no-op.
+- **CAT-4-MOQT §3.1.2 action mnemonics:** action-name mapping follows
+  CAT-4-MOQT §3.1.2 Table 2 (`PUB_NS`, `SUB_NS`, `SETUP`, etc.). actx
+  label assignments follow the generic-DPoP draft. Update this section
+  when either draft advances.
 
-**Test coverage:** 530+ tests covering claims, algorithms, encoding, validation, DPoP CWT strictness (duplicate keys, trailing data, cti byte-string enforcement), and cross-endpoint proof binding.
+**Test coverage:** 550+ tests covering claims, algorithms, encoding,
+validation, DPoP CWT strictness (duplicate keys, trailing data, cti
+byte-string enforcement), JWT wire-form shape and non-UTF-8 rejection,
+DPoP nonce enforcement, cross-endpoint proof binding, async authorize
+end-to-end, and JtiStore fault injection.

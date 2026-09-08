@@ -459,3 +459,247 @@ fn test_authorize_rejects_resource_endpoint_mismatch() {
         "proof bound to relay-a must not authorize relay-b: {result:?}"
     );
 }
+
+/// DPoP-protected ClientSetup: setup actions are endpoint-only per
+/// CAT-4-MOQT §3.1.2, so the proof carries empty tns/tn and the request
+/// context carries empty namespace/track. This must round-trip through the
+/// authorize path without triggering the namespace-mismatch or
+/// missing-track guards.
+#[test]
+fn test_dpop_setup_authorizes_with_empty_namespace_and_track() {
+    let alg = Es256Algorithm::new_with_key_pair().unwrap();
+    let jwk = Jwk::from_es256_verifying_key(alg.verifying_key()).unwrap();
+    let thumbprint = jwk.thumbprint().unwrap();
+
+    let scope = cat_token::moqt::MoqtScopeBuilder::new()
+        .action(MoqtAction::ClientSetup)
+        .build();
+    let token = CatTokenBuilder::new()
+        .issuer("https://test.com")
+        .single_audience("relay")
+        .moqt_scope(scope)
+        .confirmation(thumbprint)
+        .build()
+        .unwrap();
+    let validated = make_validated(&token);
+
+    let mut proof =
+        DpopProof::create_for_moqt(MoqtAction::ClientSetup, Vec::new(), b"", ALG_ES256, jwk)
+            .with_jti(generate_jti())
+            .with_access_token_hash(ath_for(&validated));
+    proof.sign(&alg).unwrap();
+
+    let settings = CatDpopSettings::new().with_window(300).unwrap();
+    let validator = cat_token::moqt::MoqtValidator::new().with_dpop_validation(settings);
+
+    let request = cat_token::moqt::RelayRequestContext::new(
+        "relay",
+        MoqtAction::ClientSetup,
+        Vec::new(),
+        Vec::new(),
+    )
+    .with_dpop_proof(proof);
+
+    validator
+        .authorize::<dyn ReplayGuard>(&validated, &request, None, None)
+        .expect("DPoP-protected setup must authorize with empty ns/track");
+}
+
+/// RFC 9449 §8 nonce challenge. When the relay pins an expected nonce on
+/// the request context, the DPoP proof MUST carry a matching nonce.
+#[test]
+fn test_dpop_nonce_mismatch_rejected() {
+    let alg = Es256Algorithm::new_with_key_pair().unwrap();
+    let jwk = Jwk::from_es256_verifying_key(alg.verifying_key()).unwrap();
+    let thumbprint = jwk.thumbprint().unwrap();
+
+    let scope = cat_token::moqt::MoqtScopeBuilder::new()
+        .action(MoqtAction::Publish)
+        .namespace_exact(b"ns")
+        .build();
+    let token = CatTokenBuilder::new()
+        .issuer("https://test.com")
+        .single_audience("relay")
+        .moqt_scope(scope)
+        .confirmation(thumbprint)
+        .build()
+        .unwrap();
+    let validated = make_validated(&token);
+
+    // Proof carries nonce "server-nonce-a", but the relay's challenge
+    // for this request is "server-nonce-b".
+    let mut proof = DpopProof::create_for_moqt(
+        MoqtAction::Publish,
+        vec![b"ns".to_vec()],
+        b"track",
+        ALG_ES256,
+        jwk,
+    )
+    .with_jti(generate_jti())
+    .with_access_token_hash(ath_for(&validated))
+    .with_nonce("server-nonce-a".to_string());
+    proof.sign(&alg).unwrap();
+
+    let settings = CatDpopSettings::new().with_window(300).unwrap();
+    let validator = cat_token::moqt::MoqtValidator::new().with_dpop_validation(settings);
+
+    let request = cat_token::moqt::RelayRequestContext::new(
+        "relay",
+        MoqtAction::Publish,
+        vec![b"ns".to_vec()],
+        b"track".to_vec(),
+    )
+    .with_dpop_proof(proof)
+    .with_expected_dpop_nonce("server-nonce-b");
+
+    let result = validator.authorize::<dyn ReplayGuard>(&validated, &request, None, None);
+    assert!(
+        matches!(result, Err(CatError::DpopValidationFailed(_))),
+        "nonce mismatch must be rejected: {result:?}"
+    );
+}
+
+#[test]
+fn test_dpop_missing_nonce_rejected_when_expected() {
+    let alg = Es256Algorithm::new_with_key_pair().unwrap();
+    let jwk = Jwk::from_es256_verifying_key(alg.verifying_key()).unwrap();
+    let thumbprint = jwk.thumbprint().unwrap();
+
+    let scope = cat_token::moqt::MoqtScopeBuilder::new()
+        .action(MoqtAction::Publish)
+        .namespace_exact(b"ns")
+        .build();
+    let token = CatTokenBuilder::new()
+        .issuer("https://test.com")
+        .single_audience("relay")
+        .moqt_scope(scope)
+        .confirmation(thumbprint)
+        .build()
+        .unwrap();
+    let validated = make_validated(&token);
+
+    let mut proof = DpopProof::create_for_moqt(
+        MoqtAction::Publish,
+        vec![b"ns".to_vec()],
+        b"track",
+        ALG_ES256,
+        jwk,
+    )
+    .with_jti(generate_jti())
+    .with_access_token_hash(ath_for(&validated));
+    proof.sign(&alg).unwrap();
+
+    let settings = CatDpopSettings::new().with_window(300).unwrap();
+    let validator = cat_token::moqt::MoqtValidator::new().with_dpop_validation(settings);
+
+    let request = cat_token::moqt::RelayRequestContext::new(
+        "relay",
+        MoqtAction::Publish,
+        vec![b"ns".to_vec()],
+        b"track".to_vec(),
+    )
+    .with_dpop_proof(proof)
+    .with_expected_dpop_nonce("server-nonce");
+
+    let result = validator.authorize::<dyn ReplayGuard>(&validated, &request, None, None);
+    assert!(
+        matches!(result, Err(CatError::DpopValidationFailed(_))),
+        "missing nonce must be rejected when server pinned one: {result:?}"
+    );
+}
+
+#[test]
+fn test_dpop_matching_nonce_accepted() {
+    let alg = Es256Algorithm::new_with_key_pair().unwrap();
+    let jwk = Jwk::from_es256_verifying_key(alg.verifying_key()).unwrap();
+    let thumbprint = jwk.thumbprint().unwrap();
+
+    let scope = cat_token::moqt::MoqtScopeBuilder::new()
+        .action(MoqtAction::Publish)
+        .namespace_exact(b"ns")
+        .build();
+    let token = CatTokenBuilder::new()
+        .issuer("https://test.com")
+        .single_audience("relay")
+        .moqt_scope(scope)
+        .confirmation(thumbprint)
+        .build()
+        .unwrap();
+    let validated = make_validated(&token);
+
+    let mut proof = DpopProof::create_for_moqt(
+        MoqtAction::Publish,
+        vec![b"ns".to_vec()],
+        b"track",
+        ALG_ES256,
+        jwk,
+    )
+    .with_jti(generate_jti())
+    .with_access_token_hash(ath_for(&validated))
+    .with_nonce("server-nonce".to_string());
+    proof.sign(&alg).unwrap();
+
+    let settings = CatDpopSettings::new().with_window(300).unwrap();
+    let validator = cat_token::moqt::MoqtValidator::new().with_dpop_validation(settings);
+
+    let request = cat_token::moqt::RelayRequestContext::new(
+        "relay",
+        MoqtAction::Publish,
+        vec![b"ns".to_vec()],
+        b"track".to_vec(),
+    )
+    .with_dpop_proof(proof)
+    .with_expected_dpop_nonce("server-nonce");
+
+    validator
+        .authorize::<dyn ReplayGuard>(&validated, &request, None, None)
+        .expect("matching nonce must authorize");
+}
+
+/// A DPoP proof for a setup action MUST NOT smuggle a namespace or track.
+#[test]
+fn test_dpop_setup_rejects_populated_namespace() {
+    let alg = Es256Algorithm::new_with_key_pair().unwrap();
+    let jwk = Jwk::from_es256_verifying_key(alg.verifying_key()).unwrap();
+    let thumbprint = jwk.thumbprint().unwrap();
+
+    let scope = cat_token::moqt::MoqtScopeBuilder::new()
+        .action(MoqtAction::ClientSetup)
+        .build();
+    let token = CatTokenBuilder::new()
+        .issuer("https://test.com")
+        .single_audience("relay")
+        .moqt_scope(scope)
+        .confirmation(thumbprint)
+        .build()
+        .unwrap();
+    let validated = make_validated(&token);
+
+    let mut proof = DpopProof::create_for_moqt(
+        MoqtAction::ClientSetup,
+        vec![b"leaked-ns".to_vec()],
+        b"",
+        ALG_ES256,
+        jwk,
+    )
+    .with_jti(generate_jti())
+    .with_access_token_hash(ath_for(&validated));
+    proof.sign(&alg).unwrap();
+
+    let settings = CatDpopSettings::new().with_window(300).unwrap();
+    let validator = cat_token::moqt::MoqtValidator::new().with_dpop_validation(settings);
+
+    let request = cat_token::moqt::RelayRequestContext::new(
+        "relay",
+        MoqtAction::ClientSetup,
+        Vec::new(),
+        Vec::new(),
+    )
+    .with_dpop_proof(proof);
+
+    let result = validator.authorize::<dyn ReplayGuard>(&validated, &request, None, None);
+    assert!(
+        matches!(result, Err(CatError::DpopValidationFailed(_))),
+        "setup with populated tns must be rejected: {result:?}"
+    );
+}
