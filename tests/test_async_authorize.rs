@@ -327,3 +327,165 @@ async fn async_authorize_commits_catreplay_via_guard() {
         "async replay guard should have been consulted for each authorize"
     );
 }
+
+/// Non-strict guard used to prove `require_strict_replay_guard` refuses it.
+struct BestEffortGuard;
+#[async_trait]
+impl AsyncReplayGuard for BestEffortGuard {
+    async fn check_and_record(&self, _cti: &[u8]) -> Result<bool, CatError> {
+        Ok(false)
+    }
+    // Deliberately inherits the default `is_strict() == false`.
+}
+
+struct StrictGuard {
+    inner: tokio::sync::Mutex<std::collections::HashSet<Vec<u8>>>,
+}
+#[async_trait]
+impl AsyncReplayGuard for StrictGuard {
+    async fn check_and_record(&self, cti: &[u8]) -> Result<bool, CatError> {
+        let mut set = self.inner.lock().await;
+        Ok(!set.insert(cti.to_vec()))
+    }
+    fn is_strict(&self) -> bool {
+        true
+    }
+}
+
+/// `require_strict_replay_guard()` rejects a best-effort guard when the
+/// token asserts catreplay. Mirrors the JTI-store `try_from_sync_strict`
+/// contract at the second commit surface — without this, a CDN deployment
+/// could pin JTI strictness but silently accept a leaky `cti` backend.
+#[tokio::test]
+async fn strict_validator_refuses_best_effort_replay_guard() {
+    let alg = Es256Algorithm::new_with_key_pair().unwrap();
+    let jwk = Jwk::from_es256_verifying_key(alg.verifying_key()).unwrap();
+    let thumbprint = jwk.thumbprint().unwrap();
+
+    let token = CatTokenBuilder::new()
+        .issuer("https://test.com")
+        .single_audience("relay")
+        .moqt_scope(moqt_scope())
+        .confirmation(thumbprint)
+        .cwt_id(b"strict-cti".to_vec())
+        .replay_protection(cat_token::claims::ReplayProtection::Prohibited)
+        .build()
+        .unwrap();
+    let validated = make_validated(&token);
+
+    let settings = CatDpopSettings::new()
+        .with_window(300)
+        .unwrap()
+        .with_jti_processing(true);
+    let sync = cat_token::moqt::MoqtValidator::new().with_dpop_validation(settings);
+    let jti_store = Arc::new(AsyncInMemoryStrictJtiStore::new());
+    let validator = AsyncMoqtValidator::try_from_sync_strict(sync, jti_store)
+        .expect("strict store construction")
+        .require_strict_replay_guard();
+
+    let request = cat_token::moqt::RelayRequestContext::new(
+        "relay",
+        MoqtAction::Publish,
+        vec![b"ns".to_vec()],
+        b"track".to_vec(),
+    )
+    .with_dpop_proof(build_dpop_proof(&alg, jwk, &validated));
+
+    let err = validator
+        .authorize_async(&validated, &request, Some(&BestEffortGuard), None)
+        .await
+        .expect_err("best-effort guard must be refused under require_strict_replay_guard");
+    assert!(
+        matches!(&err, CatError::CryptoError(msg) if msg.contains("is_strict")),
+        "expected CryptoError referencing is_strict, got {err:?}"
+    );
+}
+
+/// A strict-attesting guard passes the same gate — the check keys off the
+/// guard's `is_strict()` bit, not on the trait object type.
+#[tokio::test]
+async fn strict_validator_accepts_strict_replay_guard() {
+    let alg = Es256Algorithm::new_with_key_pair().unwrap();
+    let jwk = Jwk::from_es256_verifying_key(alg.verifying_key()).unwrap();
+    let thumbprint = jwk.thumbprint().unwrap();
+
+    let token = CatTokenBuilder::new()
+        .issuer("https://test.com")
+        .single_audience("relay")
+        .moqt_scope(moqt_scope())
+        .confirmation(thumbprint)
+        .cwt_id(b"strict-ok-cti".to_vec())
+        .replay_protection(cat_token::claims::ReplayProtection::Prohibited)
+        .build()
+        .unwrap();
+    let validated = make_validated(&token);
+
+    let settings = CatDpopSettings::new()
+        .with_window(300)
+        .unwrap()
+        .with_jti_processing(true);
+    let sync = cat_token::moqt::MoqtValidator::new().with_dpop_validation(settings);
+    let jti_store = Arc::new(AsyncInMemoryStrictJtiStore::new());
+    let validator = AsyncMoqtValidator::try_from_sync_strict(sync, jti_store)
+        .expect("strict store construction")
+        .require_strict_replay_guard();
+
+    let guard = StrictGuard {
+        inner: tokio::sync::Mutex::new(std::collections::HashSet::new()),
+    };
+    let request = cat_token::moqt::RelayRequestContext::new(
+        "relay",
+        MoqtAction::Publish,
+        vec![b"ns".to_vec()],
+        b"track".to_vec(),
+    )
+    .with_dpop_proof(build_dpop_proof(&alg, jwk, &validated));
+
+    validator
+        .authorize_async(&validated, &request, Some(&guard), None)
+        .await
+        .expect("strict guard should be accepted under require_strict_replay_guard");
+}
+
+/// `require_strict_replay_guard()` is a no-op for tokens that don't assert
+/// catreplay — the guard slot is never consulted, so the strictness check
+/// never fires. Prevents accidentally regressing on the guard-optional
+/// happy path.
+#[tokio::test]
+async fn strict_validator_no_guard_no_catreplay_still_authorizes() {
+    let alg = Es256Algorithm::new_with_key_pair().unwrap();
+    let jwk = Jwk::from_es256_verifying_key(alg.verifying_key()).unwrap();
+    let thumbprint = jwk.thumbprint().unwrap();
+
+    let token = CatTokenBuilder::new()
+        .issuer("https://test.com")
+        .single_audience("relay")
+        .moqt_scope(moqt_scope())
+        .confirmation(thumbprint)
+        .build()
+        .unwrap();
+    let validated = make_validated(&token);
+
+    let settings = CatDpopSettings::new()
+        .with_window(300)
+        .unwrap()
+        .with_jti_processing(true);
+    let sync = cat_token::moqt::MoqtValidator::new().with_dpop_validation(settings);
+    let jti_store = Arc::new(AsyncInMemoryStrictJtiStore::new());
+    let validator = AsyncMoqtValidator::try_from_sync_strict(sync, jti_store)
+        .expect("strict store construction")
+        .require_strict_replay_guard();
+
+    let request = cat_token::moqt::RelayRequestContext::new(
+        "relay",
+        MoqtAction::Publish,
+        vec![b"ns".to_vec()],
+        b"track".to_vec(),
+    )
+    .with_dpop_proof(build_dpop_proof(&alg, jwk, &validated));
+
+    validator
+        .authorize_async(&validated, &request, None, None)
+        .await
+        .expect("guard-less authorize should succeed when the token has no catreplay");
+}

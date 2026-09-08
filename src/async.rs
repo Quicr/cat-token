@@ -71,9 +71,27 @@ pub trait AsyncJtiStore: Send + Sync {
 /// has been observed before (atomically recording the current observation
 /// for future calls), `Ok(false)` on first observation, and an error only
 /// on backend failure (which propagates as a hard authorization failure).
+///
+/// [`is_strict`](AsyncReplayGuard::is_strict) mirrors the JTI-store contract:
+/// a strict guard is self-attesting that it retains every observed `cti`
+/// for at least the token's `exp - iat` window, insert-if-absent is atomic
+/// across every node that shares the backend, and backend outage surfaces
+/// as [`CatError::CryptoError`] rather than `Ok(false)`. Distributed CDN
+/// deployments MUST use a strict guard behind
+/// [`AsyncMoqtValidator::require_strict_replay_guard`]; a best-effort LRU
+/// is a replay-defense bypass under memory pressure or restart.
 #[async_trait]
 pub trait AsyncReplayGuard: Send + Sync {
     async fn check_and_record(&self, cti: &[u8]) -> Result<bool, CatError>;
+
+    /// Self-attestation. See the trait rustdoc for the strict-guard
+    /// contract. The crate cannot verify a distributed backend meets it;
+    /// the integrator asserts it and audits against the same list as the
+    /// JTI store (atomic insert-if-absent, TTL ≥ token lifetime, no
+    /// eviction inside TTL, fail-closed on outage).
+    fn is_strict(&self) -> bool {
+        false
+    }
 }
 
 /// Wrap a sync [`crate::JtiStore`] as an [`AsyncJtiStore`]. For in-process
@@ -111,10 +129,46 @@ impl AsyncJtiStore for AsyncJtiStoreAdapter {
 /// async paths must share the same store instance if the deployment ever
 /// mixes them — otherwise a JTI accepted on one path can be replayed on
 /// the other.
+///
+/// # CPU offload shape (relay obligation)
+///
+/// Only the two commits inside [`AsyncMoqtValidator::commit_async`] are
+/// actually awaitable — token decode, CAT claim evaluation, MOQT scope
+/// matching, and DPoP ES256/PS256 verification all run synchronously
+/// inside [`MoqtValidator::authorize_precommit`]. At CDN scale that
+/// synchronous half must be lifted off the I/O runtime or a burst of
+/// ES256 verifications will inflate p99/p999 tail latency for every
+/// unrelated request on the reactor. The precommit / commit split
+/// exists to make the offload straightforward:
+///
+/// ```ignore
+/// // Runs on a bounded blocking pool (spawn_blocking, rayon, etc.),
+/// // NOT on the reactor. Cap the pool with a semaphore per connection
+/// // so a DPoP surge cannot exhaust it.
+/// let pre = tokio::task::spawn_blocking({
+///     let sync = sync_validator.clone();
+///     let token = token.clone();
+///     let ctx = ctx.clone();
+///     move || sync.authorize_precommit(&token, &ctx, true, None)
+/// })
+/// .await
+/// .expect("blocking pool")??;
+///
+/// // Back on the reactor: the two replay commits are the only awaits.
+/// let authorized = async_validator
+///     .commit_async(pre, Some(replay_guard))
+///     .await?;
+/// ```
+///
+/// The alternative — wrapping the whole `authorize_async` in
+/// `spawn_blocking` — works and is simpler, at the cost of tying up a
+/// blocking-pool slot for the JTI/cti network round-trips. See
+/// `docs/RELAY-OBLIGATIONS.md` §3 for the full checklist.
 #[derive(Clone)]
 pub struct AsyncMoqtValidator {
     sync: MoqtValidator,
     jti_store: Arc<dyn AsyncJtiStore>,
+    require_strict_replay_guard: bool,
 }
 
 impl AsyncMoqtValidator {
@@ -147,7 +201,11 @@ impl AsyncMoqtValidator {
                     .to_string(),
             ));
         }
-        Ok(Self { sync, jti_store })
+        Ok(Self {
+            sync,
+            jti_store,
+            require_strict_replay_guard: false,
+        })
     }
 
     /// Build the async validator without checking store strictness. Use
@@ -157,7 +215,28 @@ impl AsyncMoqtValidator {
     /// production deployments MUST use
     /// [`AsyncMoqtValidator::try_from_sync_strict`] instead.
     pub fn from_sync_best_effort(sync: MoqtValidator, jti_store: Arc<dyn AsyncJtiStore>) -> Self {
-        Self { sync, jti_store }
+        Self {
+            sync,
+            jti_store,
+            require_strict_replay_guard: false,
+        }
+    }
+
+    /// Refuse `authorize_async` calls whose supplied
+    /// [`AsyncReplayGuard`] reports `is_strict() == false`. Set this on
+    /// the CDN deployment path so a caller cannot silently degrade the
+    /// `catreplay` commit surface to a best-effort backend after the
+    /// JTI-store strictness gate has already been enforced at
+    /// construction time. Guardless requests (tokens without a
+    /// `catreplay` obligation) are unaffected.
+    ///
+    /// Like [`AsyncJtiStore::is_strict`] this is *self-attestation*:
+    /// the crate cannot verify the backend, only that the integrator
+    /// has opted into the contract described on [`AsyncReplayGuard`].
+    #[must_use]
+    pub fn require_strict_replay_guard(mut self) -> Self {
+        self.require_strict_replay_guard = true;
+        self
     }
 
     /// Async equivalent of [`MoqtValidator::authorize`]. Runs the sync
@@ -195,28 +274,40 @@ impl AsyncMoqtValidator {
 
         let reuse_detected = match pre.replay_obligation().cloned() {
             Some(CatReplayObligation::Prohibited(cti)) => {
-                let guard = replay_guard.ok_or_else(|| {
-                    CatError::InvalidClaimValue(
-                        "token asserts catreplay but no replay guard configured".to_string(),
-                    )
-                })?;
+                let guard = self.resolve_replay_guard(replay_guard)?;
                 if guard.check_and_record(&cti).await? {
                     return Err(CatError::ReplayAttackDetected);
                 }
                 false
             }
             Some(CatReplayObligation::ReuseDetection(cti)) => {
-                let guard = replay_guard.ok_or_else(|| {
-                    CatError::InvalidClaimValue(
-                        "token asserts catreplay but no replay guard configured".to_string(),
-                    )
-                })?;
+                let guard = self.resolve_replay_guard(replay_guard)?;
                 guard.check_and_record(&cti).await?
             }
             None => false,
         };
 
         Ok(pre.finalize(reuse_detected))
+    }
+
+    fn resolve_replay_guard<'g>(
+        &self,
+        guard: Option<&'g dyn AsyncReplayGuard>,
+    ) -> Result<&'g dyn AsyncReplayGuard, CatError> {
+        let guard = guard.ok_or_else(|| {
+            CatError::InvalidClaimValue(
+                "token asserts catreplay but no replay guard configured".to_string(),
+            )
+        })?;
+        if self.require_strict_replay_guard && !guard.is_strict() {
+            return Err(CatError::CryptoError(
+                "AsyncReplayGuard::is_strict() returned false but validator \
+                 was constructed with require_strict_replay_guard(); refusing \
+                 to commit catreplay through a best-effort backend"
+                    .to_string(),
+            ));
+        }
+        Ok(guard)
     }
 }
 

@@ -42,10 +42,19 @@ distributed strict `JtiStore` / `AsyncJtiStore` and prove:
   MUST NOT reset the JTI set. This is a property of the storage
   layer, not the crate.
 
-`catreplay`'s `AsyncReplayGuard` has an analogous set of obligations
-for the `cti` state. The crate does not surface an `is_strict`
-attestation on that trait; the relay must prove correctness of the
-`cti` backend independently.
+`catreplay`'s `AsyncReplayGuard` carries the same set of obligations
+for the `cti` state. As of 0.4.2 the trait exposes
+`AsyncReplayGuard::is_strict()` mirroring the JTI-store
+self-attestation, and `AsyncMoqtValidator::require_strict_replay_guard()`
+turns the check on so a non-strict guard cannot slip past into a CDN
+deployment for the second commit surface. TTL for the `cti` store must
+be sized to the maximum token lifetime (`exp - iat`), not the DPoP
+freshness window — a re-used token can arrive at any point inside its
+own validity, not just within the JTI window. The strict attestation
+covers the same axes as the JTI store: atomic insert-if-absent, TTL ≥
+token lifetime + skew, no eviction inside TTL, fail-closed on outage.
+The crate cannot verify the distributed backend; the integrator is
+asserting the contract by opting in.
 
 ## 2. Non-atomic two-phase commit (JTI, then cti)
 
@@ -69,20 +78,39 @@ awaitable. Token decoding, CAT claim evaluation, MOQT scope matching,
 and DPoP signature verification (ES256/PS256) all run synchronously
 inside the future. At high connection rates a burst of ES256
 verifications can starve the executor and inflate p99/p999 tail
-latency.
+latency. `AsyncMoqtValidator::authorize_precommit` (via the sync
+`MoqtValidator`) and `AsyncMoqtValidator::commit_async` are split
+precisely so the CPU-bound half can be lifted off the I/O runtime
+without pulling the whole authorize call into a blocking pool.
 
-Options (choose one; the crate does not choose for you):
+Recommended shape:
 
-- Run `authorize_async` on a dedicated CPU worker pool that is
-  distinct from the I/O runtime.
-- Apply strict per-connection concurrency limits around DPoP
-  verification so the executor cannot be saturated.
-- Use `tokio::task::spawn_blocking` for the sync half of the
-  authorization if the deployment tolerates the extra hop.
+- **Split precommit and commit across executors.** Call
+  `MoqtValidator::authorize_precommit` under
+  `tokio::task::spawn_blocking` (or your runtime's equivalent) to
+  keep ES256/PS256 verification off the reactor. Feed the resulting
+  `PreCommit` into `AsyncMoqtValidator::commit_async` back on the I/O
+  runtime so the two replay commits stay awaitable. `commit_async`
+  is a `pub` method on `AsyncMoqtValidator` for this reason.
+- **Bound the blocking pool.** `spawn_blocking` slots are not free —
+  cap them so a DPoP surge cannot exhaust the whole pool and stall
+  unrelated I/O. A per-connection admission gate (semaphore) sized
+  to the pool is the simplest enforceable limit.
+- **Monitor event-loop lag.** Even with the precommit offload, the
+  post-commit path (finalize + response construction) runs on the
+  reactor. A `tokio-metrics` `poll_duration` histogram or equivalent
+  is the fastest signal that a hot path has slipped back onto the
+  reactor.
+- **Fall back to full offload** if the deployment cannot afford the
+  extra hop granularity: wrap the entire `authorize_async` call in
+  `spawn_blocking`, accepting the cost of blocking on the JTI/cti
+  awaits. The crate does not enforce a choice here.
 
 `benches/async_scale_bench.rs` demonstrates the shape of the async
 path under simulated backend latency; it does NOT prove event-loop
-safety at production rates. That comes from real-relay soaks.
+safety at production rates. That comes from real-relay soaks with
+`tokio-metrics` (or the analogous instrumentation for the chosen
+runtime) attached.
 
 ## 4. Load, failover, and soak
 
@@ -115,14 +143,52 @@ The CBOR label numbers this crate assigns to `actx`/`nonce`/`ath`
 not interoperate. Confirm the label assignment with your DPoP issuer
 and any peer relays out of band.
 
-## 6. `cattpk` pinning
+## 6. `cattpk` pinning and TLS chain validation
 
-`MoqtValidator::authorize` does NOT evaluate `cattpk`. The relay
-MUST invoke `authenticate_and_pin` with a real `PathValidator` and
-thread the resulting `VerifiedPeerCertificate` through its TLS
-termination layer. Skipping the pin check is an authorization
-bypass; the crate cannot enforce it because it does not see the
-peer certificate.
+`MoqtValidator::authorize` does NOT evaluate `cattpk`. `cattpk` is a
+*pin post-check*: it asserts that the peer's SPKI matches an expected
+DER blob AFTER the TLS stack has otherwise authenticated the
+certificate. Two separate obligations sit on the relay:
+
+- **Run a real path validator upstream.** Invoke `authenticate_and_pin`
+  with a `PathValidator` (RFC 5280 chain + revocation +
+  hostname/SAN as appropriate for the deployment) and thread the
+  resulting `VerifiedPeerCertificate` through the TLS termination
+  layer. `cat-token` intentionally does not ship an X.509 path
+  validator — the profile is a strict CAT recipient, not a PKI
+  library.
+- **Fail closed on missing pin evaluation.** A relay that receives a
+  `cattpk`-carrying token but has no peer certificate on the request
+  MUST reject the request. Silently authorizing without the pin
+  check is an authorization bypass; the crate cannot enforce it
+  because it does not see the peer certificate.
+
+## 7. `moqt-reval` revalidation deadlines
+
+`MoqtValidator::validate_moqt_claims` enforces the structural
+`moqt-reval` obligations from CAT-4-MOQT §3.1.4: a recipient that
+does not `.supports_revalidation()` must reject a `moqt-reval`
+token; a recipient whose configured minimum interval exceeds the
+token's declared interval must also reject it. **What the crate
+does not enforce is the running deadline.** Once a request has been
+authorized, the relay owns:
+
+- **Ticking the per-session revalidation clock.** Store the token's
+  `iat` and `moqt-reval` alongside the session state; on each
+  request beyond `iat + moqt-reval` seconds require a re-presented
+  token before continuing. A `moqt-reval == 0.0` token asserts "do
+  not revalidate" and must be treated as a session-lifetime lease.
+- **Threading `catr` renewal instructions through the response
+  path.** `AuthorizedRequest.renewal` carries the token's `catr`
+  claim (renewal URI, cookie/header carrier, expiration deadline)
+  for the same session. The response builder is responsible for
+  emitting the renewal hint on the appropriate status code; the
+  authorization core does not send bytes on the wire.
+- **Enforcing the `catr.deadline` fail-closed contract.** A token
+  with `catr.deadline` past whose deadline the client has not
+  successfully renewed MUST NOT continue to authorize; the relay
+  drops the session. The crate exposes the deadline on the claim
+  but does not run its own timer.
 
 ---
 
