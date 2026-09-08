@@ -4,7 +4,10 @@
 //! Example: MOQT Relay - Token Validation
 //!
 //! This example shows how a MOQT relay would validate incoming tokens
-//! and authorize MOQT operations.
+//! and authorize MOQT operations. For the async equivalent — including a
+//! custom `AsyncJtiStore` / `AsyncReplayGuard` implementation for
+//! network-backed replay stores — see `examples/async_relay_validator.rs`
+//! (enabled by `--features async`).
 
 use cat_token::prelude::*;
 use chrono::{Duration, Utc};

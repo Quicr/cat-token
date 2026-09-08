@@ -97,6 +97,10 @@ required-features = ["moqt"]
 [[example]]
 name = "generic_cat"
 
+[[example]]
+name = "async_relay_validator"
+required-features = ["async"]
+
 [features]
 default = ["builtin-trie", "moqt"]
 builtin-trie = []
