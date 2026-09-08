@@ -4,50 +4,59 @@
 
 Round-4 audit follow-up. Adds an async authorize path so production
 relays can integrate cat-token without wrapping every replay commit in
-`spawn_blocking`, tightens the DPoP JWT wire format to match
+`spawn_blocking`, aligns the DPoP JWT wire format with
 draft-nandakumar-moq-generic-dpop-proof-00 §3.2 (text `tns`/`tn`/`jti`),
 closes the DPoP-protected setup authorization gap for endpoint-only
 actions, and enforces the strict JTI-store contract at
 `AsyncMoqtValidator` construction time so a non-strict backend cannot
-slip past into a CDN deployment. Freezes the JWT DPoP profile
-identifier, ships the CDN-scale replay contract harness distributed
-backends must pass before deployment, extends CI to the async surface,
-and adds a scale bench for `authorize_async` under simulated backend
-latency.
+slip past into a CDN deployment. Ships the CDN-scale replay contract
+harness distributed backends must pass before deployment, extends CI
+to the async surface, adds a genuine scale bench for `authorize_async`
+under simulated backend latency, and documents the obligations the
+embedding relay still owns.
 
 ### Added
 
-- **Frozen JWT DPoP profile identifier.** JWT proofs now pin
-  `dpop-proof+jwt;profile=cta5007b-v1` in the `typ` header, matching
-  the CWT sibling. A bare `dpop-proof+jwt` header (pre-v0.4.2) is
-  rejected at `DpopHeader::is_valid` so a future v2 shape cannot
-  masquerade as v1 to a peer that inspects the header only. Positive
-  and negative wire vectors (`test_dpop_jwt_typ_carries_frozen_profile`,
-  `test_dpop_jwt_bare_typ_rejected`) lock the contract in.
 - **`jti_contract` module** — the property-test harness every strict
   `JtiStore` / `AsyncJtiStore` implementation must pass before it is
-  deployed at CDN scale. Public assertions cover TTL retention
-  (`assert_no_dropped_insert_within_ttl`), sharding hygiene
+  deployed at CDN scale. Public assertions cover immediate-duplicate
+  smoke test (`assert_no_dropped_insert_within_ttl`), sharding hygiene
   (`assert_distinct_keys_never_collide`), insert-if-absent atomicity
   under contention (`assert_atomic_insert_if_absent`), and outage
   fail-closed behaviour (`assert_fail_closed_on_backend_outage`).
   Async siblings live under `jti_contract::asynchronous` when built
-  with `--features async`. Backend implementers fork
+  with `--features async`; the async atomicity helper drives all
+  inserts concurrently via `futures::future::join_all` so a
+  check-then-set race actually surfaces. TTL retention under time
+  passage / memory pressure is out of scope — that requires a soak
+  against production-shaped traffic. Backend implementers fork
   `tests/test_jti_contract.rs`, swap in their Redis/DynamoDB store,
-  and run the same suite — the harness demonstrates the contract is
-  satisfiable and catches regressions; a real 100k soak still needs
-  production-shaped infrastructure the crate cannot ship.
+  and run the same suite.
 - **`async_scale_bench`** (`--bench async_scale_bench --features async`)
   drives 512 concurrent `authorize_async` calls against a
   latency-injecting store, sweeping 0/100/1000 μs simulated backend
-  RTTs. Catches regressions in the pre-commit/commit split that would
-  otherwise only surface under real network delay — the CI-runnable
-  half of the 100k-flow readiness gate.
+  RTTs. Each request carries a fresh signed DPoP proof and the token
+  has a `cnf` binding, so the JTI store is actually on the path — a
+  runtime assertion inside the bench (`store.calls() == CONCURRENCY`)
+  fails the run if the wiring ever regresses. Catches regressions in
+  the pre-commit/commit split and ES256 verification path; a real
+  100k-flow soak still requires production-shaped infrastructure the
+  crate cannot ship.
 - **Async feature matrix in CI.** `.github/workflows/ci.yml` now
   builds and tests the `moqt,async` and `builtin-trie,moqt,async`
   cells so the async surface is gated on the same bar as sync.
+- **`docs/RELAY-OBLIGATIONS.md`** — checklist of what the embedding
+  relay must still prove before promoting a `cat-token` integration
+  to 100k+ CDN scale (distributed replay backend, CPU-bound crypto
+  isolation, JTI/cti two-phase-commit failure model, soak/failover,
+  `cattpk` pinning).
+- **`docs/PROFILE.md` DPoP section** — pins the wire `typ` values to
+  the draft verbatim and documents the private-use CBOR label
+  numbers (400/401/402 for `actx`/`nonce`/`ath`) that peers must
+  agree on out of band.
 - **Async authorize surface** behind the new `async` feature
-  (`--features async`, pulls in `async-trait`; no runtime dependency).
+  (`--features async`, pulls in `async-trait` and `futures` for the
+  concurrent-inserts helper; no runtime dependency).
   - `AsyncMoqtValidator::authorize_async` — mirrors
     `MoqtValidator::authorize` but awaits the two replay commits
     (DPoP JTI, `catreplay` cti). Pre-commit checks share the sync

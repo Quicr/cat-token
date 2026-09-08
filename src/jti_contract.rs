@@ -63,16 +63,13 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 
-/// Assert that a JTI accepted at time `t` is still visible as a replay
-/// (rejected with [`CatError::ReplayAttackDetected`]) at time `t + delta`
-/// for all `delta < ttl_seconds`. The harness inserts a single JTI, then
-/// re-inserts it to prove the duplicate is caught.
-///
-/// This is the minimal strictness proof: any store that returns
-/// `is_strict() == true` but drops entries under load will fail here.
-/// The test does not sleep for `ttl_seconds` — a real distributed store
-/// must be soak-tested separately for full-TTL retention under
-/// realistic ingress rates.
+/// Smoke test: an accepted JTI must be rejected on immediate re-insert.
+/// Named `_within_ttl` because it is the minimum a strict store must
+/// satisfy inside its freshness window, but this harness does not
+/// exercise time passage, memory pressure, or cross-node retention —
+/// those need a soak against production-shaped traffic. A store that
+/// passes this and then drops entries under load will still fail at
+/// scale; treat this as a canary, not a TTL proof.
 pub fn assert_no_dropped_insert_within_ttl(store: &dyn JtiStore, iat: i64) {
     let key = "contract-test-jti-single".to_string();
     store
@@ -195,6 +192,9 @@ pub mod asynchronous {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    /// Async sibling of [`super::assert_no_dropped_insert_within_ttl`].
+    /// Smoke test only: catches a store that drops entries between
+    /// consecutive calls; does not exercise time passage or contention.
     pub async fn assert_no_dropped_insert_within_ttl(store: &dyn AsyncJtiStore, iat: i64) {
         let key = "contract-async-single".to_string();
         store
@@ -210,23 +210,30 @@ pub mod asynchronous {
         }
     }
 
+    /// Async sibling of [`super::assert_atomic_insert_if_absent`]. Drives
+    /// N inserts of the same JTI concurrently via [`futures::future::join_all`],
+    /// so a check-then-set implementation admits more than one success
+    /// and fails the assertion. `join_all` runs the futures on the
+    /// caller's task and polls them cooperatively — it does not pick a
+    /// runtime (tokio/async-std/smol are all supported) but it does
+    /// interleave the futures at every await point, which is what races
+    /// a non-atomic read-modify-write inside the store.
+    ///
+    /// If the store's `check_and_insert` awaits on I/O, a caller who
+    /// wants worker-thread parallelism on top of interleaving can wrap
+    /// each call in `tokio::spawn` outside the harness.
     pub async fn assert_atomic_insert_if_absent(store: Arc<dyn AsyncJtiStore>, n: usize) {
         let key = "contract-async-atomic".to_string();
         let successes = Arc::new(AtomicUsize::new(0));
         let rejections = Arc::new(AtomicUsize::new(0));
 
-        // Spawn N independent futures on the caller's runtime. We use
-        // `futures::future::join_all` semantics via a plain Vec + await
-        // pattern that doesn't pull in extra deps — callers already have
-        // a runtime, so we just push N JoinHandles into it via async
-        // move blocks.
-        let mut tasks = Vec::with_capacity(n);
+        let mut futures = Vec::with_capacity(n);
         for _ in 0..n {
             let store = Arc::clone(&store);
             let key = key.clone();
             let successes = Arc::clone(&successes);
             let rejections = Arc::clone(&rejections);
-            tasks.push(async move {
+            futures.push(async move {
                 match store.check_and_insert(key, 1).await {
                     Ok(()) => {
                         successes.fetch_add(1, Ordering::Relaxed);
@@ -238,17 +245,7 @@ pub mod asynchronous {
                 }
             });
         }
-        // Poll every future to completion. Without a runtime-provided
-        // join, we sequence them one after another — this still catches
-        // check-then-set races because each call awaits *inside* the
-        // store (locks, network I/O, etc.), and the harness runs them
-        // as concurrent tasks when the caller wraps in `tokio::spawn`.
-        // Callers who need real concurrency should splat this loop into
-        // `tokio::spawn`; see the async example test in the crate's
-        // integration suite.
-        for t in tasks {
-            t.await;
-        }
+        ::futures::future::join_all(futures).await;
 
         let successes = successes.load(Ordering::Relaxed);
         let rejections = rejections.load(Ordering::Relaxed);

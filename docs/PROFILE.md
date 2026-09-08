@@ -86,6 +86,29 @@ If any signed claim's semantics is not enforceable against the supplied
 context, the request is rejected — the crate does not silently permit an
 un-checked restriction.
 
+## DPoP wire profile
+
+Both wire forms come from `draft-nandakumar-moq-generic-dpop-proof-00`
+and emit the draft's `typ` header verbatim so RFC 9449 tooling and
+generic-DPoP peers interoperate without a private opt-in:
+
+- CWT (default). `typ=dpop-proof+cwt` per draft §3.1, COSE_Sign1
+  wrapper, CBOR payload.
+- JWT. `typ=dpop-proof+jwt` per draft §3.2 and RFC 9449 §4.2, JWS
+  compact serialization. `tns`/`tn`/`jti` are UTF-8 text strings;
+  `ath` remains base64url.
+
+The draft leaves CBOR label numbers for `actx`/`nonce`/`ath` TBD. This
+crate assigns 400/401/402 as private-use labels and matches them
+literally on decode. A peer using different numbers will not
+interoperate — the label assignment must be agreed out of band with
+the counterparty until the draft (or IANA) pins numbers, at which
+point both sides upgrade together. This crate's version bump is what
+signals the label change; the `typ` header is not versioned.
+
+Symmetric algorithms are forbidden for DPoP signing; only ES256 (COSE
+`-7`) and PS256 (COSE `-37`) are accepted.
+
 ## Key resolution
 
 `SingleKeyResolver` and `KeyRingResolver` require an exact

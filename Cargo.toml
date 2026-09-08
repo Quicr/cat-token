@@ -37,6 +37,10 @@ qp-trie = { version = "0.8", optional = true }
 # Optional async trait support for AsyncJtiStore / AsyncReplayGuard.
 async-trait = { version = "0.1", optional = true }
 
+# `futures::future::join_all` used by `jti_contract::asynchronous` to
+# drive concurrent inserts without picking a runtime for the caller.
+futures = { version = "0.3", default-features = false, features = ["std", "async-await"], optional = true }
+
 [dependencies.regex]
 version = "1.10"
 
@@ -114,4 +118,4 @@ moqt = []
 # Adds AsyncJtiStore / AsyncReplayGuard / MoqtValidator::authorize_async so
 # relays can integrate cat-token into an async event loop without wrapping
 # every call in spawn_blocking. Requires moqt.
-async = ["moqt", "dep:async-trait"]
+async = ["moqt", "dep:async-trait", "dep:futures"]
