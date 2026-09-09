@@ -1817,7 +1817,7 @@ pub trait JtiStore: Send + Sync {
     /// nodes, that TTL is at least the freshness window, or that the
     /// backend fails closed on outage. Distributed strict deployments
     /// must satisfy those additional obligations at the store level; see
-    /// [`crate::moqt::MoqtValidator::try_with_strict_dpop_validation`]
+    /// [`crate::moqt::MoqtValidator::dpop_strict`]
     /// for the full caller contract.
     fn is_strict(&self) -> bool {
         false
@@ -2278,7 +2278,7 @@ impl DpopValidator {
     /// configured settings don't honour JTIs or the proof carries no cti.
     ///
     /// Exposed so async integrations
-    /// ([`crate::r#async::MoqtValidator::authorize_async`]) can build the same
+    /// ([`crate::r#async::AsyncMoqtValidator::authorize`]) can build the same
     /// key and commit against an [`crate::r#async::AsyncJtiStore`] without
     /// duplicating the key-shape logic.
     pub fn dpop_commit_key(

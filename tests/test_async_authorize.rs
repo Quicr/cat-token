@@ -71,10 +71,10 @@ async fn async_authorize_happy_path_commits_jti() {
         .with_window(300)
         .unwrap()
         .with_jti_processing(true);
-    let sync = cat_token::moqt::MoqtValidator::new().with_dpop_validation(settings);
+    let sync = cat_token::moqt::MoqtValidator::new().dpop_best_effort(settings);
     let store = Arc::new(AsyncInMemoryStrictJtiStore::new());
-    let validator = AsyncMoqtValidator::try_from_sync_strict(sync, store.clone())
-        .expect("strict store construction");
+    let validator =
+        AsyncMoqtValidator::strict(sync, store.clone()).expect("strict store construction");
 
     let request = cat_token::moqt::RelayRequestContext::new(
         "relay",
@@ -85,7 +85,7 @@ async fn async_authorize_happy_path_commits_jti() {
     .with_dpop_proof(proof);
 
     validator
-        .authorize_async(&validated, &request, None, None)
+        .authorize(&validated, &request)
         .await
         .expect("async authorize should succeed");
 
@@ -114,10 +114,9 @@ async fn async_authorize_rejects_replayed_jti() {
         .with_window(300)
         .unwrap()
         .with_jti_processing(true);
-    let sync = cat_token::moqt::MoqtValidator::new().with_dpop_validation(settings);
+    let sync = cat_token::moqt::MoqtValidator::new().dpop_best_effort(settings);
     let store: Arc<dyn AsyncJtiStore> = Arc::new(AsyncInMemoryStrictJtiStore::new());
-    let validator =
-        AsyncMoqtValidator::try_from_sync_strict(sync, store).expect("strict store construction");
+    let validator = AsyncMoqtValidator::strict(sync, store).expect("strict store construction");
 
     let request = cat_token::moqt::RelayRequestContext::new(
         "relay",
@@ -128,12 +127,12 @@ async fn async_authorize_rejects_replayed_jti() {
     .with_dpop_proof(proof);
 
     validator
-        .authorize_async(&validated, &request, None, None)
+        .authorize(&validated, &request)
         .await
         .expect("first authorize succeeds");
 
     let err = validator
-        .authorize_async(&validated, &request, None, None)
+        .authorize(&validated, &request)
         .await
         .expect_err("replay must fail");
     assert!(
@@ -180,8 +179,8 @@ async fn async_authorize_fails_closed_on_store_outage() {
         .with_window(300)
         .unwrap()
         .with_jti_processing(true);
-    let sync = cat_token::moqt::MoqtValidator::new().with_dpop_validation(settings);
-    let validator = AsyncMoqtValidator::try_from_sync_strict(sync, Arc::new(FaultyJtiStore))
+    let sync = cat_token::moqt::MoqtValidator::new().dpop_best_effort(settings);
+    let validator = AsyncMoqtValidator::strict(sync, Arc::new(FaultyJtiStore))
         .expect("FaultyJtiStore advertises is_strict = true");
 
     let request = cat_token::moqt::RelayRequestContext::new(
@@ -193,7 +192,7 @@ async fn async_authorize_fails_closed_on_store_outage() {
     .with_dpop_proof(proof);
 
     let err = validator
-        .authorize_async(&validated, &request, None, None)
+        .authorize(&validated, &request)
         .await
         .expect_err("store outage must fail authorization closed");
     assert!(
@@ -203,7 +202,7 @@ async fn async_authorize_fails_closed_on_store_outage() {
 }
 
 /// A store that advertises non-strict behaviour. Passing this to
-/// `try_from_sync_strict` MUST fail — the CDN construction contract
+/// `AsyncMoqtValidator::strict` MUST fail — the CDN construction contract
 /// refuses backends that could evict a retained JTI inside the freshness
 /// window.
 struct NonStrictJtiStore;
@@ -224,8 +223,8 @@ fn async_validator_refuses_non_strict_store() {
         .with_window(300)
         .unwrap()
         .with_jti_processing(true);
-    let sync = cat_token::moqt::MoqtValidator::new().with_dpop_validation(settings);
-    match AsyncMoqtValidator::try_from_sync_strict(sync, Arc::new(NonStrictJtiStore)) {
+    let sync = cat_token::moqt::MoqtValidator::new().dpop_best_effort(settings);
+    match AsyncMoqtValidator::strict(sync, Arc::new(NonStrictJtiStore)) {
         Ok(_) => panic!("non-strict store must be refused"),
         Err(CatError::CryptoError(msg)) => {
             assert!(msg.contains("is_strict"), "unexpected message: {msg}");
@@ -286,10 +285,9 @@ async fn async_authorize_commits_catreplay_via_guard() {
         .with_window(300)
         .unwrap()
         .with_jti_processing(true);
-    let sync = cat_token::moqt::MoqtValidator::new().with_dpop_validation(settings);
+    let sync = cat_token::moqt::MoqtValidator::new().dpop_best_effort(settings);
     let jti_store = Arc::new(AsyncInMemoryStrictJtiStore::new());
-    let validator = AsyncMoqtValidator::try_from_sync_strict(sync, jti_store)
-        .expect("strict store construction");
+    let validator = AsyncMoqtValidator::strict(sync, jti_store).expect("strict store construction");
     let guard = RecordingReplayGuard::new();
 
     let request1 = cat_token::moqt::RelayRequestContext::new(
@@ -301,7 +299,7 @@ async fn async_authorize_commits_catreplay_via_guard() {
     .with_dpop_proof(make_proof());
 
     validator
-        .authorize_async(&validated, &request1, Some(&guard), None)
+        .authorize_with_replay(&validated, &request1, &guard, None)
         .await
         .expect("first replay-guarded authorize succeeds");
 
@@ -314,7 +312,7 @@ async fn async_authorize_commits_catreplay_via_guard() {
     .with_dpop_proof(make_proof());
 
     let err = validator
-        .authorize_async(&validated, &request2, Some(&guard), None)
+        .authorize_with_replay(&validated, &request2, &guard, None)
         .await
         .expect_err("duplicate cti must fail with Prohibited replay mode");
     assert!(
@@ -353,7 +351,7 @@ impl AsyncReplayGuard for StrictGuard {
 }
 
 /// `require_strict_replay_guard()` rejects a best-effort guard when the
-/// token asserts catreplay. Mirrors the JTI-store `try_from_sync_strict`
+/// token asserts catreplay. Mirrors the JTI-store `strict` constructor's
 /// contract at the second commit surface — without this, a CDN deployment
 /// could pin JTI strictness but silently accept a leaky `cti` backend.
 #[tokio::test]
@@ -377,9 +375,9 @@ async fn strict_validator_refuses_best_effort_replay_guard() {
         .with_window(300)
         .unwrap()
         .with_jti_processing(true);
-    let sync = cat_token::moqt::MoqtValidator::new().with_dpop_validation(settings);
+    let sync = cat_token::moqt::MoqtValidator::new().dpop_best_effort(settings);
     let jti_store = Arc::new(AsyncInMemoryStrictJtiStore::new());
-    let validator = AsyncMoqtValidator::try_from_sync_strict(sync, jti_store)
+    let validator = AsyncMoqtValidator::strict(sync, jti_store)
         .expect("strict store construction")
         .require_strict_replay_guard();
 
@@ -392,7 +390,7 @@ async fn strict_validator_refuses_best_effort_replay_guard() {
     .with_dpop_proof(build_dpop_proof(&alg, jwk, &validated));
 
     let err = validator
-        .authorize_async(&validated, &request, Some(&BestEffortGuard), None)
+        .authorize_with_replay(&validated, &request, &BestEffortGuard, None)
         .await
         .expect_err("best-effort guard must be refused under require_strict_replay_guard");
     assert!(
@@ -424,9 +422,9 @@ async fn strict_validator_accepts_strict_replay_guard() {
         .with_window(300)
         .unwrap()
         .with_jti_processing(true);
-    let sync = cat_token::moqt::MoqtValidator::new().with_dpop_validation(settings);
+    let sync = cat_token::moqt::MoqtValidator::new().dpop_best_effort(settings);
     let jti_store = Arc::new(AsyncInMemoryStrictJtiStore::new());
-    let validator = AsyncMoqtValidator::try_from_sync_strict(sync, jti_store)
+    let validator = AsyncMoqtValidator::strict(sync, jti_store)
         .expect("strict store construction")
         .require_strict_replay_guard();
 
@@ -442,7 +440,7 @@ async fn strict_validator_accepts_strict_replay_guard() {
     .with_dpop_proof(build_dpop_proof(&alg, jwk, &validated));
 
     validator
-        .authorize_async(&validated, &request, Some(&guard), None)
+        .authorize_with_replay(&validated, &request, &guard, None)
         .await
         .expect("strict guard should be accepted under require_strict_replay_guard");
 }
@@ -470,9 +468,9 @@ async fn strict_validator_no_guard_no_catreplay_still_authorizes() {
         .with_window(300)
         .unwrap()
         .with_jti_processing(true);
-    let sync = cat_token::moqt::MoqtValidator::new().with_dpop_validation(settings);
+    let sync = cat_token::moqt::MoqtValidator::new().dpop_best_effort(settings);
     let jti_store = Arc::new(AsyncInMemoryStrictJtiStore::new());
-    let validator = AsyncMoqtValidator::try_from_sync_strict(sync, jti_store)
+    let validator = AsyncMoqtValidator::strict(sync, jti_store)
         .expect("strict store construction")
         .require_strict_replay_guard();
 
@@ -485,7 +483,7 @@ async fn strict_validator_no_guard_no_catreplay_still_authorizes() {
     .with_dpop_proof(build_dpop_proof(&alg, jwk, &validated));
 
     validator
-        .authorize_async(&validated, &request, None, None)
+        .authorize(&validated, &request)
         .await
         .expect("guard-less authorize should succeed when the token has no catreplay");
 }

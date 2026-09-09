@@ -123,19 +123,6 @@ fn test_normalize_invalid() {
     assert!(normalize_sf_value("\x00\x01\x02").is_err());
 }
 
-// --- Integration with cath matching ---
-
-#[test]
-fn test_sf_normalized_matching_with_cath() {
-    use cat_token::*;
-
-    let mut token = CatToken::new();
-    let normalized = normalize_sf_value("gzip, deflate, br").unwrap();
-    token.cat.cath = Some(vec![claims::HeaderMatchRule {
-        name: "Accept-Encoding".to_string(),
-        matches: vec![claims::MatchValue::Exact(normalized)],
-    }]);
-
-    let input = normalize_sf_value("gzip,  deflate,   br").unwrap();
-    assert!(validate_all_headers(&token, &[("accept-encoding", &input)]).is_ok());
-}
+// Integration with cath (structured-header normalized matching against
+// a token's `cath` claim) lives in the internal test module in
+// `src/token.rs::tests` so it can call `validate_all_headers` directly.

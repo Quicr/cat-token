@@ -154,15 +154,15 @@ fn test_dpop_jti_burned_on_first_success() {
         .unwrap()
         .with_jti_processing(true);
     let validator = MoqtValidator::new()
-        .try_with_strict_dpop_validation(settings, store)
+        .dpop_strict(settings, store)
         .expect("strict store");
 
     let ctx = authorize_ctx(b"track1").with_dpop_proof(proof.clone());
     validator
-        .authorize::<dyn ReplayGuard>(&validated, &ctx, None, None)
+        .authorize(&validated, &ctx)
         .expect("first authorize must succeed");
 
-    let replay = validator.authorize::<dyn ReplayGuard>(&validated, &ctx, None, None);
+    let replay = validator.authorize(&validated, &ctx);
     assert!(
         matches!(replay, Err(CatError::ReplayAttackDetected)),
         "second call with same JTI must fail: {replay:?}"
@@ -187,7 +187,7 @@ fn test_transient_backend_failure_does_not_burn_jti() {
         .unwrap()
         .with_jti_processing(true);
     let validator = MoqtValidator::new()
-        .try_with_strict_dpop_validation(settings, injector_dyn)
+        .dpop_strict(settings, injector_dyn)
         .expect("strict store");
 
     let scope = MoqtScopeBuilder::new()
@@ -229,7 +229,7 @@ fn test_transient_backend_failure_does_not_burn_jti() {
 
     let ctx1 = authorize_ctx(b"track1").with_dpop_proof(proof1);
     injector.arm();
-    let first = validator.authorize::<dyn ReplayGuard>(&validated, &ctx1, None, None);
+    let first = validator.authorize(&validated, &ctx1);
     assert!(
         matches!(first, Err(CatError::CryptoError(_))),
         "arming the injector must surface the backend error: {first:?}"
@@ -251,7 +251,7 @@ fn test_transient_backend_failure_does_not_burn_jti() {
     proof2.sign(&dpop_alg).unwrap();
     let ctx2 = authorize_ctx(b"track1").with_dpop_proof(proof2);
     validator
-        .authorize::<dyn ReplayGuard>(&validated, &ctx2, None, None)
+        .authorize(&validated, &ctx2)
         .expect("retry with fresh JTI must succeed");
 }
 
@@ -270,11 +270,11 @@ fn test_relay_restart_loses_in_memory_replay_state() {
         let store: Arc<dyn JtiStore> = Arc::new(InMemoryStrictJtiStore::new(300));
         let settings = CatDpopSettings::new().with_window(300).unwrap();
         let validator = MoqtValidator::new()
-            .try_with_strict_dpop_validation(settings, store)
+            .dpop_strict(settings, store)
             .expect("strict store");
         let ctx = authorize_ctx(b"track1").with_dpop_proof(proof.clone());
         validator
-            .authorize::<dyn ReplayGuard>(&validated, &ctx, None, None)
+            .authorize(&validated, &ctx)
             .expect("pre-restart authorize");
     }
     // Relay restart: brand-new store instance.
@@ -284,11 +284,11 @@ fn test_relay_restart_loses_in_memory_replay_state() {
         .unwrap()
         .with_jti_processing(true);
     let validator = MoqtValidator::new()
-        .try_with_strict_dpop_validation(settings, store)
+        .dpop_strict(settings, store)
         .expect("strict store");
     let ctx = authorize_ctx(b"track1").with_dpop_proof(proof);
     validator
-        .authorize::<dyn ReplayGuard>(&validated, &ctx, None, None)
+        .authorize(&validated, &ctx)
         .expect("post-restart in-memory store has no memory of pre-restart JTI");
 }
 

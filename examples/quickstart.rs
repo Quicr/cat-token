@@ -54,10 +54,11 @@ fn main() -> Result<(), CatError> {
         vec![b"live.example.com".to_vec(), b"streaming-123".to_vec()],
         b"/streams/video".to_vec(),
     );
-    match moqt_validator.authorize::<dyn ReplayGuard>(&validated, &request, None, None) {
+    match moqt_validator.authorize(&validated, &request) {
         Ok(result) => println!(
             "Authorized (scope {}, revalidation={:?})",
-            result.matched_scope_index, result.revalidation_interval
+            result.matched_scope_index(),
+            result.revalidation_interval()
         ),
         Err(e) => println!("Denied: {e}"),
     }

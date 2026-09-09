@@ -1,6 +1,6 @@
 [package]
 name = "cat-token"
-version = "0.4.3"
+version = "0.5.0"
 edition = "2024"
 authors = ["Suhas Nandakumar"]
 description = "Strict fail-closed profile of CTA-5007-B CAT and CAT-4-MOQT (see docs/PROFILE.md for supported claim forms and rejections)"
@@ -115,7 +115,7 @@ default = ["builtin-trie", "moqt"]
 builtin-trie = []
 qp-trie = ["dep:qp-trie"]
 moqt = []
-# Adds AsyncJtiStore / AsyncReplayGuard / MoqtValidator::authorize_async so
+# Adds AsyncJtiStore / AsyncReplayGuard / AsyncMoqtValidator::authorize so
 # relays can integrate cat-token into an async event loop without wrapping
 # every call in spawn_blocking. Requires moqt.
 async = ["moqt", "dep:async-trait", "dep:futures"]

@@ -12,9 +12,9 @@
 //!    or any distributed KV store. Production relays swap this out for
 //!    their real backend.
 //! 3. How to implement `AsyncReplayGuard` for the `catreplay` cti check.
-//! 4. How the pre-commit / commit split lets `authorize_async` reuse every
+//! 4. How the pre-commit / commit split lets `authorize` reuse every
 //!    non-storage check from the sync pipeline.
-//! 5. How `AsyncMoqtValidator::try_from_sync_strict` enforces the strict
+//! 5. How `AsyncMoqtValidator::strict` enforces the strict
 //!    JTI-store contract at construction time — a non-strict backend is
 //!    refused up front rather than being allowed to shed retained JTIs
 //!    at runtime.
@@ -117,14 +117,14 @@ async fn main() {
         .with_jti_processing(true);
     let moqt_validator = MoqtValidator::new()
         .with_min_revalidation_interval(60.0)
-        .with_dpop_validation(dpop_settings);
+        .dpop_best_effort(dpop_settings);
 
     let jti_store: Arc<dyn AsyncJtiStore> = Arc::new(MyAsyncJtiStore::new());
     let replay_guard = MyAsyncReplayGuard::new();
     // Custom store advertises is_strict() = true, so we take the CDN path.
     // Non-strict stores would be rejected here — the example intentionally
     // uses the strict constructor to show the production wiring.
-    let async_validator = AsyncMoqtValidator::try_from_sync_strict(moqt_validator, jti_store)
+    let async_validator = AsyncMoqtValidator::strict(moqt_validator, jti_store)
         .expect("MyAsyncJtiStore advertises is_strict() = true");
 
     // --- Build a DPoP-bound token issued to the demo holder key. ---
@@ -146,7 +146,7 @@ async fn main() {
     )
     .await
     {
-        Ok(result) => println!("ALLOWED (scope {})\n", result.matched_scope_index),
+        Ok(result) => println!("ALLOWED (scope {})\n", result.matched_scope_index()),
         Err(e) => println!("DENIED - {}\n", e),
     }
 
@@ -197,7 +197,7 @@ async fn validate_and_authorize_async(
     .with_dpop_proof(proof);
 
     async_validator
-        .authorize_async(&validated, &request, Some(replay_guard), None)
+        .authorize_with_replay(&validated, &request, replay_guard, None)
         .await
         .map_err(|e| e.to_string())
 }
@@ -240,11 +240,11 @@ async fn replay_same_proof_async(
 
     // First attempt seeds the JTI; second attempt collides.
     let _ = async_validator
-        .authorize_async(&validated, &request, Some(replay_guard), None)
+        .authorize_with_replay(&validated, &request, replay_guard, None)
         .await;
 
     async_validator
-        .authorize_async(&validated, &request, Some(replay_guard), None)
+        .authorize_with_replay(&validated, &request, replay_guard, None)
         .await
         .map_err(|e| e.to_string())
 }

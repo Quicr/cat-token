@@ -122,9 +122,9 @@ impl AsyncJtiStore for AsyncJtiStoreAdapter {
 /// Async validator that shares its policy config with a sync
 /// [`MoqtValidator`] but commits through async traits.
 ///
-/// Construct via [`AsyncMoqtValidator::try_from_sync_strict`] (rejects
+/// Construct via [`AsyncMoqtValidator::strict`] (rejects
 /// non-strict stores) for CDN/multi-relay deployments, or
-/// [`AsyncMoqtValidator::from_sync_best_effort`] for development and
+/// [`AsyncMoqtValidator::best_effort`] for development and
 /// single-tenant tests where eviction under load is acceptable. Sync and
 /// async paths must share the same store instance if the deployment ever
 /// mixes them — otherwise a JTI accepted on one path can be replayed on
@@ -160,7 +160,7 @@ impl AsyncJtiStore for AsyncJtiStoreAdapter {
 ///     .await?;
 /// ```
 ///
-/// The alternative — wrapping the whole `authorize_async` in
+/// The alternative — wrapping the whole `authorize` call in
 /// `spawn_blocking` — works and is simpler, at the cost of tying up a
 /// blocking-pool slot for the JTI/cti network round-trips. See
 /// `docs/RELAY-OBLIGATIONS.md` §3 for the full checklist.
@@ -179,7 +179,7 @@ impl AsyncMoqtValidator {
     /// that could shed retained JTIs.
     ///
     /// The `is_strict()` bit is *self-attestation*, matching the sync
-    /// contract on [`MoqtValidator::try_with_strict_dpop_validation`]. A
+    /// contract on [`MoqtValidator::dpop_strict`]. A
     /// distributed backend must additionally guarantee atomic
     /// insert-if-absent across nodes, TTL ≥ freshness window + skew, no
     /// silent eviction inside that TTL, and fail-closed on outage
@@ -187,7 +187,7 @@ impl AsyncMoqtValidator {
     /// The reference [`AsyncInMemoryStrictJtiStore`] satisfies these for
     /// a single-relay deployment; distributed backends must be audited
     /// against the same list before deployment.
-    pub fn try_from_sync_strict(
+    pub fn strict(
         sync: MoqtValidator,
         jti_store: Arc<dyn AsyncJtiStore>,
     ) -> Result<Self, CatError> {
@@ -196,7 +196,7 @@ impl AsyncMoqtValidator {
                 "AsyncJtiStore::is_strict() returned false; strict CDN \
                  deployments require a store that retains every accepted \
                  JTI for the DPoP freshness window. Use \
-                 AsyncMoqtValidator::from_sync_best_effort for local \
+                 AsyncMoqtValidator::best_effort for local \
                  development."
                     .to_string(),
             ));
@@ -213,8 +213,8 @@ impl AsyncMoqtValidator {
     /// best-effort replay defense — a store that evicts under memory
     /// pressure will let a previously-accepted JTI replay. Multi-relay
     /// production deployments MUST use
-    /// [`AsyncMoqtValidator::try_from_sync_strict`] instead.
-    pub fn from_sync_best_effort(sync: MoqtValidator, jti_store: Arc<dyn AsyncJtiStore>) -> Self {
+    /// [`AsyncMoqtValidator::strict`] instead.
+    pub fn best_effort(sync: MoqtValidator, jti_store: Arc<dyn AsyncJtiStore>) -> Self {
         Self {
             sync,
             jti_store,
@@ -222,7 +222,7 @@ impl AsyncMoqtValidator {
         }
     }
 
-    /// Refuse `authorize_async` calls whose supplied
+    /// Refuse `authorize` calls whose supplied
     /// [`AsyncReplayGuard`] reports `is_strict() == false`. Set this on
     /// the CDN deployment path so a caller cannot silently degrade the
     /// `catreplay` commit surface to a best-effort backend after the
@@ -243,22 +243,32 @@ impl AsyncMoqtValidator {
     /// pre-commit pipeline (audience, catu/catm/cath/catnip/catpor,
     /// DPoP signature + shape) then awaits the two commit points. Fail-
     /// closed on any error from either store.
-    pub async fn authorize_async(
+    pub async fn authorize(
         &self,
         token: &ValidatedToken,
         ctx: &RelayRequestContext,
-        replay_guard: Option<&dyn AsyncReplayGuard>,
+    ) -> Result<AuthorizedRequest, CatError> {
+        let pre = self.sync.authorize_precommit(token, ctx, false, None)?;
+        self.commit_async(pre, None).await
+    }
+
+    /// Async equivalent of [`MoqtValidator::authorize_with_replay`].
+    pub async fn authorize_with_replay(
+        &self,
+        token: &ValidatedToken,
+        ctx: &RelayRequestContext,
+        replay_guard: &dyn AsyncReplayGuard,
         catpor_block_list: Option<&CatPorBlockList>,
     ) -> Result<AuthorizedRequest, CatError> {
-        let pre =
-            self.sync
-                .authorize_precommit(token, ctx, replay_guard.is_some(), catpor_block_list)?;
-        self.commit_async(pre, replay_guard).await
+        let pre = self
+            .sync
+            .authorize_precommit(token, ctx, true, catpor_block_list)?;
+        self.commit_async(pre, Some(replay_guard)).await
     }
 
     /// Perform the async commit half of the pipeline. JTI first, then
     /// cti — matches the sync ordering documented on
-    /// [`MoqtValidator::authorize`]. Split out from `authorize_async` so
+    /// [`MoqtValidator::authorize`]. Split out from `authorize` so
     /// advanced callers can interleave metrics or tracing between the
     /// pre-commit decision and the storage effects.
     pub async fn commit_async(

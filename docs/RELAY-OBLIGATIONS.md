@@ -1,7 +1,7 @@
 # Relay obligations
 
 `cat-token` is an embedded authorization core. `MoqtValidator::authorize`
-and `AsyncMoqtValidator::authorize_async` return a decision for one
+and `AsyncMoqtValidator::authorize` return a decision for one
 request; the surrounding relay owns everything that cannot be settled
 inside a single call. This document lists what the relay must still
 prove before a `cat-token`-backed deployment can be certified for
@@ -58,7 +58,7 @@ asserting the contract by opting in.
 
 ## 2. Non-atomic two-phase commit (JTI, then cti)
 
-`authorize_async` (and `authorize`) commit the DPoP JTI first, then
+Both `authorize` entry points (sync and async) commit the DPoP JTI first, then
 the `catreplay` cti. A failure in the second commit leaves the JTI
 burned — the same request cannot be retried with the same proof.
 This is documented at `src/moqt.rs` on the sync `authorize` and is
@@ -73,7 +73,7 @@ considerations, but the relay must:
 
 ## 3. Isolate CPU-bound cryptographic verification
 
-Only the two replay commits inside `authorize_async` are actually
+Only the two replay commits inside `AsyncMoqtValidator::authorize` are actually
 awaitable. Token decoding, CAT claim evaluation, MOQT scope matching,
 and DPoP signature verification (ES256/PS256) all run synchronously
 inside the future. At high connection rates a burst of ES256
@@ -102,7 +102,7 @@ Recommended shape:
   is the fastest signal that a hot path has slipped back onto the
   reactor.
 - **Fall back to full offload** if the deployment cannot afford the
-  extra hop granularity: wrap the entire `authorize_async` call in
+  extra hop granularity: wrap the entire async `authorize` call in
   `spawn_blocking`, accepting the cost of blocking on the JTI/cti
   awaits. The crate does not enforce a choice here.
 

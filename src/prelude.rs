@@ -32,12 +32,8 @@ pub use crate::structured_header::{
     get_sf_dictionary_member, normalize_sf_value, parse_sf_dictionary, parse_sf_item, parse_sf_list,
 };
 pub use crate::token::{
-    CatPorBlockList, CatTokenBuilder, CatTokenValidator, ReplayGuard, apply_match_value,
-    decode_encrypted_token, decode_encrypted_token_with_limits, decode_token, decode_token_base64,
-    decode_token_with_admission, decode_token_with_admission_and_limits,
-    decode_token_with_resolver, decode_token_with_resolver_and_limits, encode_token,
-    encode_token_base64, enforce_catnip, enforce_catpor, enforce_catreplay, enforce_catu,
-    strip_token_from_uri, unfold_header_value, validate_all_headers, validate_method,
+    CatPorBlockList, CatTokenBuilder, CatTokenValidator, Decoder, ReplayGuard,
+    decode_encrypted_token, decode_token, encode_token, encode_token_base64,
 };
 pub use crate::x509::{
     PathValidator, VerifiedPeerCertificate, authenticate_and_pin, check_cattpk_pin,
@@ -48,4 +44,7 @@ pub use crate::x509::{
 #[cfg(feature = "moqt")]
 pub use crate::claims::{BinaryMatch, MoqtAction, MoqtClaims, MoqtScope, NamespaceMatch};
 #[cfg(feature = "moqt")]
-pub use crate::moqt::{AuthorizedRequest, MoqtScopeBuilder, MoqtValidator, RelayRequestContext};
+pub use crate::moqt::{
+    AuthorizedRequest, HttpRequest, MoqtScopeBuilder, MoqtValidator, RelayRequestContext,
+    TransportInfo,
+};

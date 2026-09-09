@@ -31,7 +31,7 @@ fn authorize(
     token: &ValidatedToken,
     req: &RelayRequestContext,
 ) -> Result<cat_token::moqt::AuthorizedRequest, CatError> {
-    v.authorize::<dyn ReplayGuard>(token, req, None, None)
+    v.authorize(token, req)
 }
 
 // --- CatTokenBuilder::expires_in ---
@@ -161,7 +161,8 @@ fn test_decode_token_base64_roundtrip() {
         .unwrap();
 
     let encoded_b64 = encode_token_base64(&token, &key).unwrap();
-    let decoded = decode_token_base64(&encoded_b64, &key)
+    let decoded = Decoder::with_algorithm(&key)
+        .decode_base64(&encoded_b64)
         .unwrap()
         .into_unvalidated_token();
     assert_eq!(decoded.core.iss.as_deref(), Some("b64-test"));
