@@ -7,6 +7,21 @@ db-urls = ["https://github.com/rustsec/advisory-db"]
 # spin 0.9.8 is yanked but only reachable transitively through rsa; keep
 # yanks as a warning, not a hard failure, until rsa 0.10 stabilizes.
 yanked = "warn"
+# Deferred dependency migrations. Each entry MUST cite the migration
+# path in docs/DEPENDENCY-DEBT.md. Removing the debt is the exit
+# criterion — not silencing the check.
+ignore = [
+    # rsa 0.9 Marvin timing sidechannel. cat-token uses rsa only for
+    # PS256 signature *verification*; the Marvin attack targets private
+    # key operations, so this crate as a recipient is not on the attack
+    # surface. Issuers using this crate to sign PS256 tokens ARE
+    # exposed. Awaiting rsa 0.10 stable; see docs/DEPENDENCY-DEBT.md.
+    { id = "RUSTSEC-2023-0071", reason = "verifier-side only; awaiting rsa 0.10 stable — see docs/DEPENDENCY-DEBT.md" },
+    # serde_cbor is unmaintained (upstream archived 2021). Migration to
+    # ciborium is tracked separately because it touches every CBOR call
+    # site in the strict parser and needs its own review.
+    { id = "RUSTSEC-2021-0127", reason = "serde_cbor unmaintained; ciborium migration tracked in docs/DEPENDENCY-DEBT.md" },
+]
 
 [licenses]
 allow = [

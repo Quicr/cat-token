@@ -49,6 +49,24 @@ an advisory drift report.
   encoded) and a phantom `catu: 10` (also never encoded), so a peer
   reading only the JSON annotations would build a mismatched
   expectation of the CBOR payload.
+- **`lru` bumped 0.16 → 0.18** to pick up the panic-safety fix for
+  `LruCache::pop()` (RUSTSEC-2026-0253). cat-token's `LruCache`
+  callers key on `Vec<u8>` / `String`, neither of which panics on
+  drop, so the vulnerability was not reachable through this crate —
+  but the bump is free and closes the advisory.
+
+### Security
+
+- **`deny.toml` advisory ignores.** Two open advisories are
+  explicitly deferred with the exposure-audit rationale documented in
+  the new `docs/DEPENDENCY-DEBT.md`:
+  - RUSTSEC-2023-0071 (`rsa 0.9` Marvin timing attack): cat-token
+    uses `rsa` for PS256 *verification* only; the attack targets
+    private-key operations, so the recipient path is not on the
+    attack surface. Awaiting `rsa 0.10` stable.
+  - RUSTSEC-2021-0127 (`serde_cbor` unmaintained): migration to
+    `ciborium` (already a direct dep) is tracked separately because
+    it touches every strict-profile CBOR call site.
 
 ## 0.4.2 — 2026-09-07
 
