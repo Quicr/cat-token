@@ -144,13 +144,21 @@ jobs:
       with:
         components: miri
 
-    - name: Run Miri on unit tests
-      # `-Zmiri-disable-isolation` lets the test suite call SystemTime::now()
-      # (DpopPayload::new derives iat from wall-clock time). Miri's default
-      # isolation blocks all syscalls, which is the wrong bar for a
-      # provenance / UB check — we only want the Stacked Borrows / Tree
-      # Borrows model here.
-      run: cargo +nightly miri test --lib --all-features
+    - name: Run Miri on crypto-free modules
+      # Miri is an abstract interpreter and cannot execute the C FFI
+      # symbols `ring` links (OPENSSL_cpuid_setup et al.), so any test
+      # that exercises SHA-256 / ES256 / random-byte paths aborts.
+      # Restrict Miri to the pure-Rust modules where it actually
+      # catches UB — CBOR / URI / MOQT / claims / structured-header /
+      # response / geo parsing and matching — and let clippy + the
+      # regular test suite cover the crypto paths.
+      #
+      # `-Zmiri-disable-isolation` lets DpopPayload::new call
+      # SystemTime::now() where those paths appear transitively;
+      # isolation is the wrong bar for a Stacked/Tree Borrows check.
+      run: >
+        cargo +nightly miri test --lib --all-features --
+        uri:: structured_header:: response:: geo:: moqt:: claims::
       env:
         MIRIFLAGS: -Zmiri-strict-provenance -Zmiri-disable-isolation
 
