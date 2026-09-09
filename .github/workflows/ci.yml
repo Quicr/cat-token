@@ -145,9 +145,14 @@ jobs:
         components: miri
 
     - name: Run Miri on unit tests
+      # `-Zmiri-disable-isolation` lets the test suite call SystemTime::now()
+      # (DpopPayload::new derives iat from wall-clock time). Miri's default
+      # isolation blocks all syscalls, which is the wrong bar for a
+      # provenance / UB check — we only want the Stacked Borrows / Tree
+      # Borrows model here.
       run: cargo +nightly miri test --lib --all-features
       env:
-        MIRIFLAGS: -Zmiri-strict-provenance
+        MIRIFLAGS: -Zmiri-strict-provenance -Zmiri-disable-isolation
 
   doc-test:
     name: Documentation Tests
