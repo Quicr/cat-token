@@ -1,11 +1,42 @@
 // SPDX-FileCopyrightText: Copyright (c) 2022 Quicr
 // SPDX-License-Identifier: BSD-2-Clause
 
-use cat_token::moqt::{MoqtAuthRequest, MoqtScopeBuilder, MoqtValidator, roles};
+#![cfg(feature = "moqt")]
+
+use cat_token::moqt::{MoqtScopeBuilder, MoqtValidator, RelayRequestContext, roles};
 use cat_token::*;
 use chrono::{Duration, Utc};
 use std::sync::Arc;
 use std::thread;
+
+const RELAY: &str = "relay";
+
+fn make_validated(token: &CatToken) -> ValidatedToken {
+    let key = HmacSha256Algorithm::new(b"test-key-for-roundtrip-000000000");
+    let encoded = encode_token(token, &key).unwrap();
+    let validator = CatTokenValidator::new().allow_unencrypted_privacy_claims();
+    decode_token(&encoded, &key)
+        .unwrap()
+        .validate(&validator)
+        .unwrap()
+}
+
+fn ctx(action: MoqtAction, ns: Vec<Vec<u8>>, track: Vec<u8>) -> RelayRequestContext {
+    RelayRequestContext::new(RELAY, action, ns, track)
+}
+
+fn validator() -> MoqtValidator {
+    // Tests use tokens without `aud`; allow that here so existing behaviour is preserved.
+    MoqtValidator::new().allow_missing_audience()
+}
+
+fn authorize(
+    v: &MoqtValidator,
+    token: &ValidatedToken,
+    req: &RelayRequestContext,
+) -> Result<cat_token::moqt::AuthorizedRequest, CatError> {
+    v.authorize::<dyn ReplayGuard>(token, req, None, None)
+}
 
 #[test]
 fn test_moqt_validator_spec_example_exact_match() {
@@ -24,17 +55,18 @@ fn test_moqt_validator_spec_example_exact_match() {
     let token = CatTokenBuilder::new()
         .issuer("https://spec-example.com")
         .moqt_scope(scope)
-        .build();
+        .build()
+        .unwrap();
 
-    let validator = MoqtValidator::new();
+    let v = validator();
 
     // Should permit exact match
-    let request = MoqtAuthRequest::new(
+    let request = ctx(
         MoqtAction::PublishNamespace,
         vec![b"example.com".to_vec()],
         b"/bob".to_vec(),
     );
-    assert!(validator.authorize(&token, &request).authorized);
+    assert!(authorize(&v, &make_validated(&token), &request).is_ok());
 
     // Should prohibit - various mismatches
     let test_cases = vec![
@@ -46,13 +78,13 @@ fn test_moqt_validator_spec_example_exact_match() {
     ];
 
     for (ns, track) in test_cases {
-        let request = MoqtAuthRequest::new(
+        let request = ctx(
             MoqtAction::PublishNamespace,
             vec![ns.clone()],
             track.clone(),
         );
         assert!(
-            !validator.authorize(&token, &request).authorized,
+            authorize(&v, &make_validated(&token), &request).is_err(),
             "Should deny ns={:?} track={:?}",
             String::from_utf8_lossy(&ns),
             String::from_utf8_lossy(&track)
@@ -77,9 +109,10 @@ fn test_moqt_validator_spec_example_prefix_match() {
     let token = CatTokenBuilder::new()
         .issuer("https://spec-example.com")
         .moqt_scope(scope)
-        .build();
+        .build()
+        .unwrap();
 
-    let validator = MoqtValidator::new();
+    let v = validator();
 
     // Should permit - various prefix matches
     let permit_cases: Vec<(&[u8], &[u8])> = vec![
@@ -90,13 +123,13 @@ fn test_moqt_validator_spec_example_prefix_match() {
     ];
 
     for (ns, track) in permit_cases {
-        let request = MoqtAuthRequest::new(
+        let request = ctx(
             MoqtAction::PublishNamespace,
             vec![ns.to_vec()],
             track.to_vec(),
         );
         assert!(
-            validator.authorize(&token, &request).authorized,
+            authorize(&v, &make_validated(&token), &request).is_ok(),
             "Should permit ns={:?} track={:?}",
             String::from_utf8_lossy(ns),
             String::from_utf8_lossy(track)
@@ -108,13 +141,13 @@ fn test_moqt_validator_spec_example_prefix_match() {
         vec![(b"example.com", b"/alice"), (b"other.com", b"/bob")];
 
     for (ns, track) in deny_cases {
-        let request = MoqtAuthRequest::new(
+        let request = ctx(
             MoqtAction::PublishNamespace,
             vec![ns.to_vec()],
             track.to_vec(),
         );
         assert!(
-            !validator.authorize(&token, &request).authorized,
+            authorize(&v, &make_validated(&token), &request).is_err(),
             "Should deny ns={:?} track={:?}",
             String::from_utf8_lossy(ns),
             String::from_utf8_lossy(track)
@@ -130,48 +163,47 @@ fn test_moqt_validator_multiple_scopes() {
 
     let token = CatTokenBuilder::new()
         .issuer("https://multi-scope.com")
-        .audience(vec!["relay".to_string()])
+        .audience(vec![RELAY.to_string()])
         .expires_at(Utc::now() + Duration::hours(1))
         .moqt_scopes(vec![pub_scope, sub_scope])
-        .build();
+        .build()
+        .unwrap();
 
-    let validator = MoqtValidator::new();
+    let v = MoqtValidator::new();
 
     // Publisher can publish to /live/
-    let request = MoqtAuthRequest::new(
+    let request = ctx(
         MoqtAction::Publish,
         vec![b"cdn.example.com".to_vec()],
         b"/live/stream1".to_vec(),
     );
-    let result = validator.authorize(&token, &request);
-    assert!(result.authorized);
-    assert_eq!(result.matched_scope_index, Some(0));
+    let result = authorize(&v, &make_validated(&token), &request).unwrap();
+    assert_eq!(result.matched_scope_index, 0);
 
     // Publisher cannot publish to /vod/
-    let request = MoqtAuthRequest::new(
+    let request = ctx(
         MoqtAction::Publish,
         vec![b"cdn.example.com".to_vec()],
         b"/vod/movie1".to_vec(),
     );
-    assert!(!validator.authorize(&token, &request).authorized);
+    assert!(authorize(&v, &make_validated(&token), &request).is_err());
 
     // Subscriber can fetch from /vod/
-    let request = MoqtAuthRequest::new(
+    let request = ctx(
         MoqtAction::Fetch,
         vec![b"cdn.example.com".to_vec()],
         b"/vod/movie1".to_vec(),
     );
-    let result = validator.authorize(&token, &request);
-    assert!(result.authorized);
-    assert_eq!(result.matched_scope_index, Some(1));
+    let result = authorize(&v, &make_validated(&token), &request).unwrap();
+    assert_eq!(result.matched_scope_index, 1);
 
     // Subscriber cannot fetch from /live/
-    let request = MoqtAuthRequest::new(
+    let request = ctx(
         MoqtAction::Fetch,
         vec![b"cdn.example.com".to_vec()],
         b"/live/stream1".to_vec(),
     );
-    assert!(!validator.authorize(&token, &request).authorized);
+    assert!(authorize(&v, &make_validated(&token), &request).is_err());
 }
 
 #[test]
@@ -185,18 +217,18 @@ fn test_moqt_validator_revalidation_required() {
         .issuer("https://test.com")
         .moqt_scope(scope)
         .moqt_reval(300.0) // 5 minute revalidation
-        .build();
+        .build()
+        .unwrap();
 
-    let validator = MoqtValidator::new();
+    let v = validator();
 
-    let request = MoqtAuthRequest::new(
+    let request = ctx(
         MoqtAction::Publish,
         vec![b"example.com".to_vec()],
         b"/stream".to_vec(),
     );
-    let result = validator.authorize(&token, &request);
+    let result = authorize(&v, &make_validated(&token), &request).unwrap();
 
-    assert!(result.authorized);
     assert!(result.requires_revalidation);
     assert_eq!(result.revalidation_interval, Some(300.0));
 }
@@ -213,20 +245,22 @@ fn test_moqt_validator_revalidation_zero() {
         .issuer("https://test.com")
         .moqt_scope(scope)
         .moqt_reval(0.0)
-        .build();
+        .build()
+        .unwrap();
 
-    let validator = MoqtValidator::new();
+    let v = validator();
 
-    let request = MoqtAuthRequest::new(
+    let request = ctx(
         MoqtAction::Publish,
         vec![b"example.com".to_vec()],
         b"/stream".to_vec(),
     );
-    let result = validator.authorize(&token, &request);
+    let result = authorize(&v, &make_validated(&token), &request).unwrap();
 
-    assert!(result.authorized);
-    assert!(!result.requires_revalidation); // 0 means no revalidation
-    assert_eq!(result.revalidation_interval, Some(0.0));
+    // moqt-reval == 0 means no revalidation required; the AuthorizedRequest
+    // returns no interval rather than Some(0.0).
+    assert!(!result.requires_revalidation);
+    assert!(result.revalidation_interval.is_none());
 }
 
 #[test]
@@ -241,12 +275,13 @@ fn test_moqt_validator_claims_validation() {
         .issuer("https://test.com")
         .moqt_scope(scope.clone())
         .moqt_reval(30.0) // 30 seconds
-        .build();
+        .build()
+        .unwrap();
 
     // Validator that requires at least 60 seconds
-    let validator = MoqtValidator::new().with_min_revalidation_interval(60.0);
+    let v = MoqtValidator::new().with_min_revalidation_interval(60.0);
 
-    let result = validator.validate_moqt_claims(&token);
+    let result = v.validate_moqt_claims(&token);
     assert!(matches!(
         result,
         Err(CatError::RevalidationIntervalTooShort)
@@ -257,9 +292,10 @@ fn test_moqt_validator_claims_validation() {
         .issuer("https://test.com")
         .moqt_scope(scope)
         .moqt_reval(120.0) // 2 minutes
-        .build();
+        .build()
+        .unwrap();
 
-    let result = validator.validate_moqt_claims(&token2);
+    let result = v.validate_moqt_claims(&token2);
     assert!(result.is_ok());
 }
 
@@ -274,12 +310,13 @@ fn test_moqt_validator_no_revalidation_support() {
         .issuer("https://test.com")
         .moqt_scope(scope)
         .moqt_reval(300.0)
-        .build();
+        .build()
+        .unwrap();
 
     // Validator that doesn't support revalidation
-    let validator = MoqtValidator::new().without_revalidation_support();
+    let v = MoqtValidator::new().without_revalidation_support();
 
-    let result = validator.validate_moqt_claims(&token);
+    let result = v.validate_moqt_claims(&token);
     assert!(matches!(result, Err(CatError::RevalidationRequired)));
 }
 
@@ -294,12 +331,12 @@ fn test_moqt_scope_builder() {
         .track_prefix(b"/stream/")
         .build();
 
-    assert_eq!(scope.actions.len(), 2);
+    assert_eq!(scope.actions().len(), 2);
     assert!(scope.allows_action(&MoqtAction::Publish));
     assert!(scope.allows_action(&MoqtAction::Fetch));
     assert!(!scope.allows_action(&MoqtAction::Subscribe));
-    assert_eq!(scope.namespace_matches.len(), 2);
-    assert!(scope.track_match.is_some());
+    assert_eq!(scope.namespace_matches().len(), 2);
+    assert!(scope.track_match().is_some());
 }
 
 #[test]
@@ -330,19 +367,20 @@ fn test_moqt_roles() {
 #[test]
 fn test_moqt_default_blocked() {
     // "The default for all actions is 'Blocked'"
-    let token = CatTokenBuilder::new().issuer("https://test.com").build(); // No MOQT scopes
+    let token = CatTokenBuilder::new()
+        .issuer("https://test.com")
+        .build()
+        .unwrap(); // No MOQT scopes
 
-    let validator = MoqtValidator::new();
+    let v = validator();
 
-    let request = MoqtAuthRequest::new(
+    let request = ctx(
         MoqtAction::Publish,
         vec![b"example.com".to_vec()],
         b"/stream".to_vec(),
     );
-    let result = validator.authorize(&token, &request);
-
-    assert!(!result.authorized);
-    assert!(result.matched_scope_index.is_none());
+    let result = authorize(&v, &make_validated(&token), &request);
+    assert!(matches!(result, Err(CatError::MoqtActionNotAuthorized(_))));
 }
 
 #[test]
@@ -350,18 +388,18 @@ fn test_moqt_empty_scopes() {
     let token = CatTokenBuilder::new()
         .issuer("https://test.com")
         .moqt_scopes(vec![]) // Empty scopes array
-        .build();
+        .build()
+        .unwrap();
 
-    let validator = MoqtValidator::new();
+    let v = validator();
 
-    let request = MoqtAuthRequest::new(
+    let request = ctx(
         MoqtAction::Publish,
         vec![b"example.com".to_vec()],
         b"/stream".to_vec(),
     );
-    let result = validator.authorize(&token, &request);
-
-    assert!(!result.authorized);
+    let result = authorize(&v, &make_validated(&token), &request);
+    assert!(matches!(result, Err(CatError::MoqtActionNotAuthorized(_))));
 }
 
 #[test]
@@ -375,30 +413,32 @@ fn test_moqt_validator_concurrent_access() {
         CatTokenBuilder::new()
             .issuer("https://concurrent-test.com")
             .moqt_scope(scope)
-            .build(),
+            .build()
+            .unwrap(),
     );
 
-    let validator = Arc::new(MoqtValidator::new());
+    let v = Arc::new(validator());
 
     let mut handles = vec![];
 
     for i in 0..10 {
         let token = Arc::clone(&token);
-        let validator = Arc::clone(&validator);
+        let v = Arc::clone(&v);
 
         let handle = thread::spawn(move || {
             for j in 0..100 {
                 let track = format!("/stream/{}/{}", i, j);
-                let request = MoqtAuthRequest::new(
+                let request = ctx(
                     MoqtAction::Publish,
                     vec![b"cdn.example.com".to_vec()],
                     track.as_bytes().to_vec(),
                 );
-                let result = validator.authorize(&token, &request);
                 assert!(
-                    result.authorized,
+                    v.authorize::<dyn ReplayGuard>(&make_validated(&token), &request, None, None)
+                        .is_ok(),
                     "Thread {} iter {} should be authorized",
-                    i, j
+                    i,
+                    j
                 );
             }
         });
@@ -415,6 +455,7 @@ fn test_moqt_validator_concurrent_access() {
 fn test_dpop_validator_concurrent_jti() {
     let settings = CatDpopSettings::new()
         .with_window(300)
+        .unwrap()
         .with_jti_processing(true);
     let validator = Arc::new(DpopValidator::new(settings));
 
@@ -435,29 +476,19 @@ fn test_dpop_validator_concurrent_jti() {
                 let jti = format!("jti-{}-{}", i, j);
                 let mut proof = DpopProof::create_for_moqt(
                     MoqtAction::Publish,
-                    b"namespace",
+                    vec![b"namespace".to_vec()],
                     b"track",
-                    "ES256",
+                    ALG_ES256,
                     jwk_clone.clone(),
                 )
                 .with_jti(jti.clone());
                 proof.sign(alg_clone.as_ref()).unwrap();
 
-                let result = validator.validate_with_algorithm(
-                    &proof,
-                    MoqtAction::Publish,
-                    &thumbprint,
-                    alg_clone.as_ref(),
-                );
+                let result = validator.validate(&proof, MoqtAction::Publish, &thumbprint, None);
                 assert!(result.is_ok(), "First use of JTI {} should succeed", jti);
 
                 // Second use should fail (replay)
-                let result = validator.validate_with_algorithm(
-                    &proof,
-                    MoqtAction::Publish,
-                    &thumbprint,
-                    alg_clone.as_ref(),
-                );
+                let result = validator.validate(&proof, MoqtAction::Publish, &thumbprint, None);
                 assert!(
                     matches!(result, Err(CatError::ReplayAttackDetected)),
                     "Replay of JTI {} should fail",
@@ -478,6 +509,7 @@ fn test_dpop_validator_concurrent_jti() {
 fn test_jti_cache_stats() {
     let settings = CatDpopSettings::new()
         .with_window(300)
+        .unwrap()
         .with_jti_processing(true);
 
     // Use smaller cache size for testing
@@ -486,27 +518,45 @@ fn test_jti_cache_stats() {
     let jwk = Jwk::from_es256_verifying_key(alg.verifying_key()).unwrap();
     let thumbprint = jwk.thumbprint().unwrap();
 
-    // Insert 1000 unique JTIs (fills the cache)
-    for i in 0..1000 {
+    // Insert 2000 unique JTIs — more than capacity, so the LRU cache must
+    // evict rather than start rejecting valid new proofs.
+    for i in 0..2000 {
         let jti = format!("jti-stats-{}", i);
         let mut proof = DpopProof::create_for_moqt(
             MoqtAction::Publish,
-            b"namespace",
+            vec![b"namespace".to_vec()],
             b"track",
-            "ES256",
+            ALG_ES256,
             jwk.clone(),
         )
         .with_jti(jti);
         proof.sign(&alg).unwrap();
 
-        let result =
-            validator.validate_with_algorithm(&proof, MoqtAction::Publish, &thumbprint, &alg);
-        assert!(result.is_ok(), "Validation should succeed for unique JTI");
+        let result = validator.validate(&proof, MoqtAction::Publish, &thumbprint, None);
+        assert!(
+            result.is_ok(),
+            "Validation must not hard-fail once the cache is full (LRU eviction)"
+        );
     }
 
-    // Check cache stats
     let stats = validator.jti_cache_stats();
-    assert_eq!(stats.size, 1000);
+    // Sharded per-shard clamp may make the effective total slightly below
+    // the reported capacity; verify the store is at least reporting sane
+    // pressure and that premature evictions have been counted.
     assert_eq!(stats.capacity, 1000);
-    assert!(stats.under_pressure, "Cache should be at capacity (90%+)");
+    assert!(
+        stats.size <= stats.capacity,
+        "cache size {} exceeds capacity {}",
+        stats.size,
+        stats.capacity
+    );
+    assert!(
+        stats.under_pressure,
+        "Cache should register as under pressure after overfill: size={}, capacity={}",
+        stats.size, stats.capacity
+    );
+    assert!(
+        stats.premature_evictions > 0,
+        "premature_evictions should be non-zero when overfilled inside the freshness window"
+    );
 }

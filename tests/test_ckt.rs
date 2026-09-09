@@ -42,7 +42,9 @@ fn test_ckt_roundtrip() {
         .with_cose_key_thumbprint(b"ckt-data".to_vec());
 
     let encoded = encode_token(&token, &algorithm).unwrap();
-    let decoded = decode_token(&encoded, &algorithm).unwrap();
+    let decoded = decode_token(&encoded, &algorithm)
+        .unwrap()
+        .into_unvalidated_token();
 
     let cnf = decoded.dpop.cnf.unwrap();
     assert_eq!(cnf.jkt, b"jkt-data".to_vec());
@@ -59,7 +61,9 @@ fn test_ckt_only_roundtrip() {
         .with_cose_key_thumbprint(b"ckt-only".to_vec());
 
     let encoded = encode_token(&token, &algorithm).unwrap();
-    let decoded = decode_token(&encoded, &algorithm).unwrap();
+    let decoded = decode_token(&encoded, &algorithm)
+        .unwrap()
+        .into_unvalidated_token();
 
     let cnf = decoded.dpop.cnf.unwrap();
     assert!(cnf.jkt.is_empty());
@@ -76,7 +80,9 @@ fn test_jkt_without_ckt_roundtrip() {
         .with_confirmation(b"jkt-only".to_vec());
 
     let encoded = encode_token(&token, &algorithm).unwrap();
-    let decoded = decode_token(&encoded, &algorithm).unwrap();
+    let decoded = decode_token(&encoded, &algorithm)
+        .unwrap()
+        .into_unvalidated_token();
 
     let cnf = decoded.dpop.cnf.unwrap();
     assert_eq!(cnf.jkt, b"jkt-only".to_vec());
@@ -89,7 +95,8 @@ fn test_ckt_builder() {
         .issuer("test")
         .confirmation(b"jkt".to_vec())
         .cose_key_thumbprint(b"ckt".to_vec())
-        .build();
+        .build()
+        .unwrap();
 
     let cnf = token.dpop.cnf.unwrap();
     assert_eq!(cnf.jkt, b"jkt".to_vec());

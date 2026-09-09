@@ -1,0 +1,16 @@
+# cargo-audit configuration. Kept in sync with the [advisories.ignore]
+# block in ../deny.toml — cargo-audit and cargo-deny consume different
+# config files, so both must be updated when the deferred-advisory set
+# changes. The exposure rationale lives in docs/DEPENDENCY-DEBT.md.
+
+[advisories]
+ignore = [
+    # rsa 0.9 Marvin timing attack. cat-token uses rsa for PS256
+    # verification only; the attack targets private-key operations.
+    # Awaiting rsa 0.10 stable — see docs/DEPENDENCY-DEBT.md.
+    "RUSTSEC-2023-0071",
+    # serde_cbor unmaintained. Migration to ciborium is tracked
+    # separately because it touches every strict-profile CBOR call
+    # site — see docs/DEPENDENCY-DEBT.md.
+    "RUSTSEC-2021-0127",
+]

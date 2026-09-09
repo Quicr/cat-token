@@ -2,70 +2,231 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 use crate::{
-    BinaryMatch, CatDpopSettings, CatError, CatToken, CryptographicAlgorithm, DpopProof,
-    DpopValidator, MoqtAction, MoqtScope, NamespaceMatch, confirmation_matches_jwk,
+    BinaryMatch, CatDpopSettings, CatError, CatIfAction, CatPorBlockList, CatRenewal, CatToken,
+    DpopProof, DpopValidator, MoqtAction, MoqtScope, NamespaceMatch, ReplayGuard, ValidatedToken,
+    confirmation_matches_jwk, enforce_catnip, enforce_catpor, enforce_catu, validate_all_headers,
+    validate_method,
 };
 
-/// IANA-registered token type for C4M (CAT for MoQ) AUTHORIZATION TOKEN parameter.
-/// Value: "c4m" encoded as 24-bit big-endian integer (0x63 = 'c', 0x34 = '4', 0x6d = 'm').
-pub const C4M_TOKEN_TYPE: u64 = 0x63346d;
-
-/// MOQT authorization request
+/// Replay-commit obligation carried out of the sync pre-commit pipeline. Two
+/// variants because [`crate::ReplayProtection::Prohibited`] converts a
+/// duplicate `cti` into a hard error while `ReuseDetection` records
+/// duplicate observations without failing the request.
+///
+/// Consumed by [`MoqtValidator::commit`] and the async equivalent so both
+/// paths honour the same JTI-then-`cti` ordering (see [`MoqtValidator::authorize`]).
 #[derive(Debug, Clone)]
-pub struct MoqtAuthRequest {
-    pub action: MoqtAction,
-    pub namespace: Vec<Vec<u8>>, // Namespace tuple elements
-    pub track: Vec<u8>,
-    pub dpop_proof: Option<DpopProof>,
+pub enum CatReplayObligation {
+    /// Duplicate `cti` MUST fail the request with
+    /// [`CatError::ReplayAttackDetected`].
+    Prohibited(Vec<u8>),
+    /// Duplicate `cti` sets `reuse_detected = true` on the authorization
+    /// result but does not fail. Caller decides whether to log/audit.
+    ReuseDetection(Vec<u8>),
 }
 
-impl MoqtAuthRequest {
-    pub fn new(action: MoqtAction, namespace: Vec<Vec<u8>>, track: Vec<u8>) -> Self {
+/// Everything the sync pipeline decided before touching a replay store.
+///
+/// Produced by [`MoqtValidator::authorize_precommit`]; consumed by
+/// [`MoqtValidator::commit`] (sync) or
+/// [`crate::r#async::AsyncMoqtValidator::commit_async`] (async). Splitting
+/// the pipeline this way lets async integrations reuse every non-storage
+/// check without duplicating ~250 lines of policy logic.
+#[derive(Debug, Clone)]
+pub struct PreCommit {
+    scope_index: usize,
+    renewal: Option<CatRenewal>,
+    revalidation: Option<f64>,
+    /// Composite JTI-store key + `iat`, when the DPoP profile requires a
+    /// commit. `None` when the token carries no `cnf`, when JTI honouring is
+    /// off, or when the proof carries no `cti`.
+    jti_commit: Option<(String, i64)>,
+    replay: Option<CatReplayObligation>,
+}
+
+impl PreCommit {
+    pub fn matched_scope_index(&self) -> usize {
+        self.scope_index
+    }
+
+    pub fn dpop_jti_key(&self) -> Option<(&str, i64)> {
+        self.jti_commit.as_ref().map(|(k, iat)| (k.as_str(), *iat))
+    }
+
+    pub fn replay_obligation(&self) -> Option<&CatReplayObligation> {
+        self.replay.as_ref()
+    }
+
+    /// Turn the pre-commit outcome into the final [`AuthorizedRequest`]
+    /// after both replay commits have succeeded. Exposed so async callers
+    /// ([`crate::r#async::AsyncMoqtValidator::commit_async`]) can produce
+    /// the same response shape without touching the sync commit helpers.
+    pub fn finalize(self, reuse_detected: bool) -> AuthorizedRequest {
+        let mut authorized = AuthorizedRequest::allowed(self.scope_index);
+        authorized.reuse_detected = reuse_detected;
+        authorized.renewal = self.renewal;
+        if let Some(interval) = self.revalidation
+            && interval > 0.0
+        {
+            authorized.requires_revalidation = true;
+            authorized.revalidation_interval = Some(interval);
+        }
+        authorized
+    }
+}
+/// IANA-registered token type for C4M (CAT for MoQ) AUTHORIZATION TOKEN parameter.
+pub const C4M_TOKEN_TYPE: u64 = 0x01;
+
+/// Authorization outcome for a single request. Produced only when every
+/// signed CAT claim on the token was satisfied by the request context.
+/// Carries derived data the caller needs to construct the response:
+/// revalidation policy, the token's `catr` renewal instructions (if any),
+/// and whether the token's `catreplay` mode observed a duplicate cti
+/// (`Prohibited` fails hard; `ReuseDetection` sets this flag for the caller
+/// to log/audit).
+#[derive(Debug, Clone)]
+pub struct AuthorizedRequest {
+    pub matched_scope_index: usize,
+    pub requires_revalidation: bool,
+    pub revalidation_interval: Option<f64>,
+    pub renewal: Option<CatRenewal>,
+    pub reuse_detected: bool,
+}
+
+impl AuthorizedRequest {
+    fn allowed(scope_index: usize) -> Self {
         Self {
+            matched_scope_index: scope_index,
+            requires_revalidation: false,
+            revalidation_interval: None,
+            renewal: None,
+            reuse_detected: false,
+        }
+    }
+}
+
+/// Context for a relay authorization request, used with
+/// [`MoqtValidator::authorize`].
+///
+/// This is the only supported entry point for authorization. Fields describe the
+/// full request context — a missing field represents an unknown value, not a
+/// wildcard, and will cause authorization to fail closed when a token claim
+/// requires that context (e.g. `catalpn` requires `peer_tls_alpn`).
+#[derive(Debug, Clone)]
+pub struct RelayRequestContext {
+    /// Canonical relay endpoint the client connected to. Matched against the
+    /// token's `aud` claim (if present).
+    pub relay_endpoint: String,
+    /// The MOQT action being requested.
+    pub action: MoqtAction,
+    /// The full track name namespace tuple.
+    pub namespace: Vec<Vec<u8>>,
+    /// The track name.
+    pub track: Vec<u8>,
+    /// TLS ALPN identifier negotiated with the peer. Required if the token has
+    /// a `catalpn` claim.
+    pub peer_tls_alpn: Option<Vec<u8>>,
+    /// Optional tenant/connection identity carried from a trusted upstream.
+    /// Not enforced by the library — passed through to metrics/audit hooks by
+    /// the caller. Present for callers that partition replay state by tenant.
+    pub tenant_id: Option<String>,
+    /// DPoP proof of possession. Required if the token has a `cnf` claim.
+    pub dpop_proof: Option<DpopProof>,
+    /// Fully-qualified request URI. Required if the token has a `catu` claim.
+    pub request_uri: Option<String>,
+    /// HTTP method (or equivalent transport verb). Required if the token has
+    /// a `catm` claim.
+    pub request_method: Option<String>,
+    /// Complete request header set (name, value pairs). Every rule in the
+    /// token's `cath` claim must be satisfied by some header in this list.
+    /// Case-insensitive on name per RFC 9110 §5.1.
+    pub request_headers: Vec<(String, String)>,
+    /// Peer IP address. Required if the token's `catnip` claim contains any
+    /// IP-typed identifier.
+    pub peer_ip: Option<std::net::IpAddr>,
+    /// Peer autonomous system number. Required if the token's `catnip`
+    /// contains any ASN-typed identifier.
+    pub peer_asn: Option<u32>,
+    /// Server-issued DPoP nonce challenge for this request (RFC 9449 §8).
+    /// When set, the DPoP proof MUST carry a matching `nonce` claim;
+    /// otherwise authorization fails closed with
+    /// [`CatError::DpopValidationFailed`]. `None` disables the check —
+    /// callers that don't rotate nonces per-request leave this unset.
+    pub expected_dpop_nonce: Option<String>,
+}
+
+impl RelayRequestContext {
+    pub fn new(
+        relay_endpoint: impl Into<String>,
+        action: MoqtAction,
+        namespace: Vec<Vec<u8>>,
+        track: Vec<u8>,
+    ) -> Self {
+        Self {
+            relay_endpoint: relay_endpoint.into(),
             action,
             namespace,
             track,
+            peer_tls_alpn: None,
+            tenant_id: None,
             dpop_proof: None,
+            request_uri: None,
+            request_method: None,
+            request_headers: Vec::new(),
+            peer_ip: None,
+            peer_asn: None,
+            expected_dpop_nonce: None,
         }
+    }
+
+    pub fn with_peer_tls_alpn(mut self, alpn: Vec<u8>) -> Self {
+        self.peer_tls_alpn = Some(alpn);
+        self
+    }
+
+    pub fn with_tenant_id(mut self, tenant: impl Into<String>) -> Self {
+        self.tenant_id = Some(tenant.into());
+        self
     }
 
     pub fn with_dpop_proof(mut self, proof: DpopProof) -> Self {
         self.dpop_proof = Some(proof);
         self
     }
-}
 
-/// Result of MOQT authorization check
-#[derive(Debug, Clone)]
-pub struct MoqtAuthResult {
-    pub authorized: bool,
-    pub matched_scope_index: Option<usize>,
-    pub requires_revalidation: bool,
-    pub revalidation_interval: Option<f64>,
-}
-
-impl MoqtAuthResult {
-    pub fn denied() -> Self {
-        Self {
-            authorized: false,
-            matched_scope_index: None,
-            requires_revalidation: false,
-            revalidation_interval: None,
-        }
+    pub fn with_request_uri(mut self, uri: impl Into<String>) -> Self {
+        self.request_uri = Some(uri.into());
+        self
     }
 
-    pub fn allowed(scope_index: usize) -> Self {
-        Self {
-            authorized: true,
-            matched_scope_index: Some(scope_index),
-            requires_revalidation: false,
-            revalidation_interval: None,
-        }
+    pub fn with_request_method(mut self, method: impl Into<String>) -> Self {
+        self.request_method = Some(method.into());
+        self
     }
 
-    pub fn with_revalidation(mut self, interval: f64) -> Self {
-        self.requires_revalidation = interval > 0.0;
-        self.revalidation_interval = Some(interval);
+    pub fn with_request_headers(mut self, headers: Vec<(String, String)>) -> Self {
+        self.request_headers = headers;
+        self
+    }
+
+    pub fn with_peer_ip(mut self, ip: std::net::IpAddr) -> Self {
+        self.peer_ip = Some(ip);
+        self
+    }
+
+    pub fn with_peer_asn(mut self, asn: u32) -> Self {
+        self.peer_asn = Some(asn);
+        self
+    }
+
+    /// Require the DPoP proof to echo the supplied server nonce (RFC 9449
+    /// §8). Call this after the relay has generated (or rotated) a per-
+    /// request challenge and included it in the `DPoP-Nonce` response
+    /// header that induced this proof. When set, a proof lacking a nonce
+    /// or carrying a mismatched nonce is rejected with
+    /// [`CatError::DpopValidationFailed`].
+    pub fn with_expected_dpop_nonce(mut self, nonce: impl Into<String>) -> Self {
+        self.expected_dpop_nonce = Some(nonce.into());
         self
     }
 }
@@ -79,6 +240,11 @@ pub struct MoqtValidator {
     supports_revalidation: bool,
     /// DPoP validator for proof-of-possession
     dpop_validator: Option<DpopValidator>,
+    /// Expected resource URI for DPoP binding (e.g. "moqt://relay.example.com")
+    expected_resource: Option<String>,
+    /// Whether to require the relay endpoint to appear in the token's `aud` claim.
+    /// Defaults to true — the audit's fail-closed posture demands this.
+    require_audience_binding: bool,
 }
 
 impl Default for MoqtValidator {
@@ -93,6 +259,8 @@ impl MoqtValidator {
             min_revalidation_interval: None,
             supports_revalidation: true,
             dpop_validator: None,
+            expected_resource: None,
+            require_audience_binding: true,
         }
     }
 
@@ -108,9 +276,71 @@ impl MoqtValidator {
         self
     }
 
-    /// Enable DPoP validation with settings
+    /// Enable DPoP validation backed by the in-process eviction-based
+    /// [`crate::LruJtiStore`].
+    ///
+    /// **Not strict.** RFC 9449 §11.1 requires every accepted JTI be
+    /// retained for at least the freshness window; the LRU-backed default
+    /// evicts under pressure. CDN-scale deployments MUST call
+    /// [`MoqtValidator::try_with_strict_dpop_validation`] instead, passing
+    /// a store that returns `true` from [`crate::JtiStore::is_strict`].
+    /// Use this constructor only for local development, single-tenant
+    /// tests, or intentionally best-effort replay defense.
     pub fn with_dpop_validation(mut self, settings: CatDpopSettings) -> Self {
         self.dpop_validator = Some(DpopValidator::new(settings));
+        self
+    }
+
+    /// Enable DPoP validation with a caller-supplied strict [`JtiStore`].
+    /// The store MUST return `true` from [`crate::JtiStore::is_strict`];
+    /// otherwise this returns [`CatError::CryptoError`] rather than
+    /// silently accept a store that could shed retained JTIs.
+    ///
+    /// Use this constructor for any deployment that shares replay state
+    /// across relays or that must survive a single-relay restart without
+    /// losing replay defense. The strict-mode contract is a hard
+    /// prerequisite for that guarantee.
+    ///
+    /// # Caller obligations
+    ///
+    /// The `is_strict()` bit is *self-attestation*: the store promises it
+    /// will never evict a retained JTI within the freshness window. This
+    /// crate cannot verify durability, atomic insert-if-absent semantics,
+    /// or correct TTL configuration on your behalf. A production CDN
+    /// deployment behind a distributed store must additionally guarantee:
+    ///
+    /// - Atomic insert-if-absent across all relay nodes that share the
+    ///   store (a `SETNX`-equivalent with TTL, not `GET` then `SET`).
+    /// - `check_and_insert` returns [`CatError::CryptoError`] on backend
+    ///   unavailability so authorization fails closed (see
+    ///   [`crate::dpop::JtiStore::check_and_insert`]).
+    /// - Store TTL ≥ DPoP acceptance window + tolerated clock skew.
+    /// - No silent eviction inside that TTL under any load condition.
+    ///
+    /// The [`crate::dpop::InMemoryStrictJtiStore`] reference backend
+    /// satisfies all four for a single-relay deployment; distributed
+    /// backends (Redis, DynamoDB with strong consistency, etc.) must be
+    /// audited against this list before deployment.
+    pub fn try_with_strict_dpop_validation(
+        mut self,
+        settings: CatDpopSettings,
+        store: std::sync::Arc<dyn crate::JtiStore>,
+    ) -> Result<Self, CatError> {
+        self.dpop_validator = Some(DpopValidator::with_jti_store_strict(settings, store)?);
+        Ok(self)
+    }
+
+    /// Set the expected resource URI for DPoP binding validation
+    pub fn with_expected_resource(mut self, resource: impl Into<String>) -> Self {
+        self.expected_resource = Some(resource.into());
+        self
+    }
+
+    /// Allow tokens without an `aud` claim. Tokens that DO carry `aud` are still
+    /// checked against the relay endpoint. Use only if the deployment intentionally
+    /// issues audience-less tokens; the default (audience required) is fail-closed.
+    pub fn allow_missing_audience(mut self) -> Self {
+        self.require_audience_binding = false;
         self
     }
 
@@ -153,93 +383,451 @@ impl MoqtValidator {
         Ok(())
     }
 
-    /// Check if a specific MOQT action is authorized
-    /// "Evaluation stops after the first acceptable result is discovered"
-    pub fn authorize(&self, token: &CatToken, request: &MoqtAuthRequest) -> MoqtAuthResult {
-        let scopes = match &token.moqt.moqt {
-            Some(s) => s,
-            None => return MoqtAuthResult::denied(), // No MOQT claims means blocked
-        };
+    /// Full fail-closed authorization: enforces every signed CAT claim on the
+    /// token against the supplied `RelayRequestContext`, threading through the
+    /// optional caller-supplied `catpor` block list and `catreplay` guard.
+    ///
+    /// A missing piece of request context that a token claim requires (e.g.
+    /// `catu` with no request_uri) is a hard failure — the authorization path
+    /// does not silently allow.
+    ///
+    /// On success, returns an `AuthorizedRequest` carrying:
+    /// - the matched MOQT scope index,
+    /// - the token's revalidation policy (if any),
+    /// - the token's `catr` renewal instructions for the response builder,
+    /// - a `reuse_detected` flag when `catreplay == ReuseDetection` observed
+    ///   a duplicate cti (the request is still authorized in that mode).
+    ///
+    /// Callers who want to surface `catif` action mappings on failure should
+    /// consult `token.claims().request.catif` after mapping the returned
+    /// error to a claim key.
+    ///
+    /// # Replay-commit atomicity (caller contract)
+    ///
+    /// If both DPoP JTI validation and `catreplay` are enabled, the two
+    /// commits go to independent stores (`JtiStore` and `ReplayGuard`) in
+    /// sequence — JTI first, `cti` second. **This is not atomic.** If the
+    /// `cti` commit fails after the JTI commit succeeds, the JTI is burned
+    /// but the `cti` is not; the client must retry with a *fresh* JTI (RFC
+    /// 9449 requires a new proof on every attempt anyway). See the inline
+    /// commentary at the commit site for why JTI-first ordering is the
+    /// safer of the two non-atomic orderings.
+    ///
+    /// Deployments that need strict atomicity between the two stores MUST
+    /// back both `JtiStore::check_and_insert` and
+    /// `ReplayGuard::check_and_record` with the same transactional
+    /// backend (or bind `ReplayGuard::check_and_record` to a store that
+    /// records both keys inside a single transaction). This crate does
+    /// not distribute a transaction across two independent stores.
+    pub fn authorize<G: ReplayGuard + ?Sized>(
+        &self,
+        token: &ValidatedToken,
+        ctx: &RelayRequestContext,
+        replay_guard: Option<&G>,
+        catpor_block_list: Option<&CatPorBlockList>,
+    ) -> Result<AuthorizedRequest, CatError> {
+        let pre =
+            self.authorize_precommit(token, ctx, replay_guard.is_some(), catpor_block_list)?;
+        self.commit(token.claims(), pre, replay_guard)
+    }
 
-        // Evaluate scopes in order, stop at first match
-        for (index, scope) in scopes.iter().enumerate() {
-            if self.scope_matches(scope, request) {
-                let mut result = MoqtAuthResult::allowed(index);
+    /// Run every non-storage authorization check and return the commit
+    /// obligations. Split out so async integrations can await the two
+    /// storage commits (DPoP JTI, catreplay cti) via
+    /// [`crate::r#async::AsyncMoqtValidator::commit_async`] without
+    /// duplicating the policy pipeline. Sync callers should use
+    /// [`MoqtValidator::authorize`] directly.
+    ///
+    /// `replay_guard_configured` mirrors whether a [`ReplayGuard`] will be
+    /// supplied at commit — required so the pre-commit phase can fail
+    /// closed on a token that mandates one when none is configured.
+    pub fn authorize_precommit(
+        &self,
+        token: &ValidatedToken,
+        ctx: &RelayRequestContext,
+        replay_guard_configured: bool,
+        catpor_block_list: Option<&CatPorBlockList>,
+    ) -> Result<PreCommit, CatError> {
+        let claims = token.claims();
 
-                // Add revalidation info if present
-                if let Some(reval) = token.moqt.moqt_reval {
-                    result = result.with_revalidation(reval);
+        // 1. Structural MOQT validation (scope actions, moqt-reval policy).
+        self.validate_moqt_claims(claims)?;
+
+        // 2. catv version acceptance: unknown non-zero versions must be
+        //    rejected rather than silently accepted.
+        if let Some(v) = claims.cat.catv
+            && v > 1
+        {
+            return Err(CatError::InvalidClaimValue(format!(
+                "catv: unsupported token version {v}"
+            )));
+        }
+
+        // 3. Audience binding.
+        match &claims.core.aud {
+            Some(audiences) => {
+                if !audiences.contains(&ctx.relay_endpoint) {
+                    return Err(CatError::InvalidAudience);
                 }
-
-                return result;
+            }
+            None => {
+                if self.require_audience_binding {
+                    return Err(CatError::MissingRequiredClaim("aud".to_string()));
+                }
             }
         }
 
-        // "The default for all actions is 'Blocked'"
-        MoqtAuthResult::denied()
-    }
-
-    /// Authorize with full DPoP proof validation including signature verification.
-    ///
-    /// This method validates both the claims and the cryptographic signature of the DPoP proof.
-    pub fn authorize_with_dpop(
-        &self,
-        token: &CatToken,
-        request: &MoqtAuthRequest,
-        algorithm: &dyn CryptographicAlgorithm,
-    ) -> Result<MoqtAuthResult, CatError> {
-        // First check basic authorization
-        let auth_result = self.authorize(token, request);
-        if !auth_result.authorized {
-            return Ok(auth_result);
+        // 4. ALPN.
+        if let Some(ref token_alpns) = claims.cat.catalpn {
+            let peer_alpn = ctx.peer_tls_alpn.as_ref().ok_or_else(|| {
+                CatError::InvalidClaimValue(
+                    "token requires ALPN binding but no peer ALPN provided".to_string(),
+                )
+            })?;
+            if !token_alpns.iter().any(|a| a == peer_alpn) {
+                return Err(CatError::InvalidClaimValue(
+                    "peer TLS ALPN does not match token catalpn".to_string(),
+                ));
+            }
         }
 
-        // If token has DPoP binding, validate the proof with full signature verification
-        if let Some(ref cnf) = token.dpop.cnf {
-            let proof = request.dpop_proof.as_ref().ok_or_else(|| {
+        // 5. catu — URI-component restrictions.
+        if claims.cat.catu.is_some() {
+            let uri = ctx.request_uri.as_deref().ok_or_else(|| {
+                CatError::InvalidClaimValue(
+                    "token asserts catu but request context has no request_uri".to_string(),
+                )
+            })?;
+            enforce_catu(claims, uri)?;
+        }
+
+        // 6. catm — HTTP method restrictions.
+        if claims.cat.catm.is_some() {
+            let method = ctx.request_method.as_deref().ok_or_else(|| {
+                CatError::InvalidClaimValue(
+                    "token asserts catm but request context has no request_method".to_string(),
+                )
+            })?;
+            validate_method(claims, method)?;
+        }
+
+        // 7. cath — header restrictions.
+        if claims.cat.cath.is_some() {
+            let headers: Vec<(&str, &str)> = ctx
+                .request_headers
+                .iter()
+                .map(|(k, v)| (k.as_str(), v.as_str()))
+                .collect();
+            validate_all_headers(claims, &headers)?;
+        }
+
+        // 8. catnip — peer network identity restrictions.
+        enforce_catnip(claims, ctx.peer_ip, ctx.peer_asn)?;
+
+        // 9. catpor — probability of rejection. Fail-closed: if the token
+        //    carries catpor and no block list is provided, the caller has
+        //    misconfigured the relay; refuse rather than skip.
+        if claims.cat.catpor.is_some() {
+            let block_list = catpor_block_list.ok_or_else(|| {
+                CatError::InvalidClaimValue(
+                    "token asserts catpor but no block list configured on relay".to_string(),
+                )
+            })?;
+            enforce_catpor(claims, block_list)?;
+        }
+
+        // 10. catreplay — verify a guard has been configured when the token
+        //     demands one. The commit itself is deferred to [`Self::commit`]
+        //     so that a request that fails downstream checks does not
+        //     consume the token's cti. Callers who take the async pipeline
+        //     signal the same guard/no-guard decision via
+        //     `replay_guard_configured`.
+        let replay_mode = claims.cat.catreplay;
+        let replay_obligation = match replay_mode {
+            Some(crate::ReplayProtection::Prohibited) => {
+                if !replay_guard_configured {
+                    return Err(CatError::InvalidClaimValue(
+                        "token asserts catreplay but no replay guard configured".to_string(),
+                    ));
+                }
+                let cti = claims.core.cti.as_ref().ok_or_else(|| {
+                    CatError::MissingRequiredClaim(
+                        "cti required when catreplay=Prohibited".to_string(),
+                    )
+                })?;
+                Some(CatReplayObligation::Prohibited(cti.clone()))
+            }
+            Some(crate::ReplayProtection::ReuseDetection) => {
+                if !replay_guard_configured {
+                    return Err(CatError::InvalidClaimValue(
+                        "token asserts catreplay but no replay guard configured".to_string(),
+                    ));
+                }
+                let cti = claims.core.cti.as_ref().ok_or_else(|| {
+                    CatError::MissingRequiredClaim(
+                        "cti required when catreplay=ReuseDetection".to_string(),
+                    )
+                })?;
+                Some(CatReplayObligation::ReuseDetection(cti.clone()))
+            }
+            _ => None,
+        };
+
+        // 11. MOQT scope match.
+        let scope_index = self.match_scope_index(claims, ctx).ok_or_else(|| {
+            CatError::MoqtActionNotAuthorized(format!(
+                "no MOQT scope matches action {:?}",
+                ctx.action
+            ))
+        })?;
+
+        // 12. DPoP proof of possession — verify only; jti commit is deferred
+        //     until after all authorization checks succeed.
+        let dpop_commit = if let Some(ref cnf) = claims.dpop.cnf {
+            let proof = ctx.dpop_proof.as_ref().ok_or_else(|| {
                 CatError::DpopValidationFailed(
                     "Token requires DPoP proof but none provided".to_string(),
                 )
             })?;
 
-            // Validate DPoP proof
             let validator = self.dpop_validator.as_ref().ok_or_else(|| {
                 CatError::DpopValidationFailed("DPoP validation not configured".to_string())
             })?;
 
-            // Check key binding
             if !confirmation_matches_jwk(cnf, &proof.header.jwk)? {
                 return Err(CatError::InvalidDpopBinding);
             }
 
-            // Validate the proof with full signature verification
-            validator.validate_with_algorithm(proof, request.action, &cnf.jkt, algorithm)?;
-        }
+            let issuer = claims.core.iss.as_deref();
+            // Bind the DPoP proof to *this specific token instance* via the
+            // access-token-hash claim. Without this binding a valid proof for
+            // one token could be reused against a different token sharing the
+            // same holder key (e.g. two tokens minted for the same subject with
+            // different scopes). The hash covers the wire bytes exactly as
+            // received — see [`crate::VerifiedToken::serialized`] for why we
+            // do not re-encode.
+            let ath_expected = crate::dpop::compute_access_token_hash(token.serialized());
+            validator.validate_without_jti_commit(
+                proof,
+                ctx.action,
+                &cnf.jkt,
+                issuer,
+                Some(&ath_expected),
+            )?;
 
-        Ok(auth_result)
+            // Setup actions are endpoint-only: tns/tn are meaningless and
+            // must be empty on both sides (enforced by enforce_actx_shape
+            // below). Skipping the equality checks here lets a well-formed
+            // setup proof authorize without a fake matching namespace.
+            match ctx.action.resource_shape() {
+                crate::MoqtResourceShape::Endpoint => {}
+                _ => {
+                    if proof.payload.actx.tns != ctx.namespace {
+                        return Err(CatError::DpopValidationFailed(
+                            "DPoP proof namespace does not match request".to_string(),
+                        ));
+                    }
+                    if proof.payload.actx.tn != ctx.track {
+                        return Err(CatError::DpopValidationFailed(
+                            "DPoP proof track does not match request".to_string(),
+                        ));
+                    }
+                }
+            }
+
+            if let Some(ref expected) = self.expected_resource {
+                match &proof.payload.actx.resource {
+                    Some(resource) if resource != expected => {
+                        return Err(CatError::DpopValidationFailed(format!(
+                            "DPoP proof resource '{}' does not match expected '{}'",
+                            resource, expected
+                        )));
+                    }
+                    None => {
+                        return Err(CatError::DpopValidationFailed(
+                            "DPoP proof missing required resource binding".to_string(),
+                        ));
+                    }
+                    _ => {}
+                }
+            }
+
+            // CAT-4-MOQT requires the resource URI, if present, to be
+            // consistent with the tns/tn fields of the same proof AND with
+            // the relay endpoint handling this request. A proof carrying a
+            // resource for another relay endpoint must not authorize this
+            // one, even when tns/tn happen to match — otherwise a hostile
+            // holder could take a proof it obtained against relay A and
+            // replay it at relay B by presenting a token whose audience
+            // permits both.
+            if let Some(resource) = proof.payload.actx.resource.as_deref() {
+                let parsed = parse_moqt_resource_uri(resource)?;
+                if parsed.endpoint != ctx.relay_endpoint {
+                    return Err(CatError::DpopValidationFailed(format!(
+                        "DPoP proof resource endpoint '{}' does not match relay '{}'",
+                        parsed.endpoint, ctx.relay_endpoint
+                    )));
+                }
+                if let Some(ref ns) = parsed.namespace
+                    && proof.payload.actx.tns != *ns
+                {
+                    return Err(CatError::DpopValidationFailed(
+                        "DPoP proof resource namespace tuple disagrees with actx.tns".to_string(),
+                    ));
+                }
+                if let Some(ref tn) = parsed.track
+                    && &proof.payload.actx.tn != tn
+                {
+                    return Err(CatError::DpopValidationFailed(
+                        "DPoP proof resource track disagrees with actx.tn".to_string(),
+                    ));
+                }
+                enforce_resource_shape(ctx.action, &parsed)?;
+            }
+
+            // Whether or not the proof carries a resource URI, the fields
+            // that DO appear in it (or in actx.tns/actx.tn) must be
+            // action-appropriate. A setup action carrying a namespace or
+            // track is malformed; a track action missing a track name is
+            // ambiguous. This guard runs even when the proof omits the
+            // resource URI, using actx directly.
+            enforce_actx_shape(ctx.action, &proof.payload.actx)?;
+
+            // RFC 9449 §8 nonce challenge. When the relay has pinned an
+            // expected nonce for this request the proof MUST carry it
+            // verbatim. Missing nonce or mismatch is treated the same —
+            // both indicate the client did not obey the server's
+            // rotation, and continuing would trust an unrotated proof.
+            if let Some(expected) = ctx.expected_dpop_nonce.as_deref() {
+                match proof.payload.nonce.as_deref() {
+                    Some(actual) if actual == expected => {}
+                    Some(_) => {
+                        return Err(CatError::DpopValidationFailed(
+                            "DPoP proof nonce does not match server challenge".to_string(),
+                        ));
+                    }
+                    None => {
+                        return Err(CatError::DpopValidationFailed(
+                            "DPoP proof missing required server nonce".to_string(),
+                        ));
+                    }
+                }
+            }
+
+            validator.dpop_commit_key(proof, &cnf.jkt, issuer)
+        } else {
+            None
+        };
+
+        Ok(PreCommit {
+            scope_index,
+            renewal: claims.request.catr.clone(),
+            revalidation: claims.moqt.moqt_reval,
+            jti_commit: dpop_commit,
+            replay: replay_obligation,
+        })
     }
 
-    /// Check if a scope matches the request
-    fn scope_matches(&self, scope: &MoqtScope, request: &MoqtAuthRequest) -> bool {
-        // Check if action is allowed
-        if !scope.allows_action(&request.action) {
+    /// Sync commit phase. All authorization checks in
+    /// [`Self::authorize_precommit`] have passed by the time this runs;
+    /// this method touches the two replay stores in the JTI-then-`cti`
+    /// order documented on [`Self::authorize`]. The async equivalent is
+    /// [`crate::r#async::AsyncMoqtValidator::commit_async`].
+    ///
+    /// Commit the in-memory DPoP JTI first, then the CAT cti. The two
+    /// stores are independent; without a two-phase transaction the crate
+    /// must pick an ordering. JTI first is safer because:
+    ///   - The default JTI store is in-process and rarely fails
+    ///     transiently (lock poisoning is the only real failure surface).
+    ///   - The `cti` store is often a distributed backend behind the
+    ///     `ReplayGuard` trait and its failures can be transient.
+    ///   - If the cti commit fails after JTI commit, the client retries
+    ///     with a fresh JTI (required per RFC 9449) so no state is
+    ///     leaked: the second attempt sees a virgin cti store and
+    ///     succeeds. The reverse ordering (cti first) would leave the
+    ///     cti consumed on a JTI failure and turn every transient JTI
+    ///     hiccup into a permanent replay error on the caller's retry.
+    ///   - If a caller needs strict atomicity between the two stores,
+    ///     they can bind both to the same backend behind `ReplayGuard`
+    ///     and issue a single transactional commit inside
+    ///     `check_and_record`.
+    pub fn commit<G: ReplayGuard + ?Sized>(
+        &self,
+        _claims: &CatToken,
+        pre: PreCommit,
+        replay_guard: Option<&G>,
+    ) -> Result<AuthorizedRequest, CatError> {
+        if let Some((key, iat)) = pre.jti_commit.clone() {
+            let validator = self.dpop_validator.as_ref().ok_or_else(|| {
+                CatError::DpopValidationFailed(
+                    "DPoP JTI commit requested but validator not configured".to_string(),
+                )
+            })?;
+            validator.jti_store().check_and_insert(key, iat)?;
+        }
+
+        let reuse_detected = match pre.replay.clone() {
+            Some(CatReplayObligation::Prohibited(cti)) => {
+                let guard = replay_guard.ok_or_else(|| {
+                    CatError::InvalidClaimValue(
+                        "token asserts catreplay but no replay guard configured".to_string(),
+                    )
+                })?;
+                if guard.check_and_record(&cti)? {
+                    return Err(CatError::ReplayAttackDetected);
+                }
+                false
+            }
+            Some(CatReplayObligation::ReuseDetection(cti)) => {
+                let guard = replay_guard.ok_or_else(|| {
+                    CatError::InvalidClaimValue(
+                        "token asserts catreplay but no replay guard configured".to_string(),
+                    )
+                })?;
+                guard.check_and_record(&cti)?
+            }
+            None => false,
+        };
+
+        Ok(pre.finalize(reuse_detected))
+    }
+
+    /// Look up the `catif` action associated with a given claim key. Callers
+    /// can consult this on error to construct a client response consistent
+    /// with the token's `catif` directives.
+    pub fn catif_action_for(token: &CatToken, claim_key: i64) -> Option<&CatIfAction> {
+        token.request.catif.as_ref().and_then(|actions| {
+            actions
+                .iter()
+                .find(|(k, _)| *k == claim_key)
+                .map(|(_, a)| a)
+        })
+    }
+
+    fn match_scope_index(&self, token: &CatToken, ctx: &RelayRequestContext) -> Option<usize> {
+        let scopes = token.moqt.moqt.as_ref()?;
+        scopes
+            .iter()
+            .position(|scope| self.scope_matches(scope, ctx))
+    }
+
+    fn scope_matches(&self, scope: &MoqtScope, ctx: &RelayRequestContext) -> bool {
+        if !scope.allows_action(&ctx.action) {
             return false;
         }
 
-        // Check namespace matches
         // "Matches are performed bytewise against the corresponding field of the Full Track Name"
         if !scope.namespace_matches.is_empty() {
             for (i, ns_match) in scope.namespace_matches.iter().enumerate() {
-                let tuple_elem = request.namespace.get(i).map(|v| v.as_slice());
+                let tuple_elem = ctx.namespace.get(i).map(|v| v.as_slice());
                 if !ns_match.matches(tuple_elem) {
                     return false;
                 }
             }
         }
 
-        // Check track match
         if let Some(ref track_match) = scope.track_match
-            && !track_match.matches(&request.track)
+            && !track_match.matches(&ctx.track)
         {
             return false;
         }
@@ -422,22 +1010,223 @@ pub mod roles {
     }
 }
 
+/// Parsed components of a `moqt://<endpoint>[?tns=<b64seg1>,<b64seg2>...[&tn=<b64>]]`
+/// resource URI as produced by [`crate::dpop::construct_moqt_uri`]. Used to
+/// cross-validate a DPoP proof's `actx.resource` against its own
+/// `actx.tns`/`actx.tn`.
+///
+/// The parser accepts only the strict shape emitted by the constructor. A
+/// resource URI with additional query parameters, path components, fragments,
+/// or a scheme other than `moqt://` is rejected as invalid form rather than
+/// silently ignored, so a hostile proof cannot smuggle a mismatched target
+/// through fields the crate does not inspect.
+struct MoqtResourceUri {
+    endpoint: String,
+    /// The namespace tuple, one `Vec<u8>` per tuple segment. `None` means the
+    /// resource URI did not carry a namespace at all.
+    namespace: Option<Vec<Vec<u8>>>,
+    track: Option<Vec<u8>>,
+}
+
+fn parse_moqt_resource_uri(uri: &str) -> Result<MoqtResourceUri, CatError> {
+    use base64::Engine as _;
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+
+    let rest = uri.strip_prefix("moqt://").ok_or_else(|| {
+        CatError::DpopValidationFailed(format!(
+            "DPoP proof resource must start with moqt://; got '{uri}'"
+        ))
+    })?;
+    if rest.contains('#') || rest.contains('/') {
+        return Err(CatError::DpopValidationFailed(
+            "DPoP proof resource must not contain '#' or '/'".to_string(),
+        ));
+    }
+    let (endpoint, query) = match rest.split_once('?') {
+        Some((ep, q)) => (ep.to_string(), Some(q)),
+        None => (rest.to_string(), None),
+    };
+    if endpoint.is_empty() {
+        return Err(CatError::DpopValidationFailed(
+            "DPoP proof resource endpoint is empty".to_string(),
+        ));
+    }
+    let mut namespace: Option<Vec<Vec<u8>>> = None;
+    let mut track: Option<Vec<u8>> = None;
+    if let Some(q) = query {
+        for pair in q.split('&') {
+            let (k, v) = pair.split_once('=').ok_or_else(|| {
+                CatError::DpopValidationFailed(
+                    "DPoP proof resource query segment has no '='".to_string(),
+                )
+            })?;
+            match k {
+                "tns" if namespace.is_none() => {
+                    if v.is_empty() {
+                        return Err(CatError::DpopValidationFailed(
+                            "DPoP proof resource tns value is empty".to_string(),
+                        ));
+                    }
+                    let mut segments: Vec<Vec<u8>> = Vec::new();
+                    for seg in v.split(',') {
+                        let decoded = URL_SAFE_NO_PAD.decode(seg).map_err(|e| {
+                            CatError::DpopValidationFailed(format!(
+                                "DPoP proof resource tns segment base64 decode: {e}"
+                            ))
+                        })?;
+                        segments.push(decoded);
+                    }
+                    namespace = Some(segments);
+                }
+                "tn" if track.is_none() => {
+                    let decoded = URL_SAFE_NO_PAD.decode(v).map_err(|e| {
+                        CatError::DpopValidationFailed(format!(
+                            "DPoP proof resource tn base64 decode: {e}"
+                        ))
+                    })?;
+                    track = Some(decoded);
+                }
+                _ => {
+                    return Err(CatError::DpopValidationFailed(format!(
+                        "DPoP proof resource has unexpected or repeated query key '{k}'"
+                    )));
+                }
+            }
+        }
+    }
+    if track.is_some() && namespace.is_none() {
+        return Err(CatError::DpopValidationFailed(
+            "DPoP proof resource carries tn without tns".to_string(),
+        ));
+    }
+    Ok(MoqtResourceUri {
+        endpoint,
+        namespace,
+        track,
+    })
+}
+
+/// Reject resource URIs whose shape doesn't match the requested action.
+/// Setup actions must not name a namespace or track; namespace actions must
+/// name a namespace but no track; track actions must name both.
+fn enforce_resource_shape(action: MoqtAction, parsed: &MoqtResourceUri) -> Result<(), CatError> {
+    use crate::MoqtResourceShape::*;
+    match action.resource_shape() {
+        Endpoint => {
+            if parsed.namespace.is_some() || parsed.track.is_some() {
+                return Err(CatError::DpopValidationFailed(format!(
+                    "DPoP proof resource carries namespace/track for setup action {:?}",
+                    action
+                )));
+            }
+        }
+        Namespace => {
+            if parsed.namespace.is_none() {
+                return Err(CatError::DpopValidationFailed(format!(
+                    "DPoP proof resource missing namespace for {:?}",
+                    action
+                )));
+            }
+            if parsed.track.is_some() {
+                return Err(CatError::DpopValidationFailed(format!(
+                    "DPoP proof resource carries track for namespace action {:?}",
+                    action
+                )));
+            }
+        }
+        Track => {
+            if parsed.namespace.is_none() || parsed.track.is_none() {
+                return Err(CatError::DpopValidationFailed(format!(
+                    "DPoP proof resource missing namespace or track for track action {:?}",
+                    action
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Reject `actx` maps whose shape doesn't match the requested action. Runs
+/// unconditionally so a proof that omits the optional `resource` URI still
+/// cannot smuggle e.g. a track name into a setup action.
+fn enforce_actx_shape(
+    action: MoqtAction,
+    actx: &crate::dpop::AuthorizationContext,
+) -> Result<(), CatError> {
+    use crate::MoqtResourceShape::*;
+    match action.resource_shape() {
+        Endpoint => {
+            if !actx.tns.is_empty() {
+                return Err(CatError::DpopValidationFailed(format!(
+                    "DPoP actx carries namespace for setup action {:?}",
+                    action
+                )));
+            }
+            if !actx.tn.is_empty() {
+                return Err(CatError::DpopValidationFailed(format!(
+                    "DPoP actx carries track for setup action {:?}",
+                    action
+                )));
+            }
+        }
+        Namespace => {
+            if actx.tns.is_empty() {
+                return Err(CatError::DpopValidationFailed(format!(
+                    "DPoP actx missing namespace for {:?}",
+                    action
+                )));
+            }
+            if !actx.tn.is_empty() {
+                return Err(CatError::DpopValidationFailed(format!(
+                    "DPoP actx carries track for namespace action {:?}",
+                    action
+                )));
+            }
+        }
+        Track => {
+            if actx.tns.is_empty() || actx.tn.is_empty() {
+                return Err(CatError::DpopValidationFailed(format!(
+                    "DPoP actx missing namespace or track for track action {:?}",
+                    action
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::CatTokenBuilder;
+    use crate::{CatTokenBuilder, ValidatedToken};
+
+    fn ctx(action: MoqtAction, ns: Vec<Vec<u8>>, track: Vec<u8>) -> RelayRequestContext {
+        RelayRequestContext::new("relay", action, ns, track)
+    }
 
     #[test]
-    fn test_moqt_auth_request() {
-        let request = MoqtAuthRequest::new(
+    fn test_relay_request_context() {
+        let request = ctx(
             MoqtAction::Publish,
             vec![b"example.com".to_vec()],
             b"/stream/video".to_vec(),
         );
-
         assert_eq!(request.action, MoqtAction::Publish);
         assert_eq!(request.namespace, vec![b"example.com".to_vec()]);
         assert_eq!(request.track, b"/stream/video".to_vec());
+    }
+
+    fn authorize_no_guard(
+        validator: &MoqtValidator,
+        token: &CatToken,
+        request: &RelayRequestContext,
+    ) -> Result<AuthorizedRequest, CatError> {
+        validator.authorize::<dyn ReplayGuard>(
+            &ValidatedToken::from_unchecked(token.clone()),
+            request,
+            None,
+            None,
+        )
     }
 
     #[test]
@@ -450,46 +1239,49 @@ mod tests {
 
         let token = CatTokenBuilder::new()
             .issuer("https://test.com")
+            .single_audience("relay")
             .moqt_scope(scope)
-            .build();
+            .build()
+            .unwrap();
 
         let validator = MoqtValidator::new();
 
-        // Should allow
-        let request = MoqtAuthRequest::new(
+        let request = ctx(
             MoqtAction::Publish,
             vec![b"example.com".to_vec()],
             b"/stream/video".to_vec(),
         );
-        let result = validator.authorize(&token, &request);
-        assert!(result.authorized);
+        assert!(authorize_no_guard(&validator, &token, &request).is_ok());
 
-        // Should deny (wrong action)
-        let request = MoqtAuthRequest::new(
+        let request = ctx(
             MoqtAction::Fetch,
             vec![b"example.com".to_vec()],
             b"/stream/video".to_vec(),
         );
-        let result = validator.authorize(&token, &request);
-        assert!(!result.authorized);
+        assert!(matches!(
+            authorize_no_guard(&validator, &token, &request),
+            Err(CatError::MoqtActionNotAuthorized(_))
+        ));
 
-        // Should deny (wrong namespace)
-        let request = MoqtAuthRequest::new(
+        let request = ctx(
             MoqtAction::Publish,
             vec![b"other.com".to_vec()],
             b"/stream/video".to_vec(),
         );
-        let result = validator.authorize(&token, &request);
-        assert!(!result.authorized);
+        assert!(matches!(
+            authorize_no_guard(&validator, &token, &request),
+            Err(CatError::MoqtActionNotAuthorized(_))
+        ));
 
-        // Should deny (wrong track)
-        let request = MoqtAuthRequest::new(
+        let request = ctx(
             MoqtAction::Publish,
             vec![b"example.com".to_vec()],
             b"/other/video".to_vec(),
         );
-        let result = validator.authorize(&token, &request);
-        assert!(!result.authorized);
+        assert!(matches!(
+            authorize_no_guard(&validator, &token, &request),
+            Err(CatError::MoqtActionNotAuthorized(_))
+        ));
     }
 
     #[test]
@@ -501,20 +1293,21 @@ mod tests {
 
         let token = CatTokenBuilder::new()
             .issuer("https://test.com")
+            .single_audience("relay")
             .moqt_scope(scope)
             .moqt_reval(300.0)
-            .build();
+            .build()
+            .unwrap();
 
         let validator = MoqtValidator::new();
 
-        let request = MoqtAuthRequest::new(
+        let request = ctx(
             MoqtAction::Publish,
             vec![b"example.com".to_vec()],
             b"/stream".to_vec(),
         );
-        let result = validator.authorize(&token, &request);
+        let result = authorize_no_guard(&validator, &token, &request).unwrap();
 
-        assert!(result.authorized);
         assert!(result.requires_revalidation);
         assert_eq!(result.revalidation_interval, Some(300.0));
     }
@@ -530,7 +1323,8 @@ mod tests {
             .issuer("https://test.com")
             .moqt_scope(scope)
             .moqt_reval(300.0)
-            .build();
+            .build()
+            .unwrap();
 
         let validator = MoqtValidator::new().without_revalidation_support();
 
@@ -549,7 +1343,8 @@ mod tests {
             .issuer("https://test.com")
             .moqt_scope(scope)
             .moqt_reval(60.0) // 1 minute
-            .build();
+            .build()
+            .unwrap();
 
         let validator = MoqtValidator::new().with_min_revalidation_interval(300.0); // 5 minutes minimum
 
@@ -557,6 +1352,32 @@ mod tests {
         assert!(matches!(
             result,
             Err(CatError::RevalidationIntervalTooShort)
+        ));
+    }
+
+    #[test]
+    fn test_missing_audience_rejected_by_default() {
+        let scope = MoqtScopeBuilder::new()
+            .publisher()
+            .namespace_exact(b"example.com")
+            .build();
+
+        let token = CatTokenBuilder::new()
+            .issuer("https://test.com")
+            .moqt_scope(scope)
+            .build()
+            .unwrap();
+
+        let validator = MoqtValidator::new();
+        let request = ctx(
+            MoqtAction::Publish,
+            vec![b"example.com".to_vec()],
+            b"/stream".to_vec(),
+        );
+        let result = authorize_no_guard(&validator, &token, &request);
+        assert!(matches!(
+            result,
+            Err(CatError::MissingRequiredClaim(ref c)) if c == "aud"
         ));
     }
 
@@ -580,7 +1401,6 @@ mod tests {
 
     #[test]
     fn test_first_match_wins() {
-        // Create two scopes - first denies Fetch, second allows it
         let scope1 = MoqtScopeBuilder::new()
             .action(MoqtAction::Publish)
             .namespace_exact(b"example.com")
@@ -595,29 +1415,27 @@ mod tests {
 
         let token = CatTokenBuilder::new()
             .issuer("https://test.com")
+            .single_audience("relay")
             .moqt_scopes(vec![scope1, scope2])
-            .build();
+            .build()
+            .unwrap();
 
         let validator = MoqtValidator::new();
 
-        // Publish should match scope 0
-        let request = MoqtAuthRequest::new(
+        let request = ctx(
             MoqtAction::Publish,
             vec![b"example.com".to_vec()],
             b"/stream/1".to_vec(),
         );
-        let result = validator.authorize(&token, &request);
-        assert!(result.authorized);
-        assert_eq!(result.matched_scope_index, Some(0));
+        let result = authorize_no_guard(&validator, &token, &request).unwrap();
+        assert_eq!(result.matched_scope_index, 0);
 
-        // Fetch should match scope 1
-        let request = MoqtAuthRequest::new(
+        let request = ctx(
             MoqtAction::Fetch,
             vec![b"example.com".to_vec()],
             b"/stream/1".to_vec(),
         );
-        let result = validator.authorize(&token, &request);
-        assert!(result.authorized);
-        assert_eq!(result.matched_scope_index, Some(1));
+        let result = authorize_no_guard(&validator, &token, &request).unwrap();
+        assert_eq!(result.matched_scope_index, 1);
     }
 }

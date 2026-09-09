@@ -50,7 +50,7 @@ type HmacSha256 = Hmac<Sha256>;
 /// Minimum RSA key size in bytes (2048 bits = 256 bytes)
 pub const MIN_RSA_KEY_SIZE: usize = 256;
 
-pub trait CryptographicAlgorithm {
+pub trait CryptographicAlgorithm: Send + Sync {
     fn sign(&self, data: &[u8]) -> Result<Vec<u8>, CatError>;
     fn verify(&self, data: &[u8], signature: &[u8]) -> Result<(), CatError>;
     fn algorithm_id(&self) -> i64;
@@ -196,6 +196,7 @@ impl CryptographicAlgorithm for Es256Algorithm {
 pub struct Ps256Algorithm {
     signing_key: Option<RsaSigningKey<Sha256>>,
     public_key: RsaPublicKey,
+    verifying_key: RsaVerifyingKey<Sha256>,
 }
 
 impl Ps256Algorithm {
@@ -206,9 +207,11 @@ impl Ps256Algorithm {
         let public_key = RsaPublicKey::from(&private_key);
         let signing_key = RsaSigningKey::<Sha256>::new(private_key);
 
+        let verifying_key = RsaVerifyingKey::<Sha256>::new(public_key.clone());
         Ok(Self {
             signing_key: Some(signing_key),
             public_key,
+            verifying_key,
         })
     }
 
@@ -221,9 +224,11 @@ impl Ps256Algorithm {
                 MIN_RSA_KEY_SIZE
             )));
         }
+        let verifying_key = RsaVerifyingKey::<Sha256>::new(public_key.clone());
         Ok(Self {
             signing_key: None,
             public_key,
+            verifying_key,
         })
     }
 
@@ -245,11 +250,10 @@ impl CryptographicAlgorithm for Ps256Algorithm {
     }
 
     fn verify(&self, data: &[u8], signature: &[u8]) -> Result<(), CatError> {
-        let verifying_key = RsaVerifyingKey::<Sha256>::new(self.public_key.clone());
         let signature = rsa::pss::Signature::try_from(signature)
             .map_err(|e| CatError::CryptoError(e.to_string()))?;
 
-        verifying_key
+        self.verifying_key
             .verify(data, &signature)
             .map_err(|_| CatError::SignatureVerificationFailed)
     }

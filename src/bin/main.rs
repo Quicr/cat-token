@@ -75,7 +75,7 @@ fn generate_hmac_example() -> Result<(), Box<dyn std::error::Error>> {
         encode_token_base64(&token, &algorithm)?
     );
 
-    let decoded = decode_token(&encoded, &algorithm)?;
+    let decoded = decode_token(&encoded, &algorithm)?.into_unvalidated_token();
     println!("Token verified and decoded successfully!");
     println!("Issuer: {:?}", decoded.core.iss);
     println!("Audience: {:?}", decoded.core.aud);
@@ -101,7 +101,7 @@ fn generate_es256_example() -> Result<(), Box<dyn std::error::Error>> {
         encode_token_base64(&token, &algorithm)?
     );
 
-    let decoded = decode_token(&encoded, &algorithm)?;
+    let decoded = decode_token(&encoded, &algorithm)?.into_unvalidated_token();
     println!("Token verified and decoded successfully!");
     println!("Issuer: {:?}", decoded.core.iss);
     println!("Audience: {:?}", decoded.core.aud);
@@ -127,7 +127,7 @@ fn generate_ps256_example() -> Result<(), Box<dyn std::error::Error>> {
         encode_token_base64(&token, &algorithm)?
     );
 
-    let decoded = decode_token(&encoded, &algorithm)?;
+    let decoded = decode_token(&encoded, &algorithm)?.into_unvalidated_token();
     println!("Token verified and decoded successfully!");
     println!("Issuer: {:?}", decoded.core.iss);
     println!("Audience: {:?}", decoded.core.aud);
@@ -204,7 +204,7 @@ fn generate_moqt_token(args: &[String]) -> Result<(), Box<dyn std::error::Error>
         .expires_in(expires)
         .moqt_scope(scope)
         .moqt_scope(setup_scope)
-        .build();
+        .build()?;
 
     let encoded = encode_token_base64(&token, &algorithm)?;
     println!("{encoded}");
@@ -224,7 +224,8 @@ fn create_sample_token() -> CatToken {
         .cwt_id(uuid::Uuid::new_v4().as_bytes().to_vec())
         .version(1)
         .replay_protection(cat_token::ReplayProtection::Prohibited)
-        .geo_coordinate(37.7749, -122.4194, Some(100))
+        .geo_coordinate(37.7749, -122.4194, 100)
         .geohash("9q8yy")
         .build()
+        .unwrap()
 }

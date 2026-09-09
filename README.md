@@ -5,7 +5,14 @@
 
 **Linux** [![Ubuntu](https://github.com/Quicr/cat-token/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/Quicr/cat-token/actions/workflows/ci.yml?query=branch%3Amain+os%3Aubuntu-latest) | **macOS** [![macOS](https://github.com/Quicr/cat-token/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/Quicr/cat-token/actions/workflows/ci.yml?query=branch%3Amain+os%3Amacos-latest) | **Windows** [![Windows](https://github.com/Quicr/cat-token/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/Quicr/cat-token/actions/workflows/ci.yml?query=branch%3Amain+os%3Awindows-latest) | [![License](https://img.shields.io/badge/License-BSD_2--Clause-blue.svg)](https://opensource.org/licenses/BSD-2-Clause)
 
-Rust implementation of [Common Access Token for Media Over QUIC Transport (CAT-4-MOQT)](https://github.com/moq-wg/CAT-4-MOQT) based on [CTA-5007-B](https://shop.cta.tech/products/common-access-token).
+Rust implementation of a **strict, fail-closed profile** of
+[Common Access Token for Media Over QUIC Transport (CAT-4-MOQT)](https://github.com/moq-wg/CAT-4-MOQT)
+built on [CTA-5007-B](https://shop.cta.tech/products/common-access-token).
+This is not a full CTA-5007-B recipient: anywhere the base spec allows
+multiple encodings of the same semantic content, this crate accepts one
+form and rejects the rest. See [docs/PROFILE.md](docs/PROFILE.md) for the
+supported-form matrix, the authorization contract, and interoperability
+non-goals.
 
 ## Installation
 
@@ -15,9 +22,9 @@ cargo add cat-token
 
 ## Features
 
-- Full CTA-5007-B CAT token support with CBOR/CWT encoding
+- Strict narrow-profile CAT recipient over CBOR/CWT (single-form parser, fail-closed authorization; see [docs/PROFILE.md](docs/PROFILE.md))
 - MOQT-specific claims: namespace/track authorization with binary matching
-- DPoP (Demonstrating Proof-of-Possession) support per RFC 9449
+- DPoP (Demonstrating Proof-of-Possession) — CWT profile (draft-nandakumar-moq-generic-dpop-proof-00) and RFC 9449 JWT compact form
 - Cryptographic algorithms: HMAC-SHA256, ES256, PS256
 - COSE_Encrypt0 encryption (AES-128-GCM, AES-256-GCM)
 - URI and header matching with exact, prefix, suffix, contains, regex (POSIX ERE), SHA-256, and SHA-512/256 match types
@@ -91,10 +98,34 @@ cargo run --example relay_validator --features moqt
 ```bash
 # Generate MOQT tokens
 cargo run --bin cat-cli -- moqt-token --key private.pem --endpoint relay.example.com
-
-# Generate test vectors
-cargo run --bin generate-test-vectors
 ```
+
+## Test vectors
+
+`cat-token` owns the reference vectors for `draft-ietf-moq-c4m`
+Appendix A. The `generate-test-vectors` binary drives three modes,
+all backed by the same deterministic generator:
+
+```bash
+# Emit JSON fixtures (default). Writes tests/test_data/*.json.
+cargo run --bin generate-test-vectors --features moqt
+
+# Emit an Appendix-A-shaped markdown block that can be pasted
+# verbatim into draft-ietf-moq-c4m.md. Hex fields stay on a single
+# line so the draft cannot introduce mid-hex whitespace on paste.
+cargo run --bin generate-test-vectors --features moqt -- --emit draft-md
+
+# Verify that the draft's embedded vectors still match cat.rs.
+# Default source is https://raw.githubusercontent.com/moq-wg/CAT-4-MOQT/main/draft-ietf-moq-c4m.md.
+cargo run --bin generate-test-vectors --features moqt -- --verify
+cargo run --bin generate-test-vectors --features moqt -- --verify --from-file /path/to/draft.md
+```
+
+CI runs the emitter as a strict self-check on every push, plus an
+advisory drift check against the live draft `main`. See
+[`docs/TEST-VECTORS.md`](docs/TEST-VECTORS.md) for the full workflow,
+determinism guarantees, exit-code semantics, and the list of
+recognised vector categories.
 
 ## Quick Start
 
@@ -148,7 +179,22 @@ let ro_scope = roles::read_only(b"example.com", b"/archive/");
 
 ## Standards Compliance
 
-Full compliance with CTA-5007-B and all referenced standards. See [`docs/std-compliance-req.md`](docs/std-compliance-req.md) for the detailed compliance matrix.
+This crate implements a **narrow, deterministic, fail-closed profile** of
+CTA-5007-B. It is not a full CTA-5007-B recipient: anywhere the base spec
+allows multiple representational forms for the same semantic content, this
+crate accepts exactly one form and rejects the rest. See
+[`docs/PROFILE.md`](docs/PROFILE.md) for the supported-forms matrix and
+per-claim rules.
+
+Note also that:
+
+- `cattpk` is a *pin* post-check that runs after a caller-supplied
+  `PathValidator` has authenticated the peer certificate. The crate does not
+  implement RFC 5280 path validation; deploy it downstream of a real
+  X.509 path validator.
+- Distributed replay coherence is out of scope. The bundled `ReplayGuard`
+  implementation is in-memory only; production deployments must supply a
+  distributed backend behind the `ReplayGuard` trait.
 
 ## License
 

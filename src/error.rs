@@ -76,4 +76,13 @@ pub enum CatError {
 
     #[error("Certificate validation failed: {0}")]
     CertificateValidationFailed(String),
+
+    #[error("DPoP algorithm not supported: {0}")]
+    DpopAlgorithmNotSupported(String),
+
+    #[error("DPoP key mismatch: embedded JWK thumbprint does not match expected")]
+    DpopKeyMismatch,
+
+    #[error("Privacy-sensitive claim {0} requires encryption")]
+    UnencryptedPrivacyClaim(String),
 }

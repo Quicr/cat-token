@@ -12,7 +12,9 @@ fn test_cti_utf8_string_roundtrip() {
         .with_cwt_id_str("my-token-id");
 
     let encoded = encode_token(&token, &algorithm).unwrap();
-    let decoded = decode_token(&encoded, &algorithm).unwrap();
+    let decoded = decode_token(&encoded, &algorithm)
+        .unwrap()
+        .into_unvalidated_token();
 
     assert_eq!(decoded.core.cti, Some(b"my-token-id".to_vec()));
 }
@@ -28,7 +30,9 @@ fn test_cti_arbitrary_bytes_roundtrip() {
         .with_cwt_id(cti_bytes.clone());
 
     let encoded = encode_token(&token, &algorithm).unwrap();
-    let decoded = decode_token(&encoded, &algorithm).unwrap();
+    let decoded = decode_token(&encoded, &algorithm)
+        .unwrap()
+        .into_unvalidated_token();
 
     assert_eq!(decoded.core.cti, Some(cti_bytes));
 }
@@ -44,7 +48,9 @@ fn test_cti_uuid_bytes() {
         .with_cwt_id(uuid_bytes.clone());
 
     let encoded = encode_token(&token, &algorithm).unwrap();
-    let decoded = decode_token(&encoded, &algorithm).unwrap();
+    let decoded = decode_token(&encoded, &algorithm)
+        .unwrap()
+        .into_unvalidated_token();
 
     assert_eq!(decoded.core.cti, Some(uuid_bytes));
 }
@@ -57,13 +63,19 @@ fn test_cti_empty_bytes() {
 
 #[test]
 fn test_builder_cwt_id_str() {
-    let token = CatTokenBuilder::new().cwt_id_str("test-id").build();
+    let token = CatTokenBuilder::new()
+        .cwt_id_str("test-id")
+        .build()
+        .unwrap();
     assert_eq!(token.core.cti, Some(b"test-id".to_vec()));
 }
 
 #[test]
 fn test_builder_cwt_id_bytes() {
     let bytes = vec![0xDE, 0xAD, 0xBE, 0xEF];
-    let token = CatTokenBuilder::new().cwt_id(bytes.clone()).build();
+    let token = CatTokenBuilder::new()
+        .cwt_id(bytes.clone())
+        .build()
+        .unwrap();
     assert_eq!(token.core.cti, Some(bytes));
 }

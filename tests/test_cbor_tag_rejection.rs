@@ -83,10 +83,16 @@ fn test_catnip_with_proper_tags_still_works() {
     let key = HmacSha256Algorithm::generate_key().unwrap();
     let alg = HmacSha256Algorithm::from_secret_key(&key);
 
-    let token = CatTokenBuilder::new().ip_address("192.168.1.1").build();
+    let token = CatTokenBuilder::new()
+        .ip_address("192.168.1.1")
+        .unwrap()
+        .build()
+        .unwrap();
 
     let encoded = encode_token(&token, &alg).unwrap();
-    let decoded = decode_token(&encoded, &alg).unwrap();
+    let decoded = decode_token(&encoded, &alg)
+        .unwrap()
+        .into_unvalidated_token();
     assert!(decoded.cat.catnip.is_some());
 }
 
@@ -96,10 +102,13 @@ fn test_catgeocoord_with_crs_wrapper_still_works() {
     let alg = HmacSha256Algorithm::from_secret_key(&key);
 
     let token = CatTokenBuilder::new()
-        .geo_coordinate(45.5, -90.5, Some(1000))
-        .build();
+        .geo_coordinate(45.5, -90.5, 1000)
+        .build()
+        .unwrap();
 
     let encoded = encode_token(&token, &alg).unwrap();
-    let decoded = decode_token(&encoded, &alg).unwrap();
+    let decoded = decode_token(&encoded, &alg)
+        .unwrap()
+        .into_unvalidated_token();
     assert!(decoded.cat.catgeocoord.is_some());
 }

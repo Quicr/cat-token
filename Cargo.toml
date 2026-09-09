@@ -1,9 +1,9 @@
 [package]
 name = "cat-token"
-version = "0.2.0"
+version = "0.4.3"
 edition = "2024"
 authors = ["Suhas Nandakumar"]
-description = "Implementation of CTA-5007-B Common Access Token specification"
+description = "Strict fail-closed profile of CTA-5007-B CAT and CAT-4-MOQT (see docs/PROFILE.md for supported claim forms and rejections)"
 license = "BSD-2-Clause"
 repository = "https://github.com/Quicr/cat-token"
 keywords = ["cat", "cwt", "cbor", "token", "authentication"]
@@ -22,7 +22,7 @@ p256 = { version = "0.13", features = ["ecdsa", "pem"] }
 rsa = { version = "0.9", features = ["sha2"] }
 thiserror = "1.0"
 zeroize = { version = "1.7", features = ["derive"] }
-lru = "0.16"
+lru = "0.18"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.0", features = ["v4", "serde"] }
 geohash = "0.13"
@@ -34,6 +34,13 @@ sfv = "0.9"
 # Optional qp-trie dependency
 qp-trie = { version = "0.8", optional = true }
 
+# Optional async trait support for AsyncJtiStore / AsyncReplayGuard.
+async-trait = { version = "0.1", optional = true }
+
+# `futures::future::join_all` used by `jti_contract::asynchronous` to
+# drive concurrent inserts without picking a runtime for the caller.
+futures = { version = "0.3", default-features = false, features = ["std", "async-await"], optional = true }
+
 [dependencies.regex]
 version = "1.10"
 
@@ -42,8 +49,10 @@ version = "0.4"
 
 [dev-dependencies]
 tokio-test = "0.4"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }
 criterion = { version = "0.5", features = ["html_reports"] }
 x509-cert = { version = "0.2", features = ["std", "builder"] }
+
 
 [lib]
 name = "cat_token"
@@ -52,14 +61,17 @@ path = "src/lib.rs"
 [[bin]]
 name = "cat-cli"
 path = "src/bin/main.rs"
+required-features = ["moqt"]
 
 [[bin]]
 name = "generate-test-vectors"
 path = "src/bin/generate_test_vectors.rs"
+required-features = ["moqt"]
 
 [[bench]]
 name = "token_bench"
 harness = false
+required-features = ["moqt"]
 
 [[bench]]
 name = "crypto_bench"
@@ -72,9 +84,38 @@ harness = false
 [[bench]]
 name = "trie_bench"
 harness = false
+required-features = ["builtin-trie"]
+
+[[bench]]
+name = "async_scale_bench"
+harness = false
+required-features = ["async"]
+
+[[example]]
+name = "quickstart"
+required-features = ["moqt"]
+
+[[example]]
+name = "relay_validator"
+required-features = ["moqt"]
+
+[[example]]
+name = "server_token_issuer"
+required-features = ["moqt"]
+
+[[example]]
+name = "generic_cat"
+
+[[example]]
+name = "async_relay_validator"
+required-features = ["async"]
 
 [features]
 default = ["builtin-trie", "moqt"]
 builtin-trie = []
 qp-trie = ["dep:qp-trie"]
 moqt = []
+# Adds AsyncJtiStore / AsyncReplayGuard / MoqtValidator::authorize_async so
+# relays can integrate cat-token into an async event loop without wrapping
+# every call in spawn_blocking. Requires moqt.
+async = ["moqt", "dep:async-trait", "dep:futures"]

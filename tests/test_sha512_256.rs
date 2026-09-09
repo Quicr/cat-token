@@ -18,7 +18,9 @@ fn test_sha512_256_match_roundtrip() {
         .with_uri_match_rules(rules.clone());
 
     let encoded = encode_token(&token, &algorithm).unwrap();
-    let decoded = decode_token(&encoded, &algorithm).unwrap();
+    let decoded = decode_token(&encoded, &algorithm)
+        .unwrap()
+        .into_unvalidated_token();
 
     assert_eq!(decoded.cat.catu, Some(rules));
 }
@@ -39,7 +41,9 @@ fn test_sha512_256_in_header_match() {
         .with_header_match_rules(rules.clone());
 
     let encoded = encode_token(&token, &algorithm).unwrap();
-    let decoded = decode_token(&encoded, &algorithm).unwrap();
+    let decoded = decode_token(&encoded, &algorithm)
+        .unwrap()
+        .into_unvalidated_token();
 
     assert_eq!(decoded.cat.cath, Some(rules));
 }
@@ -62,10 +66,13 @@ fn test_sha256_and_sha512_256_coexist() {
         .with_uri_match_rules(rules.clone());
 
     let encoded = encode_token(&token, &algorithm).unwrap();
-    let decoded = decode_token(&encoded, &algorithm).unwrap();
+    let decoded = decode_token(&encoded, &algorithm)
+        .unwrap()
+        .into_unvalidated_token();
 
     let decoded_rules = decoded.cat.catu.unwrap();
     assert_eq!(decoded_rules[0].matches.len(), 2);
+    // RFC 8949 §4.2.1 canonical: SHA256 (key -1) before SHA512_256 (key -2)
     assert!(matches!(decoded_rules[0].matches[0], MatchValue::Sha256(_)));
     assert!(matches!(
         decoded_rules[0].matches[1],

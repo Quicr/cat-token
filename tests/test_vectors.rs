@@ -4,6 +4,8 @@
 // Tests that validate against the deterministic test vectors in tests/test_data/.
 // These same vectors can be used by other CAT/MoQT implementations for interop testing.
 
+#![cfg(feature = "moqt")]
+
 use cat_token::*;
 use p256::ecdsa::{SigningKey, VerifyingKey};
 use serde_json::Value as JsonValue;
@@ -106,7 +108,9 @@ fn test_vector_cbor_network_identifiers() {
 
     let token = CatToken::new()
         .with_ip_address("192.168.1.100")
+        .unwrap()
         .with_ip_range("10.0.0.0/8")
+        .unwrap()
         .with_asn(64512)
         .with_asn_range(64512, 64768);
     let cwt = Cwt::new(ALG_HMAC256_256, token);
@@ -125,7 +129,7 @@ fn test_vector_cbor_geographic_claims() {
     assert_eq!(v["id"], "cbor_geographic_claims");
 
     let token = CatToken::new()
-        .with_geo_coordinate(37.7749, -122.4194, Some(100))
+        .with_geo_coordinate(37.7749, -122.4194, 100)
         .with_geohash("9q8yyk");
     let mut token = token;
     token.cat.catgeoiso3166 = Some(vec!["US".to_string(), "CA".to_string()]);
@@ -202,7 +206,9 @@ fn test_vector_token_hmac_minimal() {
     let alg = HmacSha256Algorithm::new(&hmac_key());
     let cose_bytes = cose_bytes_from_vector(v);
 
-    let decoded = decode_token(&cose_bytes, &alg).unwrap();
+    let decoded = decode_token(&cose_bytes, &alg)
+        .unwrap()
+        .into_unvalidated_token();
     assert_eq!(
         decoded.core.iss.as_deref(),
         Some("https://auth.example.com")
@@ -244,7 +250,9 @@ fn test_vector_token_hmac_full() {
     let alg = HmacSha256Algorithm::new(&hmac_key());
     let cose_bytes = cose_bytes_from_vector(v);
 
-    let decoded = decode_token(&cose_bytes, &alg).unwrap();
+    let decoded = decode_token(&cose_bytes, &alg)
+        .unwrap()
+        .into_unvalidated_token();
     assert_eq!(
         decoded.core.iss.as_deref(),
         Some("https://issuer.moq.example")
@@ -280,7 +288,9 @@ fn test_vector_token_es256() {
     let alg = es256_algorithm();
     let cose_bytes = cose_bytes_from_vector(v);
 
-    let decoded = decode_token(&cose_bytes, &alg).unwrap();
+    let decoded = decode_token(&cose_bytes, &alg)
+        .unwrap()
+        .into_unvalidated_token();
     assert_eq!(
         decoded.core.iss.as_deref(),
         Some("https://auth.example.com")
@@ -367,13 +377,15 @@ fn test_vector_moqt_publisher_exact() {
 
     let alg = HmacSha256Algorithm::new(&hmac_key());
     let cose_bytes = cose_bytes_from_vector(v);
-    let decoded = decode_token(&cose_bytes, &alg).unwrap();
+    let decoded = decode_token(&cose_bytes, &alg)
+        .unwrap()
+        .into_unvalidated_token();
 
     let scopes = decoded.moqt.moqt.as_ref().unwrap();
     assert_eq!(scopes.len(), 1);
-    assert_eq!(scopes[0].actions.len(), 2);
-    assert!(scopes[0].actions.contains(&MoqtAction::PublishNamespace));
-    assert!(scopes[0].actions.contains(&MoqtAction::Publish));
+    assert_eq!(scopes[0].actions().len(), 2);
+    assert!(scopes[0].actions().contains(&MoqtAction::PublishNamespace));
+    assert!(scopes[0].actions().contains(&MoqtAction::Publish));
 
     for test in v["authorization_tests"].as_array().unwrap() {
         let action_id = test["action"].as_i64().unwrap() as i32;
@@ -411,11 +423,13 @@ fn test_vector_moqt_subscriber_prefix() {
 
     let alg = HmacSha256Algorithm::new(&hmac_key());
     let cose_bytes = cose_bytes_from_vector(v);
-    let decoded = decode_token(&cose_bytes, &alg).unwrap();
+    let decoded = decode_token(&cose_bytes, &alg)
+        .unwrap()
+        .into_unvalidated_token();
 
     let scopes = decoded.moqt.moqt.as_ref().unwrap();
     assert_eq!(scopes.len(), 1);
-    assert_eq!(scopes[0].actions.len(), 3);
+    assert_eq!(scopes[0].actions().len(), 3);
 
     for test in v["authorization_tests"].as_array().unwrap() {
         let action_id = test["action"].as_i64().unwrap() as i32;
@@ -453,7 +467,9 @@ fn test_vector_moqt_multi_scope() {
 
     let alg = HmacSha256Algorithm::new(&hmac_key());
     let cose_bytes = cose_bytes_from_vector(v);
-    let decoded = decode_token(&cose_bytes, &alg).unwrap();
+    let decoded = decode_token(&cose_bytes, &alg)
+        .unwrap()
+        .into_unvalidated_token();
 
     let scopes = decoded.moqt.moqt.as_ref().unwrap();
     assert_eq!(scopes.len(), 2);
@@ -495,11 +511,13 @@ fn test_vector_moqt_admin_wildcard() {
 
     let alg = HmacSha256Algorithm::new(&hmac_key());
     let cose_bytes = cose_bytes_from_vector(v);
-    let decoded = decode_token(&cose_bytes, &alg).unwrap();
+    let decoded = decode_token(&cose_bytes, &alg)
+        .unwrap()
+        .into_unvalidated_token();
 
     let scopes = decoded.moqt.moqt.as_ref().unwrap();
     assert_eq!(scopes.len(), 1);
-    assert_eq!(scopes[0].actions.len(), 9);
+    assert_eq!(scopes[0].actions().len(), 9);
 
     for test in v["authorization_tests"].as_array().unwrap() {
         let action_id = test["action"].as_i64().unwrap() as i32;
@@ -533,7 +551,9 @@ fn test_vector_moqt_suffix_match() {
 
     let alg = HmacSha256Algorithm::new(&hmac_key());
     let cose_bytes = cose_bytes_from_vector(v);
-    let decoded = decode_token(&cose_bytes, &alg).unwrap();
+    let decoded = decode_token(&cose_bytes, &alg)
+        .unwrap()
+        .into_unvalidated_token();
 
     let scopes = decoded.moqt.moqt.as_ref().unwrap();
     assert_eq!(scopes.len(), 1);
@@ -610,7 +630,9 @@ fn test_vector_valid_basic() {
     let alg = HmacSha256Algorithm::new(&hmac_key());
     let cose_bytes = cose_bytes_from_vector(v);
 
-    let decoded = decode_token(&cose_bytes, &alg).unwrap();
+    let decoded = decode_token(&cose_bytes, &alg)
+        .unwrap()
+        .into_unvalidated_token();
     assert_eq!(
         decoded.core.iss.as_deref(),
         Some("https://auth.example.com")
@@ -693,15 +715,17 @@ fn test_vector_dpop_jwk_binding() {
 
     let alg = HmacSha256Algorithm::new(&hmac_key());
     let cose_bytes = cose_bytes_from_vector(v);
-    let decoded = decode_token(&cose_bytes, &alg).unwrap();
+    let decoded = decode_token(&cose_bytes, &alg)
+        .unwrap()
+        .into_unvalidated_token();
 
     let cnf = decoded.dpop.cnf.as_ref().unwrap();
     let expected_jkt = hex::decode(v["dpop"]["cnf_jkt_hex"].as_str().unwrap()).unwrap();
     assert_eq!(cnf.jkt, expected_jkt);
 
     let settings = decoded.dpop.catdpop.as_ref().unwrap();
-    assert_eq!(settings.window, Some(60));
-    assert_eq!(settings.honor_jti, Some(true));
+    assert_eq!(settings.window(), Some(60));
+    assert_eq!(settings.honor_jti(), Some(true));
 }
 
 #[test]
@@ -714,11 +738,13 @@ fn test_vector_dpop_no_jti() {
 
     let alg = HmacSha256Algorithm::new(&hmac_key());
     let cose_bytes = cose_bytes_from_vector(v);
-    let decoded = decode_token(&cose_bytes, &alg).unwrap();
+    let decoded = decode_token(&cose_bytes, &alg)
+        .unwrap()
+        .into_unvalidated_token();
 
     let settings = decoded.dpop.catdpop.as_ref().unwrap();
-    assert_eq!(settings.window, Some(300));
-    assert_eq!(settings.honor_jti, Some(false));
+    assert_eq!(settings.window(), Some(300));
+    assert_eq!(settings.honor_jti(), Some(false));
     assert!(!settings.should_honor_jti());
 }
 
@@ -732,7 +758,9 @@ fn test_vector_dpop_es256_real_binding() {
 
     let alg = es256_algorithm();
     let cose_bytes = cose_bytes_from_vector(v);
-    let decoded = decode_token(&cose_bytes, &alg).unwrap();
+    let decoded = decode_token(&cose_bytes, &alg)
+        .unwrap()
+        .into_unvalidated_token();
 
     let cnf = decoded.dpop.cnf.as_ref().unwrap();
     let expected_jkt = hex::decode(v["dpop"]["cnf_jkt_hex"].as_str().unwrap()).unwrap();
@@ -760,7 +788,9 @@ fn test_vector_all_hmac_tokens_reproducible() {
         let alg = HmacSha256Algorithm::new(&hmac_key());
         let cose_bytes = cose_bytes_from_vector(v);
 
-        let decoded = decode_token(&cose_bytes, &alg).unwrap();
+        let decoded = decode_token(&cose_bytes, &alg)
+            .unwrap()
+            .into_unvalidated_token();
         let re_encoded = encode_token(&decoded, &alg).unwrap();
         assert_eq!(
             hex::encode(&re_encoded),
@@ -768,5 +798,144 @@ fn test_vector_all_hmac_tokens_reproducible() {
             "HMAC token {} not reproducible after decode/re-encode",
             v["id"]
         );
+    }
+}
+
+// =============================================================================
+// Category 6: Composite Claim Tests
+// =============================================================================
+
+#[test]
+fn test_vector_composite_or_roundtrip() {
+    let vectors = load_vectors();
+    let comp_vectors = &vectors["vectors"]["composite_claims"]["vectors"];
+    let v = &comp_vectors[0];
+    assert_eq!(v["id"], "composite_or_simple");
+
+    let alg = HmacSha256Algorithm::new(&hmac_key());
+    let cose_bytes = cose_bytes_from_vector(v);
+
+    let decoded = decode_token(&cose_bytes, &alg)
+        .unwrap()
+        .into_unvalidated_token();
+    assert!(decoded.composite.or_claim.is_some());
+    let or_claim = decoded.composite.or_claim.as_ref().unwrap();
+    assert_eq!(or_claim.claims.len(), 2);
+
+    let re_encoded = encode_token(&decoded, &alg).unwrap();
+    assert_eq!(hex::encode(&re_encoded), v["cose_hex"].as_str().unwrap());
+}
+
+#[test]
+fn test_vector_composite_and_roundtrip() {
+    let vectors = load_vectors();
+    let comp_vectors = &vectors["vectors"]["composite_claims"]["vectors"];
+    let v = &comp_vectors[1];
+    assert_eq!(v["id"], "composite_and");
+
+    let alg = HmacSha256Algorithm::new(&hmac_key());
+    let cose_bytes = cose_bytes_from_vector(v);
+
+    let decoded = decode_token(&cose_bytes, &alg)
+        .unwrap()
+        .into_unvalidated_token();
+    assert!(decoded.composite.and_claim.is_some());
+    let and_claim = decoded.composite.and_claim.as_ref().unwrap();
+    assert_eq!(and_claim.claims.len(), 2);
+
+    let re_encoded = encode_token(&decoded, &alg).unwrap();
+    assert_eq!(hex::encode(&re_encoded), v["cose_hex"].as_str().unwrap());
+}
+
+#[test]
+fn test_vector_composite_nor_roundtrip() {
+    let vectors = load_vectors();
+    let comp_vectors = &vectors["vectors"]["composite_claims"]["vectors"];
+    let v = &comp_vectors[2];
+    assert_eq!(v["id"], "composite_nor");
+
+    let alg = HmacSha256Algorithm::new(&hmac_key());
+    let cose_bytes = cose_bytes_from_vector(v);
+
+    let decoded = decode_token(&cose_bytes, &alg)
+        .unwrap()
+        .into_unvalidated_token();
+    assert!(decoded.composite.nor_claim.is_some());
+    let nor_claim = decoded.composite.nor_claim.as_ref().unwrap();
+    assert_eq!(nor_claim.claims.len(), 1);
+
+    let re_encoded = encode_token(&decoded, &alg).unwrap();
+    assert_eq!(hex::encode(&re_encoded), v["cose_hex"].as_str().unwrap());
+}
+
+#[test]
+fn test_vector_composite_nested_roundtrip() {
+    let vectors = load_vectors();
+    let comp_vectors = &vectors["vectors"]["composite_claims"]["vectors"];
+    let v = &comp_vectors[3];
+    assert_eq!(v["id"], "composite_nested");
+
+    let alg = HmacSha256Algorithm::new(&hmac_key());
+    let cose_bytes = cose_bytes_from_vector(v);
+
+    let decoded = decode_token(&cose_bytes, &alg)
+        .unwrap()
+        .into_unvalidated_token();
+    assert!(decoded.composite.or_claim.is_some());
+    let or_claim = decoded.composite.or_claim.as_ref().unwrap();
+    assert_eq!(or_claim.claims.len(), 2);
+
+    // First claim set is a token
+    assert!(matches!(
+        or_claim.claims[0],
+        cat_token::claims::ClaimSet::Token(_)
+    ));
+    // Second claim set is a nested AND composite
+    assert!(matches!(
+        or_claim.claims[1],
+        cat_token::claims::ClaimSet::Composite(_)
+    ));
+    if let cat_token::claims::ClaimSet::Composite(ref nested) = or_claim.claims[1] {
+        assert_eq!(nested.op, cat_token::claims::CompositeOperator::And);
+        assert_eq!(nested.claims.len(), 2);
+    }
+
+    let re_encoded = encode_token(&decoded, &alg).unwrap();
+    assert_eq!(hex::encode(&re_encoded), v["cose_hex"].as_str().unwrap());
+}
+
+#[test]
+fn test_vector_composite_payload_cbor_matches() {
+    let vectors = load_vectors();
+    let comp_vectors = &vectors["vectors"]["composite_claims"]["vectors"];
+
+    let alg = HmacSha256Algorithm::new(&hmac_key());
+
+    for v in comp_vectors.as_array().unwrap() {
+        let cose_bytes = cose_bytes_from_vector(v);
+        let expected_payload_hex = v["payload_cbor_hex"].as_str().unwrap();
+
+        let value: ciborium::Value = ciborium::de::from_reader(cose_bytes.as_slice()).unwrap();
+        let arr = match value {
+            ciborium::Value::Tag(_, inner) => match *inner {
+                ciborium::Value::Array(a) => a,
+                _ => panic!("expected array"),
+            },
+            _ => panic!("expected tag"),
+        };
+        let actual_payload_hex = match &arr[2] {
+            ciborium::Value::Bytes(b) => hex::encode(b),
+            _ => panic!("expected bytes"),
+        };
+        assert_eq!(
+            actual_payload_hex, expected_payload_hex,
+            "Payload mismatch for {}",
+            v["id"]
+        );
+
+        // Verify decode succeeds
+        decode_token(&cose_bytes, &alg)
+            .unwrap()
+            .into_unvalidated_token();
     }
 }

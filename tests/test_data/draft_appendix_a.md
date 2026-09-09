@@ -1,0 +1,871 @@
+# Appendix A: Test Vectors
+
+This appendix provides test vectors in JSON format for cross-implementation
+validation of CAT tokens for MOQT. Tokens use COSE_Mac0 (CBOR tag 17) for
+HMAC-SHA256 or COSE_Sign1 (CBOR tag 18) for ES256. Token strings are the
+base64url encoding of the full COSE structure.
+
+The blocks below are emitted verbatim by
+`cargo run --bin generate-test-vectors --features moqt -- --emit draft-md`.
+Every hex-shaped field (`cose_hex`, `payload_cbor_hex`, ...) is kept on a
+single line so the draft cannot introduce mid-hex whitespace or truncation
+when the block is pasted. Do not hand-edit; regenerate the block instead.
+
+## Keys
+
+The following keys are used throughout these test vectors:
+
+~~~ json
+{
+  "es256_private_key": "c9afa9d845ba75166b5c215767b1d6934e50c3db36e89b127b8a622b120f6721",
+  "es256_public_key_x": "60fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6",
+  "es256_public_key_y": "7903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462299",
+  "hmac_sha256": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+}
+~~~
+
+## CBOR Encoding of Claims
+
+CBOR encoding of individual claim types
+
+~~~ json
+[
+  {
+    "claims": {
+      "iss": "https://auth.example.com"
+    },
+    "description": "Minimal token with only issuer claim",
+    "id": "cbor_issuer_only",
+    "payload_cbor_hex": "a101781868747470733a2f2f617574682e6578616d706c652e636f6d"
+  },
+  {
+    "claims": {
+      "aud": [
+        "https://relay.example.com"
+      ],
+      "cti": "test-token-001",
+      "exp": 1700086400,
+      "iss": "https://auth.example.com",
+      "nbf": 1700000000
+    },
+    "description": "All core CWT claims (iss, aud, exp, nbf, cti)",
+    "id": "cbor_core_claims",
+    "payload_cbor_hex": "a501781868747470733a2f2f617574682e6578616d706c652e636f6d0381781968747470733a2f2f72656c61792e6578616d706c652e636f6d041a65554280051a6553f100074e746573742d746f6b656e2d303031"
+  },
+  {
+    "claims": {
+      "catu": {
+        "host": "example.com"
+      },
+      "catv": 1
+    },
+    "description": "CAT version (uint 1) and URI match rule",
+    "id": "cbor_cat_version_uri",
+    "payload_cbor_hex": "a219013601190138a101a1006b6578616d706c652e636f6d"
+  },
+  {
+    "claims": {
+      "catnip": [
+        {
+          "type": "ip_address",
+          "value": "192.168.1.100"
+        },
+        {
+          "type": "ip_range",
+          "value": "10.0.0.0/8"
+        },
+        {
+          "type": "asn",
+          "value": 64512
+        },
+        {
+          "type": "asn_range",
+          "value": [
+            64512,
+            64768
+          ]
+        }
+      ]
+    },
+    "description": "Network identifiers: IP, CIDR, ASN, ASN range",
+    "id": "cbor_network_identifiers",
+    "payload_cbor_hex": "a119013784d83444c0a80164d834a108410a19fc008219fc0019fd00"
+  },
+  {
+    "claims": {
+      "catgeoalt": 10,
+      "catgeocoord": {
+        "accuracy": 100.0,
+        "lat": 37.7749,
+        "lon": -122.4194
+      },
+      "catgeoiso3166": [
+        "US",
+        "CA"
+      ],
+      "geohash": "9q8yyk"
+    },
+    "description": "Geographic claims: coordinates, geohash, ISO 3166, altitude",
+    "id": "cbor_geographic_claims",
+    "payload_cbor_hex": "a419011a6639713879796b19013c8262555362434119013d8183fb4042e32fec56d5d0fbc05e9ad77318fc50186419013e820a05"
+  },
+  {
+    "claims": {
+      "catu": [
+        {
+          "component": "host",
+          "match": "exact",
+          "value": "example.com"
+        },
+        {
+          "component": "path",
+          "match": "prefix",
+          "value": "/vod/"
+        },
+        {
+          "component": "extension",
+          "match": "exact",
+          "value": "m3u8"
+        }
+      ]
+    },
+    "description": "URI match rules: host exact, path prefix, extension exact",
+    "id": "cbor_uri_match_rules",
+    "payload_cbor_hex": "a1190138a301a1006b6578616d706c652e636f6d03a101652f766f642f08a100646d337538"
+  },
+  {
+    "claims": {
+      "catalpn": [
+        "moq-00",
+        "h3"
+      ]
+    },
+    "description": "ALPN protocol identifiers",
+    "id": "cbor_alpn",
+    "payload_cbor_hex": "a119013a82466d6f712d3030426833"
+  }
+]
+~~~
+
+## Token Structure
+
+COSE_Sign1/COSE_Mac0 token structure with cryptographic verification
+
+~~~ json
+[
+  {
+    "algorithm": "HMAC-SHA256",
+    "algorithm_id": 5,
+    "claims": {
+      "aud": [
+        "https://relay.example.com"
+      ],
+      "exp": 1700086400,
+      "iss": "https://auth.example.com"
+    },
+    "cose_b64": "0YRIogEFEGNDQVSgWD-jAXgYaHR0cHM6Ly9hdXRoLmV4YW1wbGUuY29tA4F4GWh0dHBzOi8vcmVsYXkuZXhhbXBsZS5jb20EGmVVQoBYIBbKFqLU4kdlKK6FjZGwDyV6UH_lcoS_sT19bKHwZeIw",
+    "cose_hex": "d18448a201051063434154a0583fa301781868747470733a2f2f617574682e6578616d706c652e636f6d0381781968747470733a2f2f72656c61792e6578616d706c652e636f6d041a65554280582016ca16a2d4e2476528ae858d91b00f257a507fe57284bfb13d7d6ca1f065e230",
+    "description": "Minimal COSE_Mac0 token signed with HMAC-SHA256",
+    "header_cbor_hex": "a201051063434154",
+    "id": "token_hmac_minimal",
+    "key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    "payload_cbor_hex": "a301781868747470733a2f2f617574682e6578616d706c652e636f6d0381781968747470733a2f2f72656c61792e6578616d706c652e636f6d041a65554280",
+    "tag_hex": "16ca16a2d4e2476528ae858d91b00f257a507fe57284bfb13d7d6ca1f065e230",
+    "valid": true
+  },
+  {
+    "algorithm": "HMAC-SHA256",
+    "algorithm_id": 5,
+    "claims": {
+      "aud": [
+        "https://relay1.example.com",
+        "https://relay2.example.com"
+      ],
+      "catnip": [
+        {
+          "type": "ip_address",
+          "value": "203.0.113.50"
+        }
+      ],
+      "catu": [
+        {
+          "component": "path",
+          "matches": [
+            {
+              "prefix": "/live/"
+            }
+          ]
+        }
+      ],
+      "catv": 1,
+      "cti": "vector-002",
+      "exp": 1700086400,
+      "iat": 1700000000,
+      "iss": "https://issuer.moq.example",
+      "nbf": 1700000000,
+      "sub": "user:alice@example.com"
+    },
+    "cose_b64": "0YRIogEFEGNDQVSgWKuqAXgaaHR0cHM6Ly9pc3N1ZXIubW9xLmV4YW1wbGUCdnVzZXI6YWxpY2VAZXhhbXBsZS5jb20DgngaaHR0cHM6Ly9yZWxheTEuZXhhbXBsZS5jb214Gmh0dHBzOi8vcmVsYXkyLmV4YW1wbGUuY29tBBplVUKABRplU_EABhplU_EAB0p2ZWN0b3ItMDAyGQE2ARkBN4HYNETLAHEyGQE4oQOhAWYvbGl2ZS9YICnBpmEs5tSSc_2MARa53svCh2YtW6XWfe-vr2_wwRJ4",
+    "cose_hex": "d18448a201051063434154a058abaa01781a68747470733a2f2f6973737565722e6d6f712e6578616d706c650276757365723a616c696365406578616d706c652e636f6d0382781a68747470733a2f2f72656c6179312e6578616d706c652e636f6d781a68747470733a2f2f72656c6179322e6578616d706c652e636f6d041a65554280051a6553f100061a6553f100074a766563746f722d3030321901360119013781d83444cb007132190138a103a101662f6c6976652f582029c1a6612ce6d49273fd8c0116b9decbc287662d5ba5d67defafaf6ff0c11278",
+    "description": "COSE_Mac0 token with core + CAT + informational claims, HMAC-SHA256",
+    "header_cbor_hex": "a201051063434154",
+    "id": "token_hmac_full",
+    "key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+    "payload_cbor_hex": "aa01781a68747470733a2f2f6973737565722e6d6f712e6578616d706c650276757365723a616c696365406578616d706c652e636f6d0382781a68747470733a2f2f72656c6179312e6578616d706c652e636f6d781a68747470733a2f2f72656c6179322e6578616d706c652e636f6d041a65554280051a6553f100061a6553f100074a766563746f722d3030321901360119013781d83444cb007132190138a103a101662f6c6976652f",
+    "tag_hex": "29c1a6612ce6d49273fd8c0116b9decbc287662d5ba5d67defafaf6ff0c11278",
+    "valid": true
+  },
+  {
+    "algorithm": "ES256",
+    "algorithm_id": -7,
+    "claims": {
+      "aud": [
+        "https://moq-relay.example.com"
+      ],
+      "exp": 1700086400,
+      "iss": "https://auth.example.com",
+      "nbf": 1700000000
+    },
+    "cose_b64": "0oRIogEmEGNDQVSgWEmkAXgYaHR0cHM6Ly9hdXRoLmV4YW1wbGUuY29tA4F4HWh0dHBzOi8vbW9xLXJlbGF5LmV4YW1wbGUuY29tBBplVUKABRplU_EAWEDtjPWG8yukEPKzCXZC6zIlXI3FVengWMSAhICd9VeIe8XuSXSp71xFV8FVfeeZYotjTK-qG3TJNpaODJw6SPIi",
+    "cose_hex": "d28448a201261063434154a05849a401781868747470733a2f2f617574682e6578616d706c652e636f6d0381781d68747470733a2f2f6d6f712d72656c61792e6578616d706c652e636f6d041a65554280051a6553f1005840ed8cf586f32ba410f2b3097642eb32255c8dc555e9e058c48084809df557887bc5ee4974a9ef5c4557c1557de799628b634cafaa1b74c936968e0c9c3a48f222",
+    "description": "COSE_Sign1 token signed with ES256 (P-256 ECDSA, deterministic RFC 6979)",
+    "header_cbor_hex": "a201261063434154",
+    "id": "token_es256",
+    "payload_cbor_hex": "a401781868747470733a2f2f617574682e6578616d706c652e636f6d0381781d68747470733a2f2f6d6f712d72656c61792e6578616d706c652e636f6d041a65554280051a6553f100",
+    "private_key_hex": "c9afa9d845ba75166b5c215767b1d6934e50c3db36e89b127b8a622b120f6721",
+    "public_key_x_hex": "60fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6",
+    "public_key_y_hex": "7903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462299",
+    "signature_hex": "ed8cf586f32ba410f2b3097642eb32255c8dc555e9e058c48084809df557887bc5ee4974a9ef5c4557c1557de799628b634cafaa1b74c936968e0c9c3a48f222",
+    "valid": true
+  }
+]
+~~~
+
+## DPoP Binding
+
+DPoP (Demonstrating Proof-of-Possession) binding vectors
+
+~~~ json
+[
+  {
+    "cose_b64": "0YRIogEFEGNDQVSgWFKkAXgYaHR0cHM6Ly9hdXRoLmV4YW1wbGUuY29tBBplVUKACKEZAUNYIAzr8byYgHSKlViJBbeYQ7Qrp1yxdAVePiRr-H_gC0ptGQFBogAYPAEBWCDO8RzO81M-N4hGOLv_HgjLzz1oRq_MAle_JTBBawdiQg",
+    "cose_hex": "d18448a201051063434154a05852a401781868747470733a2f2f617574682e6578616d706c652e636f6d041a6555428008a119014358200cebf1bc9880748a95588905b79843b42ba75cb174055e3e246bf87fe00b4a6d190141a200183c01015820cef11ccef3533e37884638bbff1e08cbcf3d6846afcc0257bf2530416b076242",
+    "description": "HMAC token with DPoP cnf-jkt derived from fixed ES256 test key (RFC 7638)",
+    "dpop": {
+      "cnf_jkt_hex": "0cebf1bc9880748a95588905b79843b42ba75cb174055e3e246bf87fe00b4a6d",
+      "cnf_jkt_source": "SHA-256(RFC 7638 canonical JWK of ES256 test key)",
+      "honor_jti": true,
+      "window_seconds": 60
+    },
+    "id": "dpop_jwk_binding",
+    "payload_cbor_hex": "a401781868747470733a2f2f617574682e6578616d706c652e636f6d041a6555428008a119014358200cebf1bc9880748a95588905b79843b42ba75cb174055e3e246bf87fe00b4a6d190141a200183c0101"
+  },
+  {
+    "cose_b64": "0YRIogEFEGNDQVSgWFOkAXgYaHR0cHM6Ly9hdXRoLmV4YW1wbGUuY29tBBplVUKACKEZAUNYIDyC39Y1i6gEvZCHnDTnQ7vhOuq3mAZklE83oOwAY_6VGQFBogAZASwBAFgg7LeltWZ7lfIMZzQXcY6sn12Zf9QnSFlCphBIzdjFDgw",
+    "cose_hex": "d18448a201051063434154a05853a401781868747470733a2f2f617574682e6578616d706c652e636f6d041a6555428008a119014358203c82dfd6358ba804bd90879c34e743bbe13aeab7980664944f37a0ec0063fe95190141a20019012c01005820ecb7a5b5667b95f20c673417718eac9f5d997fd427485942a61048cdd8c50e0c",
+    "description": "DPoP binding with longer window, JTI processing disabled",
+    "dpop": {
+      "cnf_jkt_hex": "3c82dfd6358ba804bd90879c34e743bbe13aeab7980664944f37a0ec0063fe95",
+      "cnf_jkt_source": "SHA-256 of 'test-public-key-material'",
+      "honor_jti": false,
+      "window_seconds": 300
+    },
+    "id": "dpop_no_jti",
+    "payload_cbor_hex": "a401781868747470733a2f2f617574682e6578616d706c652e636f6d041a6555428008a119014358203c82dfd6358ba804bd90879c34e743bbe13aeab7980664944f37a0ec0063fe95190141a20019012c0100"
+  },
+  {
+    "algorithm": "ES256",
+    "cose_b64": "0oRIogEmEGNDQVSgWG2lAXgYaHR0cHM6Ly9hdXRoLmV4YW1wbGUuY29tA4F4GWh0dHBzOi8vcmVsYXkuZXhhbXBsZS5jb20EGmVVQoAIoRkBQ1ggDOvxvJiAdIqVWIkFt5hDtCunXLF0BV4-JGv4f-ALSm0ZAUGhABh4WEDNtp3D24drHQWo-AjlKGqGECb8i1i5qaqX8jvfAlP_VjV_kSnumwlmdwE1fI1wByGzApko1P5XPVaoh0Tc4E-C",
+    "cose_hex": "d28448a201261063434154a0586da501781868747470733a2f2f617574682e6578616d706c652e636f6d0381781968747470733a2f2f72656c61792e6578616d706c652e636f6d041a6555428008a119014358200cebf1bc9880748a95588905b79843b42ba75cb174055e3e246bf87fe00b4a6d190141a10018785840cdb69dc3db876b1d05a8f808e5286a861026fc8b58b9a9aa97f23bdf0253ff56357f9129ee9b09667701357c8d700721b3029928d4fe573d56a88744dce04f82",
+    "description": "ES256 token with real JWK thumbprint binding to the signing key",
+    "dpop": {
+      "cnf_jkt_hex": "0cebf1bc9880748a95588905b79843b42ba75cb174055e3e246bf87fe00b4a6d",
+      "honor_jti": null,
+      "window_seconds": 120
+    },
+    "id": "dpop_es256_real_binding",
+    "jwk_thumbprint_input": "{\"crv\":\"P-256\",\"kty\":\"EC\",\"x\":\"YP7UuiVanTHJYet0xjVtaMBJuJI7Yfps5mliLmDyn7Y\",\"y\":\"eQP-EAi4vJmkGunpVii8ZPLxsgwtfp9Rd6PClNRGIpk\"}",
+    "payload_cbor_hex": "a501781868747470733a2f2f617574682e6578616d706c652e636f6d0381781968747470733a2f2f72656c61792e6578616d706c652e636f6d041a6555428008a119014358200cebf1bc9880748a95588905b79843b42ba75cb174055e3e246bf87fe00b4a6d190141a1001878",
+    "public_key_x_hex": "60fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb6",
+    "public_key_y_hex": "7903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462299"
+  }
+]
+~~~
+
+## MOQT Authorization Scopes
+
+MOQT authorization scope encoding and matching
+
+~~~ json
+[
+  {
+    "authorization_tests": [
+      {
+        "action": 2,
+        "expected": true,
+        "namespace": [
+          "example.com",
+          "alice"
+        ],
+        "track": "video-hd"
+      },
+      {
+        "action": 6,
+        "expected": true,
+        "namespace": [
+          "example.com",
+          "alice"
+        ],
+        "track": "video-sd"
+      },
+      {
+        "action": 6,
+        "expected": false,
+        "namespace": [
+          "example.com",
+          "alice"
+        ],
+        "track": "audio-main"
+      },
+      {
+        "action": 4,
+        "expected": false,
+        "namespace": [
+          "example.com",
+          "alice"
+        ],
+        "track": "video-hd"
+      },
+      {
+        "action": 6,
+        "expected": false,
+        "namespace": [
+          "example.com",
+          "bob"
+        ],
+        "track": "video-hd"
+      }
+    ],
+    "cose_b64": "0YRIogEFEGNDQVSgWEajAXgYaHR0cHM6Ly9hdXRoLmV4YW1wbGUuY29tBBplVUKAGQFHgYOCAgaCS2V4YW1wbGUuY29tRWFsaWNlggFGdmlkZW8tWCDm7x6w7b1254Cp5G9wd-3KsJG1XXmRqpwbpdKxdxHlmg",
+    "cose_hex": "d18448a201051063434154a05846a301781868747470733a2f2f617574682e6578616d706c652e636f6d041a655542801901478183820206824b6578616d706c652e636f6d45616c696365820146766964656f2d5820e6ef1eb0edbd76e780a9e46f7077edcab091b55d7991aa9c1ba5d2b17711e59a",
+    "description": "Publisher scope: exact namespace match, prefix track match",
+    "id": "moqt_publisher_exact",
+    "moqt_scopes": [
+      {
+        "action_names": [
+          "PublishNamespace",
+          "Publish"
+        ],
+        "actions": [
+          2,
+          6
+        ],
+        "namespace_matches": [
+          {
+            "pattern_hex": "6578616d706c652e636f6d",
+            "pattern_utf8": "example.com",
+            "type": "exact"
+          },
+          {
+            "pattern_hex": "616c696365",
+            "pattern_utf8": "alice",
+            "type": "exact"
+          }
+        ],
+        "track_match": {
+          "pattern_hex": "766964656f2d",
+          "pattern_utf8": "video-",
+          "type": "prefix"
+        }
+      }
+    ],
+    "payload_cbor_hex": "a301781868747470733a2f2f617574682e6578616d706c652e636f6d041a655542801901478183820206824b6578616d706c652e636f6d45616c696365820146766964656f2d"
+  },
+  {
+    "authorization_tests": [
+      {
+        "action": 4,
+        "expected": true,
+        "namespace": [
+          "conference.example.room1"
+        ],
+        "track": "audio"
+      },
+      {
+        "action": 7,
+        "expected": true,
+        "namespace": [
+          "conference.example.room2"
+        ],
+        "track": "video"
+      },
+      {
+        "action": 4,
+        "expected": false,
+        "namespace": [
+          "other.domain"
+        ],
+        "track": "audio"
+      },
+      {
+        "action": 6,
+        "expected": false,
+        "namespace": [
+          "conference.example.room1"
+        ],
+        "track": "audio"
+      }
+    ],
+    "cose_b64": "0YRIogEFEGNDQVSgWEGjAXgYaHR0cHM6Ly9hdXRoLmV4YW1wbGUuY29tBBplVUKAGQFHgYKDAwQHgYIBUmNvbmZlcmVuY2UuZXhhbXBsZVggpRcAnezhPxQ7Bs0fnl_YYaKTOBdLd-18DQR48bxV_qI",
+    "cose_hex": "d18448a201051063434154a05841a301781868747470733a2f2f617574682e6578616d706c652e636f6d041a6555428019014781828303040781820152636f6e666572656e63652e6578616d706c655820a517009dece13f143b06cd1f9e5fd861a29338174b77ed7c0d0478f1bc55fea2",
+    "description": "Subscriber scope: prefix namespace match, any track",
+    "id": "moqt_subscriber_prefix",
+    "moqt_scopes": [
+      {
+        "action_names": [
+          "SubscribeNamespace",
+          "Subscribe",
+          "Fetch"
+        ],
+        "actions": [
+          3,
+          4,
+          7
+        ],
+        "namespace_matches": [
+          {
+            "pattern_hex": "636f6e666572656e63652e6578616d706c65",
+            "pattern_utf8": "conference.example",
+            "type": "prefix"
+          }
+        ],
+        "track_match": null
+      }
+    ],
+    "payload_cbor_hex": "a301781868747470733a2f2f617574682e6578616d706c652e636f6d041a6555428019014781828303040781820152636f6e666572656e63652e6578616d706c65"
+  },
+  {
+    "authorization_tests": [
+      {
+        "action": 6,
+        "expected": true,
+        "namespace": [
+          "live.example",
+          "studio-a"
+        ],
+        "track": "cam1"
+      },
+      {
+        "action": 4,
+        "expected": true,
+        "namespace": [
+          "live.example.studio-b"
+        ],
+        "track": "cam1"
+      },
+      {
+        "action": 6,
+        "expected": false,
+        "namespace": [
+          "live.example",
+          "studio-b"
+        ],
+        "track": "cam1"
+      },
+      {
+        "action": 2,
+        "expected": false,
+        "namespace": [
+          "other.example",
+          "studio-a"
+        ],
+        "track": ""
+      }
+    ],
+    "cose_b64": "0YRIogEFEGNDQVSgWFukAXgYaHR0cHM6Ly9hdXRoLmV4YW1wbGUuY29tBBplVUKAGQFHgoKCAgaCTGxpdmUuZXhhbXBsZUhzdHVkaW8tYYKCBAeBggFMbGl2ZS5leGFtcGxlGQFIGQEsWCBNDG-MUgrMlkdjeDOxdzorrThZWiYfPN3fz27ezzErTg",
+    "cose_hex": "d18448a201051063434154a0585ba401781868747470733a2f2f617574682e6578616d706c652e636f6d041a655542801901478282820206824c6c6976652e6578616d706c654873747564696f2d61828204078182014c6c6976652e6578616d706c6519014819012c58204d0c6f8c520acc9647637833b1773a2bad38595a261f3cdddfcf6edecf312b4e",
+    "description": "Multi-scope token: publish to specific namespace, subscribe to prefix, with revalidation",
+    "id": "moqt_multi_scope",
+    "moqt_reval": 300.0,
+    "moqt_scopes": [
+      {
+        "action_names": [
+          "PublishNamespace",
+          "Publish"
+        ],
+        "actions": [
+          2,
+          6
+        ],
+        "namespace_matches": [
+          {
+            "pattern_hex": "6c6976652e6578616d706c65",
+            "pattern_utf8": "live.example",
+            "type": "exact"
+          },
+          {
+            "pattern_hex": "73747564696f2d61",
+            "pattern_utf8": "studio-a",
+            "type": "exact"
+          }
+        ],
+        "track_match": null
+      },
+      {
+        "action_names": [
+          "Subscribe",
+          "Fetch"
+        ],
+        "actions": [
+          4,
+          7
+        ],
+        "namespace_matches": [
+          {
+            "pattern_hex": "6c6976652e6578616d706c65",
+            "pattern_utf8": "live.example",
+            "type": "prefix"
+          }
+        ],
+        "track_match": null
+      }
+    ],
+    "payload_cbor_hex": "a401781868747470733a2f2f617574682e6578616d706c652e636f6d041a655542801901478282820206824c6c6976652e6578616d706c654873747564696f2d61828204078182014c6c6976652e6578616d706c6519014819012c"
+  },
+  {
+    "authorization_tests": [
+      {
+        "action": 0,
+        "expected": true,
+        "namespace": [
+          "any.namespace"
+        ],
+        "track": "any-track"
+      },
+      {
+        "action": 6,
+        "expected": true,
+        "namespace": [
+          "any.namespace"
+        ],
+        "track": "any-track"
+      },
+      {
+        "action": 8,
+        "expected": true,
+        "namespace": [
+          "any.namespace"
+        ],
+        "track": "status"
+      }
+    ],
+    "cose_b64": "0YRIogEFEGNDQVSgWDGjAXgYaHR0cHM6Ly9hdXRoLmV4YW1wbGUuY29tBBplVUKAGQFHgYGJAAECAwQFBgcIWCArrP8Isr53Yqqewka78MLY4SsF4Up79bc_hciffW1h_Q",
+    "cose_hex": "d18448a201051063434154a05831a301781868747470733a2f2f617574682e6578616d706c652e636f6d041a6555428019014781818900010203040506070858202bacff08b2be7762aa9ec246bbf0c2d8e12b05e14a7bf5b73f85c89f7d6d61fd",
+    "description": "Admin scope: all actions, no namespace/track restriction",
+    "id": "moqt_admin_wildcard",
+    "moqt_scopes": [
+      {
+        "action_names": [
+          "ClientSetup",
+          "ServerSetup",
+          "PublishNamespace",
+          "SubscribeNamespace",
+          "Subscribe",
+          "RequestUpdate",
+          "Publish",
+          "Fetch",
+          "TrackStatus"
+        ],
+        "actions": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8
+        ],
+        "namespace_matches": [],
+        "track_match": null
+      }
+    ],
+    "payload_cbor_hex": "a301781868747470733a2f2f617574682e6578616d706c652e636f6d041a65554280190147818189000102030405060708"
+  },
+  {
+    "authorization_tests": [
+      {
+        "action": 4,
+        "expected": true,
+        "namespace": [
+          "cdn.example.com"
+        ],
+        "track": "stream1-audio"
+      },
+      {
+        "action": 4,
+        "expected": false,
+        "namespace": [
+          "cdn.example.com"
+        ],
+        "track": "stream1-video"
+      },
+      {
+        "action": 4,
+        "expected": false,
+        "namespace": [
+          "cdn.other.org"
+        ],
+        "track": "stream1-audio"
+      }
+    ],
+    "cose_b64": "0YRIogEFEGNDQVSgWEKjAXgYaHR0cHM6Ly9hdXRoLmV4YW1wbGUuY29tBBplVUKAGQFHgYOBBIGCAkwuZXhhbXBsZS5jb22CAkYtYXVkaW9YIG-oFINQ5Ew7rkySdT_SksNYd2vqy2hmpMZzjYClG5zY",
+    "cose_hex": "d18448a201051063434154a05842a301781868747470733a2f2f617574682e6578616d706c652e636f6d041a65554280190147818381048182024c2e6578616d706c652e636f6d8202462d617564696f58206fa8148350e44c3bae4c92753fd292c358776beacb6866a4c6738d80a51b9cd8",
+    "description": "Suffix matching on both namespace and track",
+    "id": "moqt_suffix_match",
+    "moqt_scopes": [
+      {
+        "action_names": [
+          "Subscribe"
+        ],
+        "actions": [
+          4
+        ],
+        "namespace_matches": [
+          {
+            "pattern_hex": "2e6578616d706c652e636f6d",
+            "pattern_utf8": ".example.com",
+            "type": "suffix"
+          }
+        ],
+        "track_match": {
+          "pattern_hex": "2d617564696f",
+          "pattern_utf8": "-audio",
+          "type": "suffix"
+        }
+      }
+    ],
+    "payload_cbor_hex": "a301781868747470733a2f2f617574682e6578616d706c652e636f6d041a65554280190147818381048182024c2e6578616d706c652e636f6d8202462d617564696f"
+  }
+]
+~~~
+
+## Validation Vectors
+
+Token validation test cases (expected pass and fail scenarios)
+
+~~~ json
+[
+  {
+    "cose_b64": "0YRIogEFEGNDQVSgWEWkAXgYaHR0cHM6Ly9hdXRoLmV4YW1wbGUuY29tA4F4GWh0dHBzOi8vcmVsYXkuZXhhbXBsZS5jb20EGmVVQoAFGmVT8QBYIP30vfENhlwaLMuZjMPeYXjz8QWuqCDlyzStGQVQ4_xi",
+    "cose_hex": "d18448a201051063434154a05845a401781868747470733a2f2f617574682e6578616d706c652e636f6d0381781968747470733a2f2f72656c61792e6578616d706c652e636f6d041a65554280051a6553f1005820fdf4bdf10d865c1a2ccb998cc3de6178f3f105aea820e5cb34ad190550e3fc62",
+    "description": "Valid token with correct issuer, audience, and time bounds",
+    "id": "valid_basic",
+    "validation": {
+      "expected_audiences": [
+        "https://relay.example.com"
+      ],
+      "expected_issuers": [
+        "https://auth.example.com"
+      ],
+      "expected_result": "valid",
+      "reference_time": 1700003600
+    }
+  },
+  {
+    "cose_b64": "0YRIogEFEGNDQVSgWCKiAXgYaHR0cHM6Ly9hdXRoLmV4YW1wbGUuY29tBBpfXhAAWCDNInUDQ2qsHo8l8Gj0tzb1HIYIpBheVbVoItgT7Ua6aA",
+    "cose_hex": "d18448a201051063434154a05822a201781868747470733a2f2f617574682e6578616d706c652e636f6d041a5f5e10005820cd227503436aac1e8f25f068f4b736f51c8608a4185e55b56822d813ed46ba68",
+    "description": "Token with expiration in the past",
+    "id": "invalid_expired",
+    "validation": {
+      "expected_error": "TokenExpired",
+      "expected_result": "error",
+      "reference_time": 1700000000
+    }
+  },
+  {
+    "cose_b64": "0YRIogEFEGNDQVSgWCijAXgYaHR0cHM6Ly9hdXRoLmV4YW1wbGUuY29tBBplVpQABRplVUKAWCArREpqUH1KiIrMzevyeLr6t_y-L6oheaJGUU9hwhYRbg",
+    "cose_hex": "d18448a201051063434154a05828a301781868747470733a2f2f617574682e6578616d706c652e636f6d041a65569400051a6555428058202b444a6a507d4a888acccdebf278bafab7fcbe2faa2179a246514f61c216116e",
+    "description": "Token with not-before in the future",
+    "id": "invalid_not_yet_valid",
+    "validation": {
+      "expected_error": "TokenNotYetValid",
+      "expected_result": "error",
+      "reference_time": 1700000000
+    }
+  },
+  {
+    "cose_b64": "0YRIogEFEGNDQVSgWD-jAXgYaHR0cHM6Ly9ldmlsLmV4YW1wbGUuY29tA4F4GWh0dHBzOi8vcmVsYXkuZXhhbXBsZS5jb20EGmVVQoBYIOmQtbjAMxCnCDlMbHiF-XZlN1SV6QSqkZWTguttCpaC",
+    "cose_hex": "d18448a201051063434154a0583fa301781868747470733a2f2f6576696c2e6578616d706c652e636f6d0381781968747470733a2f2f72656c61792e6578616d706c652e636f6d041a655542805820e990b5b8c03310a708394c6c7885f97665375495e904aa91959382eb6d0a9682",
+    "description": "Token from untrusted issuer",
+    "id": "invalid_wrong_issuer",
+    "validation": {
+      "expected_error": "InvalidIssuer",
+      "expected_issuers": [
+        "https://auth.example.com"
+      ],
+      "expected_result": "error",
+      "reference_time": 1700003600
+    }
+  },
+  {
+    "cose_b64": "0YRIogEFEGNDQVSgWEWjAXgYaHR0cHM6Ly9hdXRoLmV4YW1wbGUuY29tA4F4H2h0dHBzOi8vb3RoZXItcmVsYXkuZXhhbXBsZS5jb20EGmVVQoBYIOeCJJJNAkaNHBBkOdcSFVXKNNj0D8GdGkLmOriIB2pX",
+    "cose_hex": "d18448a201051063434154a05845a301781868747470733a2f2f617574682e6578616d706c652e636f6d0381781f68747470733a2f2f6f746865722d72656c61792e6578616d706c652e636f6d041a655542805820e78224924d02468d1c106439d7121555ca34d8f40fc19d1a42e63ab888076a57",
+    "description": "Token not intended for this audience",
+    "id": "invalid_wrong_audience",
+    "validation": {
+      "expected_audiences": [
+        "https://relay.example.com"
+      ],
+      "expected_error": "InvalidAudience",
+      "expected_issuers": [
+        "https://auth.example.com"
+      ],
+      "expected_result": "error",
+      "reference_time": 1700003600
+    }
+  },
+  {
+    "cose_b64": "0YRIogEFEGNDQVSgWD-jAXgYaHR0cHM6Ly9hdXRoLmV4YW1wbGUuY29tA4F4GWh0dHBzOi8vcmVsYXkuZXhhbXBsZS5jb20EGmVVQoBYIOnKFqLU4kdlKK6FjZGwDyV6UH_lcoS_sT19bKHwZeIw",
+    "cose_hex": "d18448a201051063434154a0583fa301781868747470733a2f2f617574682e6578616d706c652e636f6d0381781968747470733a2f2f72656c61792e6578616d706c652e636f6d041a655542805820e9ca16a2d4e2476528ae858d91b00f257a507fe57284bfb13d7d6ca1f065e230",
+    "description": "COSE_Mac0 token with corrupted tag (first byte flipped)",
+    "id": "invalid_tampered_signature",
+    "original_cose_hex": "d18448a201051063434154a0583fa301781868747470733a2f2f617574682e6578616d706c652e636f6d0381781968747470733a2f2f72656c61792e6578616d706c652e636f6d041a65554280582016ca16a2d4e2476528ae858d91b00f257a507fe57284bfb13d7d6ca1f065e230",
+    "validation": {
+      "expected_error": "SignatureVerificationFailed",
+      "expected_result": "error",
+      "key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    }
+  },
+  {
+    "cose_b64": "0YRIogEFEGNDQVSgWCKiAXgYaHR0cHM6Ly9hdXRoLmV4YW1wbGUuY29tBBplVUKAWCCqD2TUB2jOEalC6kta2ptR7vx6flZ0I9L0RV3MCbZ-Aw",
+    "cose_hex": "d18448a201051063434154a05822a201781868747470733a2f2f617574682e6578616d706c652e636f6d041a655542805820aa0f64d40768ce11a942ea4b5ada9b51eefc7a7e567423d2f4455dcc09b67e03",
+    "description": "Token verified with incorrect key",
+    "id": "invalid_wrong_key",
+    "validation": {
+      "correct_key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "expected_error": "SignatureVerificationFailed",
+      "expected_result": "error",
+      "wrong_key_hex": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    }
+  },
+  {
+    "cose_b64": "0YRIogEFEGNDQVSgWCKiAXgYaHR0cHM6Ly9hdXRoLmV4YW1wbGUuY29tBBplVUKAWCCqD2TUB2jOEalC6kta2ptR7vx6flZ0I9L0RV3MCbZ-Aw",
+    "cose_hex": "d18448a201051063434154a05822a201781868747470733a2f2f617574682e6578616d706c652e636f6d041a655542805820aa0f64d40768ce11a942ea4b5ada9b51eefc7a7e567423d2f4455dcc09b67e03",
+    "description": "COSE_Mac0 token but verifier expects COSE_Sign1/ES256",
+    "id": "invalid_algorithm_mismatch",
+    "validation": {
+      "expected_error": "InvalidTokenFormat",
+      "expected_result": "error",
+      "token_algorithm_id": 5,
+      "verifier_algorithm_id": -7
+    }
+  }
+]
+~~~
+
+## Composite Claims
+
+Composite claim encoding (draft-lemmons-cose-composite-claims-01)
+
+~~~ json
+[
+  {
+    "composite": {
+      "claim_key": 324,
+      "claim_sets": [
+        {
+          "catv": 1,
+          "exp": 1700086400,
+          "iss": "https://auth.example.com"
+        },
+        {
+          "catv": 1,
+          "exp": 1700090000,
+          "iss": "https://auth-backup.example.com"
+        }
+      ],
+      "operator": "OR"
+    },
+    "cose_hex": "d18448a201051063434154a05879a301781868747470733a2f2f617574682e6578616d706c652e636f6d041a6555428019014482a301781868747470733a2f2f617574682e6578616d706c652e636f6d041a6555428019013601a301781f68747470733a2f2f617574682d6261636b75702e6578616d706c652e636f6d041a655550901901360158203f11f80896554afc5246d8711ca88317228a84d44fcb212563bc24812623d749",
+    "description": "OR composite: at least one of two alternative claim sets must be acceptable",
+    "id": "composite_or_simple",
+    "payload_cbor_hex": "a301781868747470733a2f2f617574682e6578616d706c652e636f6d041a6555428019014482a301781868747470733a2f2f617574682e6578616d706c652e636f6d041a6555428019013601a301781f68747470733a2f2f617574682d6261636b75702e6578616d706c652e636f6d041a6555509019013601"
+  },
+  {
+    "composite": {
+      "claim_key": 326,
+      "claim_sets": [
+        {
+          "catv": 1,
+          "exp": 1700086400
+        },
+        {
+          "catnip": [
+            {
+              "type": "ip_address",
+              "value": "10.0.0.0"
+            }
+          ],
+          "exp": 1700086400
+        }
+      ],
+      "operator": "AND"
+    },
+    "cose_hex": "d18448a201051063434154a05843a301781868747470733a2f2f617574682e6578616d706c652e636f6d041a6555428019014682a2041a6555428019013601a2041a6555428019013781d834440a0000005820b241ea8429f9bdf073dea3e4a738f0dee7116d78e509e4f6fec9c8a13b8896de",
+    "description": "AND composite: both claim sets must be acceptable",
+    "id": "composite_and",
+    "payload_cbor_hex": "a301781868747470733a2f2f617574682e6578616d706c652e636f6d041a6555428019014682a2041a6555428019013601a2041a6555428019013781d834440a000000"
+  },
+  {
+    "composite": {
+      "claim_key": 325,
+      "claim_sets": [
+        {
+          "exp": 1700086400,
+          "iss": "https://revoked.example.com"
+        }
+      ],
+      "operator": "NOR"
+    },
+    "cose_hex": "d18448a201051063434154a0584ba301781868747470733a2f2f617574682e6578616d706c652e636f6d041a6555428019014581a201781b68747470733a2f2f7265766f6b65642e6578616d706c652e636f6d041a6555428058202cf030a29072032aa0775e71c2c2703a668fa2dbf1152d74258f0f42c4640d28",
+    "description": "NOR composite: none of the listed claim sets can be acceptable",
+    "id": "composite_nor",
+    "payload_cbor_hex": "a301781868747470733a2f2f617574682e6578616d706c652e636f6d041a6555428019014581a201781b68747470733a2f2f7265766f6b65642e6578616d706c652e636f6d041a65554280"
+  },
+  {
+    "composite": {
+      "claim_key": 324,
+      "claim_sets": [
+        {
+          "exp": 1700086400,
+          "iss": "https://primary.example.com"
+        },
+        {
+          "nested": {
+            "claim_key": 326,
+            "claim_sets": [
+              {
+                "exp": 1700086400,
+                "iss": "https://secondary.example.com"
+              },
+              {
+                "catv": 1,
+                "exp": 1700086400
+              }
+            ],
+            "operator": "AND"
+          }
+        }
+      ],
+      "operator": "OR"
+    },
+    "cose_hex": "d18448a201051063434154a05882a301781868747470733a2f2f617574682e6578616d706c652e636f6d041a6555428019014482a201781b68747470733a2f2f7072696d6172792e6578616d706c652e636f6d041a65554280a119014682a201781d68747470733a2f2f7365636f6e646172792e6578616d706c652e636f6d041a65554280a2041a655542801901360158201577ec93556a6472e1e68846d3927211a531ddd337b11e4c2d5e4e24f16776aa",
+    "description": "Nested composite: OR containing a standalone claim set and a nested AND",
+    "id": "composite_nested",
+    "payload_cbor_hex": "a301781868747470733a2f2f617574682e6578616d706c652e636f6d041a6555428019014482a201781b68747470733a2f2f7072696d6172792e6578616d706c652e636f6d041a65554280a119014682a201781d68747470733a2f2f7365636f6e646172792e6578616d706c652e636f6d041a65554280a2041a6555428019013601"
+  }
+]
+~~~
+

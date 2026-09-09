@@ -39,7 +39,8 @@ fn main() {
                 ],
             },
         ])
-        .build();
+        .build()
+        .unwrap();
 
     let encoded = encode_token(&cdn_token, &key).unwrap();
     let encoded_b64 = encode_token_base64(&cdn_token, &key).unwrap();
@@ -68,7 +69,8 @@ fn main() {
                 MatchValue::Exact("/health".to_string()),
             ],
         }])
-        .build();
+        .build()
+        .unwrap();
 
     let encoded_b64 = encode_token_base64(&api_token, &key).unwrap();
     println!(
@@ -84,9 +86,10 @@ fn main() {
         .audience(vec!["streaming-service".to_string()])
         .subject("subscriber-789")
         .expires_at(Utc::now() + Duration::hours(4))
-        .geo_coordinate(37.7749, -122.4194, Some(50000)) // San Francisco, 50km radius
+        .geo_coordinate(37.7749, -122.4194, 50000) // San Francisco, 50km radius
         .geohash("9q8yy") // SF area geohash
-        .build();
+        .build()
+        .unwrap();
 
     let encoded = encode_token(&geo_token, &key).unwrap();
     let encoded_b64 = encode_token_base64(&geo_token, &key).unwrap();
@@ -98,12 +101,15 @@ fn main() {
 
     // Validation example
     println!("\n4. Token Validation");
-    let decoded = decode_token(&encoded, &key).unwrap();
+    let decoded = decode_token(&encoded, &key)
+        .unwrap()
+        .into_unvalidated_token();
 
     let validator = CatTokenValidator::new()
         .with_expected_issuers(vec!["https://auth.streaming.com".to_string()])
         .with_expected_audiences(vec!["streaming-service".to_string()])
-        .with_clock_skew_tolerance(60);
+        .with_clock_skew_tolerance(60)
+        .unwrap();
 
     match validator.validate(&decoded) {
         Ok(()) => println!("   Token is valid"),

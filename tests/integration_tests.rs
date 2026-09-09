@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2022 Quicr
 // SPDX-License-Identifier: BSD-2-Clause
 
+#![cfg(feature = "moqt")]
+
 use cat_token::*;
 use chrono::{Duration, Utc};
 
@@ -21,9 +23,10 @@ fn test_cat_token_creation() {
             matches: vec![MatchValue::Exact("example.com".to_string())],
         }])
         .replay_protection(cat_token::ReplayProtection::Prohibited)
-        .geo_coordinate(37.7749, -122.4194, Some(100))
+        .geo_coordinate(37.7749, -122.4194, 100)
         .geohash("9q8yy")
-        .build();
+        .build()
+        .unwrap();
 
     assert_eq!(token.core.iss, Some("https://example.com".to_string()));
     assert_eq!(
@@ -48,7 +51,7 @@ fn test_cat_token_creation() {
     if let Some(coords) = &token.cat.catgeocoord {
         assert_eq!(coords[0].lat, 37.7749);
         assert_eq!(coords[0].lon, -122.4194);
-        assert_eq!(coords[0].radius, Some(100));
+        assert_eq!(coords[0].radius, 100);
     } else {
         panic!("Expected geo coordinates");
     }
@@ -68,13 +71,16 @@ fn test_hmac_token_encoding_decoding() {
         .expires_at(exp)
         .cwt_id_str("test-hmac-token")
         .version(1)
-        .build();
+        .build()
+        .unwrap();
 
     let encoded = encode_token(&token, &algorithm).unwrap();
     assert!(!encoded.is_empty());
     assert!(encoded.len() > 10);
 
-    let decoded = decode_token(&encoded, &algorithm).unwrap();
+    let decoded = decode_token(&encoded, &algorithm)
+        .unwrap()
+        .into_unvalidated_token();
     assert_eq!(decoded.core.iss, token.core.iss);
     assert_eq!(decoded.core.aud, token.core.aud);
     assert_eq!(decoded.core.cti, token.core.cti);
@@ -94,13 +100,16 @@ fn test_es256_token_encoding_decoding() {
         .expires_at(exp)
         .cwt_id_str("test-es256-token")
         .version(1)
-        .build();
+        .build()
+        .unwrap();
 
     let encoded = encode_token(&token, &algorithm).unwrap();
     assert!(!encoded.is_empty());
     assert!(encoded.len() > 10);
 
-    let decoded = decode_token(&encoded, &algorithm).unwrap();
+    let decoded = decode_token(&encoded, &algorithm)
+        .unwrap()
+        .into_unvalidated_token();
     assert_eq!(decoded.core.iss, token.core.iss);
     assert_eq!(decoded.core.aud, token.core.aud);
     assert_eq!(decoded.core.cti, token.core.cti);
@@ -120,13 +129,16 @@ fn test_ps256_token_encoding_decoding() {
         .expires_at(exp)
         .cwt_id_str("test-ps256-token")
         .version(1)
-        .build();
+        .build()
+        .unwrap();
 
     let encoded = encode_token(&token, &algorithm).unwrap();
     assert!(!encoded.is_empty());
     assert!(encoded.len() > 10);
 
-    let decoded = decode_token(&encoded, &algorithm).unwrap();
+    let decoded = decode_token(&encoded, &algorithm)
+        .unwrap()
+        .into_unvalidated_token();
     assert_eq!(decoded.core.iss, token.core.iss);
     assert_eq!(decoded.core.aud, token.core.aud);
     assert_eq!(decoded.core.cti, token.core.cti);
@@ -145,14 +157,17 @@ fn test_token_validation_success() {
         .not_before(now)
         .cwt_id_str("valid-token")
         .version(1)
-        .geo_coordinate(40.7128, -74.0060, Some(50))
+        .geo_coordinate(40.7128, -74.0060, 50)
         .geohash("dr5reg")
-        .build();
+        .build()
+        .unwrap();
 
     let validator = CatTokenValidator::new()
         .with_expected_issuers(vec!["https://trusted-issuer.com".to_string()])
         .with_expected_audiences(vec!["https://my-service.com".to_string()])
-        .with_clock_skew_tolerance(60);
+        .with_clock_skew_tolerance(60)
+        .unwrap()
+        .allow_unencrypted_privacy_claims();
 
     assert!(validator.validate(&token).is_ok());
 }
@@ -167,7 +182,8 @@ fn test_token_validation_expired() {
         .audience(vec!["https://my-service.com".to_string()])
         .expires_at(exp)
         .cwt_id_str("expired-token")
-        .build();
+        .build()
+        .unwrap();
 
     let validator = CatTokenValidator::new()
         .with_expected_issuers(vec!["https://trusted-issuer.com".to_string()])
@@ -189,7 +205,8 @@ fn test_token_validation_not_yet_valid() {
         .expires_at(exp)
         .not_before(nbf)
         .cwt_id_str("future-token")
-        .build();
+        .build()
+        .unwrap();
 
     let validator = CatTokenValidator::new()
         .with_expected_issuers(vec!["https://trusted-issuer.com".to_string()])
@@ -209,7 +226,8 @@ fn test_token_validation_invalid_issuer() {
         .audience(vec!["https://my-service.com".to_string()])
         .expires_at(exp)
         .cwt_id_str("invalid-issuer-token")
-        .build();
+        .build()
+        .unwrap();
 
     let validator = CatTokenValidator::new()
         .with_expected_issuers(vec!["https://trusted-issuer.com".to_string()])
@@ -229,7 +247,8 @@ fn test_token_validation_invalid_audience() {
         .audience(vec!["https://other-service.com".to_string()])
         .expires_at(exp)
         .cwt_id_str("invalid-audience-token")
-        .build();
+        .build()
+        .unwrap();
 
     let validator = CatTokenValidator::new()
         .with_expected_issuers(vec!["https://trusted-issuer.com".to_string()])
@@ -256,9 +275,10 @@ fn test_cwt_payload_encoding_decoding() {
             matches: vec![MatchValue::Prefix("/api/".to_string())],
         }])
         .replay_protection(cat_token::ReplayProtection::Prohibited)
-        .geo_coordinate(51.5074, -0.1278, None)
+        .geo_coordinate(51.5074, -0.1278, 0)
         .geohash("gcpvj")
-        .build();
+        .build()
+        .unwrap();
 
     let cwt = Cwt::new(-7, token.clone()); // ES256 algorithm
     let encoded_payload = cwt.encode_payload().unwrap();
@@ -283,76 +303,60 @@ fn test_cwt_payload_encoding_decoding() {
 
 #[test]
 fn test_all_cat_claims() {
-    let token = CatToken {
-        core: CoreClaims {
-            iss: Some("https://issuer.com".to_string()),
-            aud: Some(vec!["aud1".to_string(), "aud2".to_string()]),
-            exp: Some(1234567890),
-            nbf: Some(1234567800),
-            cti: Some(b"unique-token-id".to_vec()),
-        },
-        cat: CatClaims {
-            catreplay: Some(cat_token::ReplayProtection::Prohibited),
-            catpor: None,
-            catv: Some(1),
-            catnip: Some(vec![
-                NetworkIdentifier::IpPrefix("192.168.1.0".parse().unwrap(), 24),
-                NetworkIdentifier::IpPrefix("10.0.0.0".parse().unwrap(), 8),
-            ]),
-            catu: Some(vec![
-                UriMatchRule {
-                    component: URI_COMPONENT_HOST,
-                    matches: vec![MatchValue::Exact("api.example.com".to_string())],
-                },
-                UriMatchRule {
-                    component: URI_COMPONENT_PATH,
-                    matches: vec![MatchValue::Prefix("/v1/".to_string())],
-                },
-            ]),
-            catm: Some(vec!["GET".to_string(), "POST".to_string()]),
-            catalpn: Some(vec![b"h2".to_vec(), b"http/1.1".to_vec()]),
-            cath: Some(vec![
-                HeaderMatchRule {
-                    name: "Host".to_string(),
-                    matches: vec![MatchValue::Exact("api.example.com".to_string())],
-                },
-                HeaderMatchRule {
-                    name: "Host".to_string(),
-                    matches: vec![MatchValue::Suffix(".example.org".to_string())],
-                },
-            ]),
-            catgeoiso3166: Some(vec!["US".to_string(), "CA".to_string()]),
-            catgeocoord: Some(vec![GeoCoordinate {
-                lat: 34.0522,
-                lon: -118.2437,
-                radius: Some(25),
-            }]),
-            geohash: Some(vec!["9q5ct".to_string()]),
-            catgeoalt: Some(cat_token::GeoAltitude {
-                altitude: 100.0,
-                deviation: 10.0,
-            }),
-            cattpk: Some(b"thumbprint-data".to_vec()),
-        },
-        informational: InformationalClaims {
-            sub: None,
-            iat: None,
-            catifdata: None,
-        },
-        dpop: DpopClaims {
-            cnf: None,
-            catdpop: None,
-        },
-        request: RequestClaims {
-            catif: None,
-            catr: None,
-        },
-        composite: cat_token::claims::CompositeClaims::default(),
-        moqt: cat_token::claims::MoqtClaims {
-            moqt: None,
-            moqt_reval: None,
-        },
-        custom: std::collections::HashMap::new(),
+    let mut token = CatToken::new();
+    token.core = CoreClaims {
+        iss: Some("https://issuer.com".to_string()),
+        aud: Some(vec!["aud1".to_string(), "aud2".to_string()]),
+        exp: Some(1234567890),
+        nbf: Some(1234567800),
+        cti: Some(b"unique-token-id".to_vec()),
+    };
+    token.cat = CatClaims {
+        catreplay: Some(cat_token::ReplayProtection::Prohibited),
+        catpor: None,
+        catv: Some(1),
+        catnip: Some(vec![
+            NetworkIdentifier::IpPrefix("192.168.1.0".parse().unwrap(), 24),
+            NetworkIdentifier::IpPrefix("10.0.0.0".parse().unwrap(), 8),
+        ]),
+        catu: Some(vec![
+            UriMatchRule {
+                component: URI_COMPONENT_HOST,
+                matches: vec![MatchValue::Exact("api.example.com".to_string())],
+            },
+            UriMatchRule {
+                component: URI_COMPONENT_PATH,
+                matches: vec![MatchValue::Prefix("/v1/".to_string())],
+            },
+        ]),
+        catm: Some(vec!["GET".to_string(), "POST".to_string()]),
+        catalpn: Some(vec![b"h2".to_vec(), b"http/1.1".to_vec()]),
+        cath: Some(vec![
+            HeaderMatchRule {
+                name: "Host".to_string(),
+                matches: vec![MatchValue::Exact("api.example.com".to_string())],
+            },
+            HeaderMatchRule {
+                name: "X-Forwarded-Host".to_string(),
+                matches: vec![MatchValue::Suffix(".example.org".to_string())],
+            },
+        ]),
+        catgeoiso3166: Some(vec!["US".to_string(), "CA".to_string()]),
+        catgeocoord: Some(vec![GeoCoordinate {
+            lat: 34.0522,
+            lon: -118.2437,
+            radius: 25,
+        }]),
+        geohash: Some(vec!["9q5ct".to_string()]),
+        catgeoalt: Some(cat_token::GeoAltitude {
+            altitude: 100.0,
+            deviation: 10.0,
+        }),
+        cattpk: Some(b"thumbprint-data".to_vec()),
+    };
+    token.moqt = cat_token::claims::MoqtClaims {
+        moqt: None,
+        moqt_reval: None,
     };
 
     let cwt = Cwt::new(-4, token.clone()); // HMAC256
@@ -397,7 +401,8 @@ fn test_invalid_signature_verification() {
     let token = CatTokenBuilder::new()
         .issuer("https://test.com")
         .cwt_id_str("signature-test")
-        .build();
+        .build()
+        .unwrap();
 
     let encoded = encode_token(&token, &algorithm1).unwrap();
 
@@ -424,14 +429,14 @@ fn test_invalid_token_format() {
 
 #[test]
 fn test_geographic_validation() {
-    let validator = CatTokenValidator::new();
+    let validator = CatTokenValidator::new().allow_unencrypted_privacy_claims();
 
     // Test invalid coordinates
     let mut token = CatToken::new();
     token.cat.catgeocoord = Some(vec![GeoCoordinate {
         lat: 91.0, // Invalid latitude
         lon: 0.0,
-        radius: None,
+        radius: 0,
     }]);
 
     let result = validator.validate(&token);
@@ -475,7 +480,8 @@ fn test_moqt_claims_creation() {
         .cwt_id_str("moqt-token")
         .moqt_scope(scope)
         .moqt_reval(300.0)
-        .build();
+        .build()
+        .unwrap();
 
     // Test MOQT claims are present
     assert!(token.moqt.moqt.is_some());
@@ -483,32 +489,32 @@ fn test_moqt_claims_creation() {
 
     let scopes = token.moqt.moqt.as_ref().unwrap();
     assert_eq!(scopes.len(), 1);
-    assert_eq!(scopes[0].actions.len(), 4);
-    assert!(scopes[0].actions.contains(&MoqtAction::PublishNamespace));
-    assert!(scopes[0].actions.contains(&MoqtAction::Publish));
+    assert_eq!(scopes[0].actions().len(), 4);
+    assert!(scopes[0].actions().contains(&MoqtAction::PublishNamespace));
+    assert!(scopes[0].actions().contains(&MoqtAction::Publish));
 
     // Test action authorization
     assert!(token.allows_moqt_action(
         &MoqtAction::PublishNamespace,
-        b"example.com",
+        &[b"example.com".to_vec()],
         b"/bob/stream1"
     ));
 
     assert!(!token.allows_moqt_action(
         &MoqtAction::Subscribe, // Not in allowed actions
-        b"example.com",
+        &[b"example.com".to_vec()],
         b"/bob/stream1"
     ));
 
     assert!(!token.allows_moqt_action(
         &MoqtAction::PublishNamespace,
-        b"other.com", // Doesn't match namespace
+        &[b"other.com".to_vec()], // Doesn't match namespace
         b"/bob/stream1"
     ));
 
     assert!(!token.allows_moqt_action(
         &MoqtAction::PublishNamespace,
-        b"example.com",
+        &[b"example.com".to_vec()],
         b"/alice/stream1" // Doesn't match track prefix
     ));
 }
@@ -571,10 +577,13 @@ fn test_moqt_token_encoding_decoding() {
         .cwt_id_str("moqt-encode-test")
         .moqt_scopes(vec![scope1, scope2])
         .moqt_reval(600.0)
-        .build();
+        .build()
+        .unwrap();
 
     let encoded = encode_token(&token, &algorithm).unwrap();
-    let decoded = decode_token(&encoded, &algorithm).unwrap();
+    let decoded = decode_token(&encoded, &algorithm)
+        .unwrap()
+        .into_unvalidated_token();
 
     // Verify MOQT claims were preserved
     assert_eq!(decoded.moqt.moqt_reval, Some(600.0));
@@ -584,19 +593,19 @@ fn test_moqt_token_encoding_decoding() {
     assert_eq!(decoded_scopes.len(), 2);
 
     // Verify first scope
-    assert_eq!(decoded_scopes[0].actions.len(), 2);
+    assert_eq!(decoded_scopes[0].actions().len(), 2);
     assert!(
         decoded_scopes[0]
-            .actions
+            .actions()
             .contains(&MoqtAction::PublishNamespace)
     );
-    assert!(decoded_scopes[0].actions.contains(&MoqtAction::Publish));
-    assert!(decoded_scopes[0].matches_namespace(b"example.com"));
+    assert!(decoded_scopes[0].actions().contains(&MoqtAction::Publish));
+    assert!(decoded_scopes[0].matches_namespace(&[b"example.com".to_vec()]));
     assert!(decoded_scopes[0].matches_track(b"/bob/stream1"));
 
     // Verify second scope
-    assert_eq!(decoded_scopes[1].actions.len(), 1);
-    assert!(decoded_scopes[1].actions.contains(&MoqtAction::Fetch));
+    assert_eq!(decoded_scopes[1].actions().len(), 1);
+    assert!(decoded_scopes[1].actions().contains(&MoqtAction::Fetch));
     assert!(decoded_scopes[1].matches_track(b"logs/12345/bob"));
     assert!(!decoded_scopes[1].matches_track(b"logs/12345/alice"));
 }
@@ -624,38 +633,47 @@ fn test_moqt_multiple_scopes_authorization() {
         .audience(vec!["moqt-relay".to_string()])
         .expires_at(Utc::now() + Duration::hours(1))
         .moqt_scopes(vec![scope1, scope2])
-        .build();
+        .build()
+        .unwrap();
 
     // Test permissions for public namespace (scope1)
     assert!(token.allows_moqt_action(
         &MoqtAction::PublishNamespace,
-        b"example.com",
+        &[b"example.com".to_vec()],
         b"/public/stream1"
     ));
     assert!(token.allows_moqt_action(
         &MoqtAction::SubscribeNamespace,
-        b"example.com",
+        &[b"example.com".to_vec()],
         b"/public/events"
     ));
     assert!(!token.allows_moqt_action(
         &MoqtAction::Publish, // Not allowed in scope1
-        b"example.com",
+        &[b"example.com".to_vec()],
         b"/public/stream1"
     ));
 
     // Test permissions for private namespace (scope2)
-    assert!(token.allows_moqt_action(&MoqtAction::Publish, b"example.com", b"/private/stream1"));
-    assert!(token.allows_moqt_action(&MoqtAction::Fetch, b"example.com", b"/private/data"));
+    assert!(token.allows_moqt_action(
+        &MoqtAction::Publish,
+        &[b"example.com".to_vec()],
+        b"/private/stream1"
+    ));
+    assert!(token.allows_moqt_action(
+        &MoqtAction::Fetch,
+        &[b"example.com".to_vec()],
+        b"/private/data"
+    ));
     assert!(!token.allows_moqt_action(
         &MoqtAction::PublishNamespace, // Not allowed in scope2
-        b"example.com",
+        &[b"example.com".to_vec()],
         b"/private/stream1"
     ));
 
     // Test no permissions for other paths
     assert!(!token.allows_moqt_action(
         &MoqtAction::PublishNamespace,
-        b"example.com",
+        &[b"example.com".to_vec()],
         b"/restricted/stream1" // No matching scope
     ));
 }
@@ -704,23 +722,48 @@ fn test_moqt_spec_example_exact_match() {
     let token = CatTokenBuilder::new()
         .issuer("https://spec-example.com")
         .moqt_scope(scope)
-        .build();
+        .build()
+        .unwrap();
 
     // Should permit
-    assert!(token.allows_moqt_action(&MoqtAction::PublishNamespace, b"example.com", b"/bob"));
-
-    // Should prohibit
-    assert!(!token.allows_moqt_action(&MoqtAction::PublishNamespace, b"example.com", b""));
-    assert!(!token.allows_moqt_action(&MoqtAction::PublishNamespace, b"example.com", b"/bob/123"));
-    assert!(!token.allows_moqt_action(&MoqtAction::PublishNamespace, b"example.com", b"/alice"));
-    assert!(!token.allows_moqt_action(&MoqtAction::PublishNamespace, b"example.com", b"/bob/logs"));
-    assert!(!token.allows_moqt_action(
+    assert!(token.allows_moqt_action(
         &MoqtAction::PublishNamespace,
-        b"alternate/example.com",
+        &[b"example.com".to_vec()],
         b"/bob"
     ));
-    assert!(!token.allows_moqt_action(&MoqtAction::PublishNamespace, b"12345", b""));
-    assert!(!token.allows_moqt_action(&MoqtAction::PublishNamespace, b"example", b".com/bob"));
+
+    // Should prohibit
+    assert!(!token.allows_moqt_action(
+        &MoqtAction::PublishNamespace,
+        &[b"example.com".to_vec()],
+        b""
+    ));
+    assert!(!token.allows_moqt_action(
+        &MoqtAction::PublishNamespace,
+        &[b"example.com".to_vec()],
+        b"/bob/123"
+    ));
+    assert!(!token.allows_moqt_action(
+        &MoqtAction::PublishNamespace,
+        &[b"example.com".to_vec()],
+        b"/alice"
+    ));
+    assert!(!token.allows_moqt_action(
+        &MoqtAction::PublishNamespace,
+        &[b"example.com".to_vec()],
+        b"/bob/logs"
+    ));
+    assert!(!token.allows_moqt_action(
+        &MoqtAction::PublishNamespace,
+        &[b"alternate/example.com".to_vec()],
+        b"/bob"
+    ));
+    assert!(!token.allows_moqt_action(&MoqtAction::PublishNamespace, &[b"12345".to_vec()], b""));
+    assert!(!token.allows_moqt_action(
+        &MoqtAction::PublishNamespace,
+        &[b"example".to_vec()],
+        b".com/bob"
+    ));
 }
 
 #[test]
@@ -741,21 +784,46 @@ fn test_moqt_spec_example_prefix_match() {
     let token = CatTokenBuilder::new()
         .issuer("https://spec-prefix-example.com")
         .moqt_scope(scope)
-        .build();
+        .build()
+        .unwrap();
 
     // Should permit
-    assert!(token.allows_moqt_action(&MoqtAction::PublishNamespace, b"example.com", b"/bob"));
-    assert!(token.allows_moqt_action(&MoqtAction::PublishNamespace, b"example.com", b"/bob/123"));
-    assert!(token.allows_moqt_action(&MoqtAction::PublishNamespace, b"example.com", b"/bob/logs"));
-
-    // Should prohibit
-    assert!(!token.allows_moqt_action(&MoqtAction::PublishNamespace, b"example.com", b""));
-    assert!(!token.allows_moqt_action(&MoqtAction::PublishNamespace, b"example.com", b"/alice"));
-    assert!(!token.allows_moqt_action(
+    assert!(token.allows_moqt_action(
         &MoqtAction::PublishNamespace,
-        b"alternate/example.com",
+        &[b"example.com".to_vec()],
         b"/bob"
     ));
-    assert!(!token.allows_moqt_action(&MoqtAction::PublishNamespace, b"12345", b""));
-    assert!(!token.allows_moqt_action(&MoqtAction::PublishNamespace, b"example", b".com/bob"));
+    assert!(token.allows_moqt_action(
+        &MoqtAction::PublishNamespace,
+        &[b"example.com".to_vec()],
+        b"/bob/123"
+    ));
+    assert!(token.allows_moqt_action(
+        &MoqtAction::PublishNamespace,
+        &[b"example.com".to_vec()],
+        b"/bob/logs"
+    ));
+
+    // Should prohibit
+    assert!(!token.allows_moqt_action(
+        &MoqtAction::PublishNamespace,
+        &[b"example.com".to_vec()],
+        b""
+    ));
+    assert!(!token.allows_moqt_action(
+        &MoqtAction::PublishNamespace,
+        &[b"example.com".to_vec()],
+        b"/alice"
+    ));
+    assert!(!token.allows_moqt_action(
+        &MoqtAction::PublishNamespace,
+        &[b"alternate/example.com".to_vec()],
+        b"/bob"
+    ));
+    assert!(!token.allows_moqt_action(&MoqtAction::PublishNamespace, &[b"12345".to_vec()], b""));
+    assert!(!token.allows_moqt_action(
+        &MoqtAction::PublishNamespace,
+        &[b"example".to_vec()],
+        b".com/bob"
+    ));
 }

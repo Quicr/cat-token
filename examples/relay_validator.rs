@@ -4,7 +4,10 @@
 //! Example: MOQT Relay - Token Validation
 //!
 //! This example shows how a MOQT relay would validate incoming tokens
-//! and authorize MOQT operations.
+//! and authorize MOQT operations. For the async equivalent — including a
+//! custom `AsyncJtiStore` / `AsyncReplayGuard` implementation for
+//! network-backed replay stores — see `examples/async_relay_validator.rs`
+//! (enabled by `--features async`).
 
 use cat_token::prelude::*;
 use chrono::{Duration, Utc};
@@ -23,7 +26,9 @@ fn main() {
     let token_validator = CatTokenValidator::new()
         .with_expected_issuers(vec!["https://auth.example.com".to_string()])
         .with_expected_audiences(vec!["moqt-relay.example.com".to_string()])
-        .with_clock_skew_tolerance(60);
+        .with_clock_skew_tolerance(60)
+        .unwrap()
+        .allow_unencrypted_privacy_claims();
 
     let moqt_validator = MoqtValidator::new().with_min_revalidation_interval(60.0);
 
@@ -40,7 +45,7 @@ fn main() {
         b"live.sports.example.com",
         b"/football/match123",
     ) {
-        Ok(result) => println!("ALLOWED (scope {})", result.matched_scope_index.unwrap()),
+        Ok(result) => println!("ALLOWED (scope {})", result.matched_scope_index),
         Err(e) => println!("DENIED - {}", e),
     }
 
@@ -116,29 +121,27 @@ fn validate_and_authorize(
     action: MoqtAction,
     namespace: &[u8],
     track: &[u8],
-) -> Result<MoqtAuthResult, String> {
-    // Step 1: Decode and verify COSE structure
-    let token = decode_token(token_bytes, key).map_err(|e| e.to_string())?;
+) -> Result<AuthorizedRequest, String> {
+    // Step 1: Decode and verify COSE signature
+    let verified = decode_token(token_bytes, key).map_err(|e| e.to_string())?;
 
-    // Step 2: Validate standard claims
-    token_validator
-        .validate(&token)
+    // Step 2: Validate claims (produces ValidatedToken)
+    let validated = verified
+        .validate(token_validator)
         .map_err(|e| e.to_string())?;
 
-    // Step 3: Validate MOQT claims
+    // Step 3: Authorize the action against a request context. `authorize`
+    // enforces every signed CAT claim; a mismatched scope or missing context
+    // yields an Err rather than a silent allow.
+    let request = RelayRequestContext::new(
+        "moqt-relay.example.com",
+        action,
+        vec![namespace.to_vec()],
+        track.to_vec(),
+    );
     moqt_validator
-        .validate_moqt_claims(&token)
-        .map_err(|e| e.to_string())?;
-
-    // Step 4: Authorize the action
-    let request = MoqtAuthRequest::new(action, vec![namespace.to_vec()], track.to_vec());
-    let result = moqt_validator.authorize(&token, &request);
-
-    if result.authorized {
-        Ok(result)
-    } else {
-        Err("Action not permitted by token scopes".to_string())
-    }
+        .authorize::<dyn ReplayGuard>(&validated, &request, None, None)
+        .map_err(|e| e.to_string())
 }
 
 fn create_test_token(key: &Es256Algorithm) -> Vec<u8> {
@@ -158,7 +161,8 @@ fn create_test_token(key: &Es256Algorithm) -> Vec<u8> {
         .expires_at(now + Duration::hours(2))
         .moqt_scope(scope)
         .moqt_reval(300.0)
-        .build();
+        .build()
+        .unwrap();
 
     encode_token(&token, key).expect("Failed to encode token")
 }
@@ -171,7 +175,8 @@ fn create_expired_token(key: &Es256Algorithm) -> Vec<u8> {
         .audience(vec!["moqt-relay.example.com".to_string()])
         .expires_at(now - Duration::hours(1)) // Expired 1 hour ago
         .moqt_scope(MoqtScopeBuilder::new().publisher().build())
-        .build();
+        .build()
+        .unwrap();
 
     encode_token(&token, key).expect("Failed to encode token")
 }

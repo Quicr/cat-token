@@ -9,8 +9,9 @@ fn test_cnf_jkt_label_is_323() {
 }
 
 #[test]
-fn test_cnf_jkt_legacy_label_is_3() {
-    assert_eq!(CNF_JKT_LEGACY, 3);
+fn test_cnf_jkt_legacy_label_accepted() {
+    // CNF_JKT_LEGACY (3) is internal, but verified through decode_legacy_label_3 test below
+    assert_eq!(cat_token::claims::CNF_JKT, 323);
 }
 
 #[test]
@@ -22,7 +23,8 @@ fn test_encoded_token_uses_label_323() {
     let token = CatTokenBuilder::new()
         .issuer("https://example.com")
         .confirmation(jkt_bytes.clone())
-        .build();
+        .build()
+        .unwrap();
 
     let cose_bytes = encode_token(&token, &alg).unwrap();
 
@@ -115,7 +117,9 @@ fn test_decode_legacy_label_3() {
     let mut cose_bytes = Vec::new();
     ciborium::ser::into_writer(&tagged, &mut cose_bytes).unwrap();
 
-    let decoded = decode_token(&cose_bytes, &alg).unwrap();
+    let decoded = decode_token(&cose_bytes, &alg)
+        .unwrap()
+        .into_unvalidated_token();
     assert!(decoded.dpop.cnf.is_some());
     assert_eq!(decoded.dpop.cnf.unwrap().jkt, jkt_bytes);
 }
@@ -129,9 +133,12 @@ fn test_roundtrip_with_label_323() {
     let token = CatTokenBuilder::new()
         .issuer("https://example.com")
         .confirmation(jkt_bytes.clone())
-        .build();
+        .build()
+        .unwrap();
 
     let encoded = encode_token(&token, &alg).unwrap();
-    let decoded = decode_token(&encoded, &alg).unwrap();
+    let decoded = decode_token(&encoded, &alg)
+        .unwrap()
+        .into_unvalidated_token();
     assert_eq!(decoded.dpop.cnf.unwrap().jkt, jkt_bytes);
 }

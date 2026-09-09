@@ -10,10 +10,13 @@ fn test_cose_sig_structure_es256() {
     let token = CatTokenBuilder::new()
         .issuer("https://example.com")
         .expires_in(3600)
-        .build();
+        .build()
+        .unwrap();
 
     let encoded = encode_token(&token, &alg).unwrap();
-    let decoded = decode_token(&encoded, &alg).unwrap();
+    let decoded = decode_token(&encoded, &alg)
+        .unwrap()
+        .into_unvalidated_token();
     assert_eq!(decoded.core.iss, token.core.iss);
 }
 
@@ -23,10 +26,13 @@ fn test_cose_sig_structure_ps256() {
     let token = CatTokenBuilder::new()
         .issuer("https://example.com")
         .expires_in(3600)
-        .build();
+        .build()
+        .unwrap();
 
     let encoded = encode_token(&token, &alg).unwrap();
-    let decoded = decode_token(&encoded, &alg).unwrap();
+    let decoded = decode_token(&encoded, &alg)
+        .unwrap()
+        .into_unvalidated_token();
     assert_eq!(decoded.core.iss, token.core.iss);
 }
 
@@ -37,10 +43,13 @@ fn test_cose_mac0_structure_hmac() {
     let token = CatTokenBuilder::new()
         .issuer("https://example.com")
         .expires_in(3600)
-        .build();
+        .build()
+        .unwrap();
 
     let encoded = encode_token(&token, &alg).unwrap();
-    let decoded = decode_token(&encoded, &alg).unwrap();
+    let decoded = decode_token(&encoded, &alg)
+        .unwrap()
+        .into_unvalidated_token();
     assert_eq!(decoded.core.iss, token.core.iss);
 }
 
@@ -127,7 +136,8 @@ fn test_tampered_token_rejected_with_cose_structure() {
         .issuer("https://example.com")
         .audience(vec!["https://api.example.com".to_string()])
         .expires_at(Utc::now() + Duration::hours(1))
-        .build();
+        .build()
+        .unwrap();
 
     let encoded = encode_token(&token, &alg).unwrap();
 
@@ -148,7 +158,10 @@ fn test_wrong_key_rejected_with_cose_structure() {
     let alg1 = HmacSha256Algorithm::from_secret_key(&key1);
     let alg2 = HmacSha256Algorithm::from_secret_key(&key2);
 
-    let token = CatTokenBuilder::new().issuer("https://example.com").build();
+    let token = CatTokenBuilder::new()
+        .issuer("https://example.com")
+        .build()
+        .unwrap();
 
     let encoded = encode_token(&token, &alg1).unwrap();
     let result = decode_token(&encoded, &alg2);
@@ -165,13 +178,16 @@ fn test_roundtrip_all_algorithms_with_cose() {
         .not_before(now)
         .cwt_id_str("roundtrip-test")
         .subject("test-user")
-        .build();
+        .build()
+        .unwrap();
 
     // HMAC
     let hmac_key = HmacSha256Algorithm::generate_key().unwrap();
     let hmac_alg = HmacSha256Algorithm::from_secret_key(&hmac_key);
     let hmac_encoded = encode_token(&token, &hmac_alg).unwrap();
-    let hmac_decoded = decode_token(&hmac_encoded, &hmac_alg).unwrap();
+    let hmac_decoded = decode_token(&hmac_encoded, &hmac_alg)
+        .unwrap()
+        .into_unvalidated_token();
     assert_eq!(hmac_decoded.core.iss, token.core.iss);
     assert_eq!(hmac_decoded.core.aud, token.core.aud);
     assert_eq!(hmac_decoded.informational.sub, token.informational.sub);
@@ -179,14 +195,18 @@ fn test_roundtrip_all_algorithms_with_cose() {
     // ES256
     let es256_alg = Es256Algorithm::new_with_key_pair().unwrap();
     let es256_encoded = encode_token(&token, &es256_alg).unwrap();
-    let es256_decoded = decode_token(&es256_encoded, &es256_alg).unwrap();
+    let es256_decoded = decode_token(&es256_encoded, &es256_alg)
+        .unwrap()
+        .into_unvalidated_token();
     assert_eq!(es256_decoded.core.iss, token.core.iss);
     assert_eq!(es256_decoded.core.aud, token.core.aud);
 
     // PS256
     let ps256_alg = Ps256Algorithm::new_with_key_pair().unwrap();
     let ps256_encoded = encode_token(&token, &ps256_alg).unwrap();
-    let ps256_decoded = decode_token(&ps256_encoded, &ps256_alg).unwrap();
+    let ps256_decoded = decode_token(&ps256_encoded, &ps256_alg)
+        .unwrap()
+        .into_unvalidated_token();
     assert_eq!(ps256_decoded.core.iss, token.core.iss);
     assert_eq!(ps256_decoded.core.aud, token.core.aud);
 }

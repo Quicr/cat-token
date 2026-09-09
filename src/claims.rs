@@ -1,8 +1,46 @@
 // SPDX-FileCopyrightText: Copyright (c) 2022 Quicr
 // SPDX-License-Identifier: BSD-2-Clause
 
+//! CAT claim data model.
+//!
+//! # Profile: narrow, deterministic, fail-closed
+//!
+//! This crate implements a deliberately narrow subset of CTA-5007-B. Anywhere
+//! the specification allows multiple representational forms for the same
+//! semantic content, we accept exactly one form on input and produce exactly
+//! one form on output. Deployments that need the full data model should
+//! extend the profile explicitly, with corresponding test vectors, rather
+//! than relying on the decoder silently accepting an alternate encoding.
+//!
+//! The concrete narrowings that differ from the base spec:
+//!
+//! - **`catif` keys**: integer claim keys only. Label strings and label sets
+//!   are rejected. The single supported form maps a specific claim number
+//!   to a single [`CatIfAction`].
+//! - **`catif` headers**: text-string name / text-string value only. Arrays,
+//!   integers, and CWT-nullable claim values are rejected. Names may not
+//!   embed `:` and neither name nor value may contain NUL/CR/LF.
+//! - **`catif` action arrays**: exactly the tuple `(status, headers?, kid?)`.
+//!   Extra positional members are rejected as invalid form rather than
+//!   ignored.
+//! - **`catr` numeric fields**: fractional numeric dates are rejected on
+//!   decode (see [`CatRenewal::with_expadd`], [`CatRenewal::with_deadline`],
+//!   and the top-level date-claim rules).
+//! - **`catalpn`**: byte strings only; the crate does not itself verify
+//!   the peer negotiated ALPN — the relay context must supply that.
+//! - **`catpor` id**: integer or byte-string forms only.
+//! - **URI parsing**: userinfo and fragments are rejected, since they are
+//!   commonly stripped/altered before authorization and diverge the token's
+//!   surface from the actual request.
+//! - **HTTP header values in responses**: control characters (other than
+//!   HTAB) are rejected rather than silently stripped; a hostile issuer
+//!   cannot smuggle CRLF past a downstream serializer.
+//!
+//! Interoperability with implementations that use the broader spec form is
+//! explicitly out of scope for this profile.
+
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::collections::HashMap;
 
 pub const CLAIM_ISS: i64 = 1;
@@ -34,29 +72,30 @@ pub const CLAIM_CATIFDATA: i64 = 320;
 pub const CLAIM_CNF: i64 = 8;
 pub const CLAIM_CATDPOP: i64 = 321;
 
-// DPoP sub-claim keys (within cnf map)
 pub const CNF_JKT: i64 = 323; // JWK Thumbprint (CTA-5007-B §4.8.1, Annex E.3)
-pub const CNF_JKT_LEGACY: i64 = 3; // Legacy JWK Thumbprint key for backward compatibility
-pub const CNF_CKT: i64 = 6; // COSE Key Thumbprint (RFC 9679)
+pub(crate) const CNF_JKT_LEGACY: i64 = 3;
+pub(crate) const CNF_CKT: i64 = 6; // COSE Key Thumbprint (RFC 9679)
 
 // catdpop sub-claim keys
-pub const CATDPOP_CRIT: i64 = -1;
-pub const CATDPOP_WINDOW: i64 = 0;
-pub const CATDPOP_HONOR_JTI: i64 = 1;
+pub(crate) const CATDPOP_CRIT: i64 = -1;
+pub(crate) const CATDPOP_WINDOW: i64 = 0;
+pub(crate) const CATDPOP_HONOR_JTI: i64 = 1;
 
 // Request Claims
 pub const CLAIM_CATIF: i64 = 322;
 pub const CLAIM_CATR: i64 = 323;
 
 // catr sub-map keys (CTA-5007-B §4.9.2)
-pub const CATR_TYPE: i64 = 0;
-pub const CATR_EXPADD: i64 = 1;
-pub const CATR_DEADLINE: i64 = 2;
-pub const CATR_NAME: i64 = 3;
-pub const CATR_PARAMS: i64 = 4;
-pub const CATR_CODE: i64 = 5;
+pub(crate) const CATR_TYPE: i64 = 0;
+pub(crate) const CATR_EXPADD: i64 = 1;
+pub(crate) const CATR_DEADLINE: i64 = 2;
+pub(crate) const CATR_COOKIE_NAME: i64 = 3;
+pub(crate) const CATR_HEADER_NAME: i64 = 4;
+pub(crate) const CATR_ADDITIONAL_COOKIE_PARAMS: i64 = 5;
+pub(crate) const CATR_ADDITIONAL_HEADER_PARAMS: i64 = 6;
+pub(crate) const CATR_STATUS_CODE: i64 = 7;
 
-// Composite Claims (RFC draft-lemmons-cose-composite-claims-01)
+// Composite Claims (RFC draft-lemmons-cose-composite-claims-02)
 pub const CLAIM_OR: i64 = 324;
 pub const CLAIM_NOR: i64 = 325;
 pub const CLAIM_AND: i64 = 326;
@@ -65,11 +104,12 @@ pub const CLAIM_AND: i64 = 326;
 pub const CLAIM_MOQT: i64 = 327; // TBD_MOQT in the spec
 pub const CLAIM_MOQT_REVAL: i64 = 328; // TBD_MOQT_REVAL in the spec
 
-// MOQT Binary match types per spec
-pub const MATCH_TYPE_PREFIX: i64 = 1;
-pub const MATCH_TYPE_SUFFIX: i64 = 2;
+#[cfg(feature = "moqt")]
+pub(crate) const MATCH_TYPE_PREFIX: i64 = 1;
+#[cfg(feature = "moqt")]
+pub(crate) const MATCH_TYPE_SUFFIX: i64 = 2;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct CoreClaims {
     pub iss: Option<String>,
     pub aud: Option<Vec<String>>,
@@ -78,7 +118,7 @@ pub struct CoreClaims {
     pub cti: Option<Vec<u8>>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[repr(u32)]
 pub enum ReplayProtection {
     Permitted = 0,
@@ -100,20 +140,20 @@ impl TryFrom<u32> for ReplayProtection {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ProbabilityOfRejection {
     pub probability: f64,
     pub id: Vec<u8>,
     pub expiration: Option<i64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct GeoAltitude {
     pub altitude: f64,
     pub deviation: f64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Default)]
 pub struct CatClaims {
     pub catreplay: Option<ReplayProtection>,
     pub catpor: Option<ProbabilityOfRejection>,
@@ -130,7 +170,7 @@ pub struct CatClaims {
     pub cattpk: Option<Vec<u8>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct InformationalClaims {
     pub sub: Option<String>,
     pub iat: Option<i64>,
@@ -141,7 +181,7 @@ pub struct InformationalClaims {
 ///
 /// Supports both JWK Thumbprint (jkt, key 3) and COSE Key Thumbprint (ckt, key 6, RFC 9679).
 /// Serialization redacts thumbprint values to prevent accidental leakage.
-#[derive(Clone, PartialEq, Deserialize)]
+#[derive(Clone, PartialEq)]
 pub struct ConfirmationClaim {
     pub jkt: Vec<u8>,
     pub ckt: Option<Vec<u8>>,
@@ -185,11 +225,16 @@ impl ConfirmationClaim {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+/// Upper cap for a DPoP acceptance window (seconds). Chosen to keep replay
+/// exposure bounded even under aggressive skew; callers that need more should
+/// re-issue tokens instead.
+pub const CATDPOP_MAX_WINDOW_SECS: i64 = 3600;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Default)]
 pub struct CatDpopSettings {
-    pub crit: Option<Vec<i64>>,
-    pub window: Option<i64>,
-    pub honor_jti: Option<bool>,
+    pub(crate) crit: Option<Vec<i64>>,
+    pub(crate) window: Option<i64>,
+    pub(crate) honor_jti: Option<bool>,
 }
 
 impl CatDpopSettings {
@@ -197,14 +242,36 @@ impl CatDpopSettings {
         Self::default()
     }
 
-    pub fn with_critical(mut self, keys: Vec<i64>) -> Self {
+    /// Set the `crit` list. Fails if any entry is an always-understood key,
+    /// or if the list is empty (CTA-5007-B §4.8.2 requires at least one entry when present).
+    pub fn with_critical(mut self, keys: Vec<i64>) -> Result<Self, crate::CatError> {
+        const ALWAYS_UNDERSTOOD: &[i64] = &[CATDPOP_CRIT, CATDPOP_WINDOW, CATDPOP_HONOR_JTI];
+        for &key in &keys {
+            if ALWAYS_UNDERSTOOD.contains(&key) {
+                return Err(crate::CatError::InvalidClaimValue(format!(
+                    "catdpop crit must not contain always-understood key: {key}"
+                )));
+            }
+        }
         self.crit = Some(keys);
-        self
+        Ok(self)
     }
 
-    pub fn with_window(mut self, seconds: i64) -> Self {
+    /// Set the acceptance window. Fails if the window is non-positive or exceeds
+    /// [`CATDPOP_MAX_WINDOW_SECS`].
+    pub fn with_window(mut self, seconds: i64) -> Result<Self, crate::CatError> {
+        if seconds <= 0 {
+            return Err(crate::CatError::InvalidClaimValue(format!(
+                "catdpop window must be > 0 (got {seconds})"
+            )));
+        }
+        if seconds > CATDPOP_MAX_WINDOW_SECS {
+            return Err(crate::CatError::InvalidClaimValue(format!(
+                "catdpop window {seconds}s exceeds cap {CATDPOP_MAX_WINDOW_SECS}s"
+            )));
+        }
         self.window = Some(seconds);
-        self
+        Ok(self)
     }
 
     pub fn with_jti_processing(mut self, honor: bool) -> Self {
@@ -212,13 +279,38 @@ impl CatDpopSettings {
         self
     }
 
+    pub fn crit(&self) -> Option<&[i64]> {
+        self.crit.as_deref()
+    }
+
+    pub fn window(&self) -> Option<i64> {
+        self.window
+    }
+
+    pub fn honor_jti(&self) -> Option<bool> {
+        self.honor_jti
+    }
+
+    pub(crate) fn set_crit_from_decode(&mut self, keys: Vec<i64>) {
+        self.crit = Some(keys);
+    }
+
+    pub(crate) fn set_window_from_decode(&mut self, seconds: i64) {
+        self.window = Some(seconds);
+    }
+
+    pub(crate) fn set_honor_jti_from_decode(&mut self, honor: bool) {
+        self.honor_jti = Some(honor);
+    }
+
     pub fn validate_crit(&self) -> Result<(), crate::CatError> {
         if let Some(ref crit) = self.crit {
-            const KNOWN_KEYS: &[i64] = &[CATDPOP_CRIT, CATDPOP_WINDOW, CATDPOP_HONOR_JTI];
+            // crit MUST NOT contain always-understood keys (CTA-5007-B §4.8.2)
+            const ALWAYS_UNDERSTOOD: &[i64] = &[CATDPOP_CRIT, CATDPOP_WINDOW, CATDPOP_HONOR_JTI];
             for &key in crit {
-                if !KNOWN_KEYS.contains(&key) {
+                if ALWAYS_UNDERSTOOD.contains(&key) {
                     return Err(crate::CatError::InvalidClaimValue(format!(
-                        "Unsupported critical DPoP setting key: {key}"
+                        "catdpop crit must not contain always-understood key: {key}"
                     )));
                 }
             }
@@ -231,11 +323,11 @@ impl CatDpopSettings {
     }
 
     pub fn should_honor_jti(&self) -> bool {
-        self.honor_jti.unwrap_or(true)
+        self.honor_jti.unwrap_or(false)
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct DpopClaims {
     pub cnf: Option<ConfirmationClaim>,
     pub catdpop: Option<CatDpopSettings>,
@@ -244,15 +336,83 @@ pub struct DpopClaims {
 /// Per-claim failure action (CTA-5007-B §4.9.1).
 /// When a specific claim fails validation, the action tells the recipient
 /// what HTTP status code, headers, and/or signing key to use in the response.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+///
+/// Constructed via [`CatIfAction::new`]. Fields are private to keep the value
+/// well-formed: status codes must be in the standard HTTP range, and header
+/// name/value pairs are validated for control characters at attach time.
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct CatIfAction {
-    pub status: u32,
-    pub headers: Option<Vec<(String, String)>>,
-    pub kid: Option<String>,
+    pub(crate) status: u32,
+    pub(crate) headers: Option<Vec<(String, String)>>,
+    pub(crate) kid: Option<String>,
+}
+
+fn ensure_header_value_clean(name: &str, value: &str) -> Result<(), crate::CatError> {
+    for &b in name.as_bytes() {
+        if b == 0 || b == b'\r' || b == b'\n' || b == b':' {
+            return Err(crate::CatError::InvalidClaimValue(format!(
+                "header name contains prohibited byte: 0x{b:02x}"
+            )));
+        }
+    }
+    for &b in value.as_bytes() {
+        if b == 0 || b == b'\r' || b == b'\n' {
+            return Err(crate::CatError::InvalidClaimValue(format!(
+                "header value for {name:?} contains prohibited control byte: 0x{b:02x}"
+            )));
+        }
+    }
+    Ok(())
+}
+
+impl CatIfAction {
+    /// Create a new per-claim failure action.
+    ///
+    /// The HTTP status code must be in the 100..=599 range.
+    pub fn new(status: u32) -> Result<Self, crate::CatError> {
+        if !(100..=599).contains(&status) {
+            return Err(crate::CatError::InvalidClaimValue(format!(
+                "catif status must be an HTTP status code in 100..=599 (got {status})"
+            )));
+        }
+        Ok(Self {
+            status,
+            headers: None,
+            kid: None,
+        })
+    }
+
+    /// Attach headers. Each name/value must be free of NUL/CR/LF and header
+    /// names must not embed `:`.
+    pub fn with_headers(mut self, headers: Vec<(String, String)>) -> Result<Self, crate::CatError> {
+        for (name, value) in &headers {
+            ensure_header_value_clean(name, value)?;
+        }
+        self.headers = Some(headers);
+        Ok(self)
+    }
+
+    /// Attach a signing key identifier.
+    pub fn with_kid(mut self, kid: impl Into<String>) -> Self {
+        self.kid = Some(kid.into());
+        self
+    }
+
+    pub fn status(&self) -> u32 {
+        self.status
+    }
+
+    pub fn headers(&self) -> Option<&[(String, String)]> {
+        self.headers.as_deref()
+    }
+
+    pub fn kid(&self) -> Option<&str> {
+        self.kid.as_deref()
+    }
 }
 
 /// Renewal type (CTA-5007-B §4.9.2).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[repr(u32)]
 pub enum CatRenewalType {
     Automatic = 0,
@@ -274,14 +434,40 @@ impl CatRenewalType {
 }
 
 /// Token renewal parameters (CTA-5007-B §4.9.2).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+///
+/// Fields are private to keep the value shape consistent with the renewal
+/// type: cookie/header names are only accepted for their respective types,
+/// status codes only for redirect, and floating-point parameters are checked
+/// for NaN/Infinity/negative zero at attach time.
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct CatRenewal {
-    pub renewal_type: CatRenewalType,
-    pub expadd: Option<i64>,
-    pub deadline: Option<i64>,
-    pub name: Option<String>,
-    pub params: Option<Vec<(String, String)>>,
-    pub code: Option<u32>,
+    pub(crate) renewal_type: CatRenewalType,
+    pub(crate) expadd: Option<f64>,
+    pub(crate) deadline: Option<f64>,
+    pub(crate) cookie_name: Option<String>,
+    pub(crate) header_name: Option<String>,
+    pub(crate) cookie_params: Option<Vec<String>>,
+    pub(crate) header_params: Option<Vec<String>>,
+    pub(crate) status_code: Option<u32>,
+}
+
+fn validate_renewal_number(name: &'static str, v: f64) -> Result<f64, crate::CatError> {
+    if v.is_nan() {
+        return Err(crate::CatError::InvalidClaimValue(format!(
+            "catr {name}: NaN is not permitted"
+        )));
+    }
+    if v.is_infinite() {
+        return Err(crate::CatError::InvalidClaimValue(format!(
+            "catr {name}: infinity is not permitted"
+        )));
+    }
+    if v == 0.0 && v.is_sign_negative() {
+        return Err(crate::CatError::InvalidClaimValue(format!(
+            "catr {name}: negative zero is not permitted"
+        )));
+    }
+    Ok(v)
 }
 
 impl CatRenewal {
@@ -290,9 +476,11 @@ impl CatRenewal {
             renewal_type: CatRenewalType::Automatic,
             expadd: None,
             deadline: None,
-            name: None,
-            params: None,
-            code: None,
+            cookie_name: None,
+            header_name: None,
+            cookie_params: None,
+            header_params: None,
+            status_code: None,
         }
     }
 
@@ -301,9 +489,11 @@ impl CatRenewal {
             renewal_type: CatRenewalType::Cookie,
             expadd: None,
             deadline: None,
-            name: Some(name.into()),
-            params: None,
-            code: None,
+            cookie_name: Some(name.into()),
+            header_name: None,
+            cookie_params: None,
+            header_params: None,
+            status_code: None,
         }
     }
 
@@ -312,9 +502,11 @@ impl CatRenewal {
             renewal_type: CatRenewalType::Header,
             expadd: None,
             deadline: None,
-            name: Some(name.into()),
-            params: None,
-            code: None,
+            cookie_name: None,
+            header_name: Some(name.into()),
+            cookie_params: None,
+            header_params: None,
+            status_code: None,
         }
     }
 
@@ -323,46 +515,118 @@ impl CatRenewal {
             renewal_type: CatRenewalType::Redirect,
             expadd: None,
             deadline: None,
-            name: None,
-            params: None,
-            code: Some(code),
+            cookie_name: None,
+            header_name: None,
+            cookie_params: None,
+            header_params: None,
+            status_code: Some(code),
         }
     }
 
-    pub fn with_expadd(mut self, seconds: i64) -> Self {
-        self.expadd = Some(seconds);
+    /// Set the `expadd` renewal offset. Rejects NaN, infinity, and negatives;
+    /// silent-fallback variants were removed so an invalid policy input
+    /// cannot become an unsigned or default value.
+    pub fn with_expadd(mut self, seconds: f64) -> Result<Self, crate::CatError> {
+        self.expadd = Some(validate_renewal_number("expadd", seconds)?);
+        Ok(self)
+    }
+
+    /// Set the `deadline` renewal timestamp. Rejects NaN, infinity, and
+    /// negatives; see [`with_expadd`](Self::with_expadd).
+    pub fn with_deadline(mut self, timestamp: f64) -> Result<Self, crate::CatError> {
+        self.deadline = Some(validate_renewal_number("deadline", timestamp)?);
+        Ok(self)
+    }
+
+    pub fn with_cookie_name(mut self, name: impl Into<String>) -> Self {
+        self.cookie_name = Some(name.into());
         self
     }
 
-    pub fn with_deadline(mut self, timestamp: i64) -> Self {
-        self.deadline = Some(timestamp);
+    pub fn with_header_name(mut self, name: impl Into<String>) -> Self {
+        self.header_name = Some(name.into());
         self
     }
 
-    pub fn with_name(mut self, name: impl Into<String>) -> Self {
-        self.name = Some(name.into());
+    pub fn with_cookie_params(mut self, params: Vec<String>) -> Self {
+        self.cookie_params = Some(params);
         self
     }
 
-    pub fn with_params(mut self, params: Vec<(String, String)>) -> Self {
-        self.params = Some(params);
+    pub fn with_header_params(mut self, params: Vec<String>) -> Self {
+        self.header_params = Some(params);
         self
     }
 
-    pub fn with_code(mut self, code: u32) -> Self {
-        self.code = Some(code);
+    pub fn with_status_code(mut self, code: u32) -> Self {
+        self.status_code = Some(code);
         self
+    }
+
+    pub fn renewal_type(&self) -> CatRenewalType {
+        self.renewal_type
+    }
+
+    pub fn expadd(&self) -> Option<f64> {
+        self.expadd
+    }
+
+    pub fn deadline(&self) -> Option<f64> {
+        self.deadline
+    }
+
+    pub fn cookie_name(&self) -> Option<&str> {
+        self.cookie_name.as_deref()
+    }
+
+    pub fn header_name(&self) -> Option<&str> {
+        self.header_name.as_deref()
+    }
+
+    pub fn cookie_params(&self) -> Option<&[String]> {
+        self.cookie_params.as_deref()
+    }
+
+    pub fn header_params(&self) -> Option<&[String]> {
+        self.header_params.as_deref()
+    }
+
+    pub fn status_code(&self) -> Option<u32> {
+        self.status_code
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn from_parts_unchecked(
+        renewal_type: CatRenewalType,
+        expadd: Option<f64>,
+        deadline: Option<f64>,
+        cookie_name: Option<String>,
+        header_name: Option<String>,
+        cookie_params: Option<Vec<String>>,
+        header_params: Option<Vec<String>>,
+        status_code: Option<u32>,
+    ) -> Self {
+        Self {
+            renewal_type,
+            expadd,
+            deadline,
+            cookie_name,
+            header_name,
+            cookie_params,
+            header_params,
+            status_code,
+        }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct RequestClaims {
     pub catif: Option<Vec<(i64, CatIfAction)>>,
     pub catr: Option<CatRenewal>,
 }
 
 /// Logical operators for composite claims
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum CompositeOperator {
     /// At least one claim set must be acceptable
     Or,
@@ -373,7 +637,7 @@ pub enum CompositeOperator {
 }
 
 /// A claim set that can contain either a token or a nested composite claim
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum ClaimSet {
     /// A regular CAT token
     Token(Box<CatToken>),
@@ -382,8 +646,8 @@ pub enum ClaimSet {
 }
 
 /// Composite claim structure implementing logical relationships between claim sets
-/// as defined in draft-lemmons-cose-composite-claims-01
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// as defined in draft-lemmons-cose-composite-claims-02
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct CompositeClaim {
     /// The logical operator for this composite claim
     pub op: CompositeOperator,
@@ -524,7 +788,7 @@ impl CompositeClaim {
 }
 
 /// Container for composite claims in a CAT token
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Default)]
 pub struct CompositeClaims {
     /// OR composite claim
     pub or_claim: Option<CompositeClaim>,
@@ -604,14 +868,14 @@ impl CompositeClaims {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct GeoCoordinate {
     pub lat: f64,
     pub lon: f64,
-    pub radius: Option<u32>,
+    pub radius: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum UriPattern {
     Exact(String),
     Prefix(String),
@@ -715,7 +979,7 @@ pub fn validate_posix_ere(pattern: &str) -> Option<String> {
     None
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum MatchValue {
     Exact(String),
     Prefix(String),
@@ -726,24 +990,63 @@ pub enum MatchValue {
     Sha512_256(Vec<u8>),
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct UriMatchRule {
     pub component: i64,
     pub matches: Vec<MatchValue>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct HeaderMatchRule {
     pub name: String,
     pub matches: Vec<MatchValue>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum NetworkIdentifier {
     IpAddress(std::net::IpAddr),
     IpPrefix(std::net::IpAddr, u8),
     Asn(u32),
     AsnRange(u32, u32),
+}
+
+fn ip_in_prefix(peer: std::net::IpAddr, prefix: std::net::IpAddr, prefix_len: u8) -> bool {
+    match (peer, prefix) {
+        (std::net::IpAddr::V4(p), std::net::IpAddr::V4(n)) => {
+            let peer_bits = u32::from(p);
+            let net_bits = u32::from(n);
+            if prefix_len == 0 {
+                return true;
+            }
+            if prefix_len > 32 {
+                return false;
+            }
+            let mask: u32 = if prefix_len == 32 {
+                u32::MAX
+            } else {
+                !((1u32 << (32 - prefix_len)) - 1)
+            };
+            (peer_bits & mask) == (net_bits & mask)
+        }
+        (std::net::IpAddr::V6(p), std::net::IpAddr::V6(n)) => {
+            let peer_bits = u128::from(p);
+            let net_bits = u128::from(n);
+            if prefix_len == 0 {
+                return true;
+            }
+            if prefix_len > 128 {
+                return false;
+            }
+            let mask: u128 = if prefix_len == 128 {
+                u128::MAX
+            } else {
+                !((1u128 << (128 - prefix_len)) - 1)
+            };
+            (peer_bits & mask) == (net_bits & mask)
+        }
+        // Address family mismatch — no prefix crosses v4/v6.
+        _ => false,
+    }
 }
 
 impl NetworkIdentifier {
@@ -777,6 +1080,44 @@ impl NetworkIdentifier {
             )));
         }
         Ok(Self::IpPrefix(addr, prefix_len))
+    }
+
+    /// Whether this identifier matches the caller-supplied peer IP.
+    /// ASN-typed identifiers do not participate in IP matching.
+    pub fn matches_ip(&self, peer: std::net::IpAddr) -> bool {
+        match self {
+            NetworkIdentifier::IpAddress(addr) => *addr == peer,
+            NetworkIdentifier::IpPrefix(prefix_addr, prefix_len) => {
+                ip_in_prefix(peer, *prefix_addr, *prefix_len)
+            }
+            NetworkIdentifier::Asn(_) | NetworkIdentifier::AsnRange(_, _) => false,
+        }
+    }
+
+    /// Whether this identifier matches the caller-supplied peer ASN.
+    /// IP-typed identifiers do not participate in ASN matching.
+    pub fn matches_asn(&self, peer_asn: u32) -> bool {
+        match self {
+            NetworkIdentifier::Asn(a) => *a == peer_asn,
+            NetworkIdentifier::AsnRange(start, end) => peer_asn >= *start && peer_asn <= *end,
+            NetworkIdentifier::IpAddress(_) | NetworkIdentifier::IpPrefix(_, _) => false,
+        }
+    }
+
+    /// True if this identifier is IP-based (matches against a peer IP).
+    pub fn is_ip_based(&self) -> bool {
+        matches!(
+            self,
+            NetworkIdentifier::IpAddress(_) | NetworkIdentifier::IpPrefix(_, _)
+        )
+    }
+
+    /// True if this identifier is ASN-based.
+    pub fn is_asn_based(&self) -> bool {
+        matches!(
+            self,
+            NetworkIdentifier::Asn(_) | NetworkIdentifier::AsnRange(_, _)
+        )
     }
 
     pub fn validate(&self) -> Result<(), crate::CatError> {
@@ -816,7 +1157,7 @@ impl NetworkIdentifier {
 }
 
 #[cfg(feature = "moqt")]
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub enum MoqtAction {
     ClientSetup = 0,
     ServerSetup = 1,
@@ -839,23 +1180,47 @@ impl MoqtAction {
     pub const ANNOUNCE: MoqtAction = MoqtAction::PublishNamespace;
     pub const SUBSCRIBE_UPDATE: MoqtAction = MoqtAction::RequestUpdate;
 
-    pub fn action_name(&self) -> &'static str {
-        match self {
-            MoqtAction::ClientSetup => "CLIENT_SETUP",
-            MoqtAction::ServerSetup => "SERVER_SETUP",
-            MoqtAction::PublishNamespace => "PUBLISH_NAMESPACE",
-            MoqtAction::SubscribeNamespace => "SUBSCRIBE_NAMESPACE",
-            MoqtAction::Subscribe => "SUBSCRIBE",
-            MoqtAction::RequestUpdate => "REQUEST_UPDATE",
-            MoqtAction::Publish => "PUBLISH",
-            MoqtAction::Fetch => "FETCH",
-            MoqtAction::TrackStatus => "TRACK_STATUS",
-        }
-    }
-
     pub fn is_valid(value: i32) -> bool {
         (0..=8).contains(&value)
     }
+
+    /// Return the [`MoqtResourceShape`] the action operates on. Callers use
+    /// this to enforce that a DPoP proof's `actx.resource` (and the request
+    /// context) carry only the fields relevant to the action — setup actions
+    /// carry an endpoint only, namespace actions carry endpoint plus
+    /// namespace, and track actions carry endpoint, namespace, and track.
+    pub fn resource_shape(&self) -> MoqtResourceShape {
+        match self {
+            MoqtAction::ClientSetup | MoqtAction::ServerSetup => MoqtResourceShape::Endpoint,
+            MoqtAction::PublishNamespace | MoqtAction::SubscribeNamespace => {
+                MoqtResourceShape::Namespace
+            }
+            MoqtAction::Subscribe
+            | MoqtAction::RequestUpdate
+            | MoqtAction::Publish
+            | MoqtAction::Fetch
+            | MoqtAction::TrackStatus => MoqtResourceShape::Track,
+        }
+    }
+}
+
+/// The set of resource identifiers a MOQT action operates on.
+///
+/// - `Endpoint`: only the relay endpoint is meaningful. Setup actions
+///   (`CLIENT_SETUP`, `SERVER_SETUP`) fit here — they establish the
+///   connection itself, not a specific namespace or track.
+/// - `Namespace`: endpoint plus a namespace tuple. Namespace-level actions
+///   (`PUBLISH_NAMESPACE`, `SUBSCRIBE_NAMESPACE`) operate on all tracks
+///   below a namespace.
+/// - `Track`: endpoint, namespace tuple, and a specific track name. Track
+///   actions (`SUBSCRIBE`, `PUBLISH`, `FETCH`, `REQUEST_UPDATE`,
+///   `TRACK_STATUS`) target one full track.
+#[cfg(feature = "moqt")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MoqtResourceShape {
+    Endpoint,
+    Namespace,
+    Track,
 }
 
 #[cfg(feature = "moqt")]
@@ -882,15 +1247,16 @@ impl TryFrom<i32> for MoqtAction {
 }
 
 #[cfg(feature = "moqt")]
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub enum BinaryMatchType {
-    Exact = 0,
-    Prefix = 1,
-    Suffix = 2,
+    Any,
+    Exact,
+    Prefix,
+    Suffix,
 }
 
 #[cfg(feature = "moqt")]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct BinaryMatch {
     pub match_type: BinaryMatchType,
     pub pattern: Vec<u8>,
@@ -900,7 +1266,7 @@ pub struct BinaryMatch {
 impl Default for BinaryMatch {
     fn default() -> Self {
         Self {
-            match_type: BinaryMatchType::Exact,
+            match_type: BinaryMatchType::Any,
             pattern: Vec::new(),
         }
     }
@@ -945,16 +1311,13 @@ impl BinaryMatch {
         Self::suffix(s.as_bytes().to_vec())
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.pattern.is_empty()
+    pub fn is_wildcard(&self) -> bool {
+        self.match_type == BinaryMatchType::Any
     }
 
     pub fn matches(&self, input: &[u8]) -> bool {
-        if self.pattern.is_empty() {
-            return true;
-        }
-
         match self.match_type {
+            BinaryMatchType::Any => true,
             BinaryMatchType::Exact => input == self.pattern.as_slice(),
             BinaryMatchType::Prefix => input.starts_with(&self.pattern),
             BinaryMatchType::Suffix => input.ends_with(&self.pattern),
@@ -967,7 +1330,7 @@ impl BinaryMatch {
 }
 
 #[cfg(feature = "moqt")]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum NamespaceMatch {
     Match(BinaryMatch),
     Nil,
@@ -1002,11 +1365,11 @@ impl NamespaceMatch {
 }
 
 #[cfg(feature = "moqt")]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct MoqtScope {
-    pub actions: Vec<MoqtAction>,
-    pub namespace_matches: Vec<NamespaceMatch>,
-    pub track_match: Option<BinaryMatch>,
+    pub(crate) actions: Vec<MoqtAction>,
+    pub(crate) namespace_matches: Vec<NamespaceMatch>,
+    pub(crate) track_match: Option<BinaryMatch>,
 }
 
 #[cfg(feature = "moqt")]
@@ -1051,6 +1414,18 @@ impl MoqtScope {
         self
     }
 
+    pub fn actions(&self) -> &[MoqtAction] {
+        &self.actions
+    }
+
+    pub fn namespace_matches(&self) -> &[NamespaceMatch] {
+        &self.namespace_matches
+    }
+
+    pub fn track_match(&self) -> Option<&BinaryMatch> {
+        self.track_match.as_ref()
+    }
+
     pub fn allows_action(&self, action: &MoqtAction) -> bool {
         self.actions.contains(action)
     }
@@ -1074,15 +1449,17 @@ impl MoqtScope {
         true
     }
 
-    pub fn matches_namespace(&self, namespace: &[u8]) -> bool {
+    pub fn matches_namespace(&self, namespace: &[Vec<u8>]) -> bool {
         if self.namespace_matches.is_empty() {
             return true;
         }
-        if let Some(first) = self.namespace_matches.first() {
-            first.matches(Some(namespace))
-        } else {
-            true
+        for (i, ns_match) in self.namespace_matches.iter().enumerate() {
+            let tuple_elem = namespace.get(i).map(|v| v.as_slice());
+            if !ns_match.matches(tuple_elem) {
+                return false;
+            }
         }
+        true
     }
 
     pub fn matches_track(&self, track: &[u8]) -> bool {
@@ -1094,13 +1471,13 @@ impl MoqtScope {
 }
 
 #[cfg(feature = "moqt")]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct MoqtClaims {
     pub moqt: Option<Vec<MoqtScope>>,
     pub moqt_reval: Option<f64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct CatToken {
     pub core: CoreClaims,
     pub cat: CatClaims,
@@ -1110,7 +1487,7 @@ pub struct CatToken {
     pub composite: CompositeClaims,
     #[cfg(feature = "moqt")]
     pub moqt: MoqtClaims,
-    pub custom: HashMap<i64, ciborium::Value>,
+    pub(crate) custom: HashMap<i64, ciborium::Value>,
 }
 
 impl Default for CatToken {
@@ -1226,7 +1603,7 @@ impl CatToken {
         self
     }
 
-    pub fn with_geo_coordinate(mut self, lat: f64, lon: f64, radius: Option<u32>) -> Self {
+    pub fn with_geo_coordinate(mut self, lat: f64, lon: f64, radius: u32) -> Self {
         let coord = GeoCoordinate { lat, lon, radius };
         match self.cat.catgeocoord {
             Some(ref mut coords) => coords.push(coord),
@@ -1296,10 +1673,14 @@ impl CatToken {
         self
     }
 
-    pub fn with_dpop_window(mut self, window_seconds: i64) -> Self {
+    /// Set the DPoP acceptance window. Fails if the value is non-positive or
+    /// exceeds [`CATDPOP_MAX_WINDOW_SECS`]; a silent fallback to defaults would
+    /// let a caller believe it configured a policy while the token carried a
+    /// different (or no) window.
+    pub fn with_dpop_window(mut self, window_seconds: i64) -> Result<Self, crate::CatError> {
         let settings = self.dpop.catdpop.take().unwrap_or_default();
-        self.dpop.catdpop = Some(settings.with_window(window_seconds));
-        self
+        self.dpop.catdpop = Some(settings.with_window(window_seconds)?);
+        Ok(self)
     }
 
     pub fn with_if_action(mut self, claim_key: i64, action: CatIfAction) -> Self {
@@ -1330,24 +1711,24 @@ impl CatToken {
         self
     }
 
-    pub fn with_ip_address(mut self, ip: impl Into<String>) -> Self {
-        let nip = NetworkIdentifier::from_ip_str(&ip.into()).expect("invalid IP address");
+    pub fn with_ip_address(mut self, ip: impl Into<String>) -> Result<Self, crate::CatError> {
+        let nip = NetworkIdentifier::from_ip_str(&ip.into())?;
         if let Some(ref mut nips) = self.cat.catnip {
             nips.push(nip);
         } else {
             self.cat.catnip = Some(vec![nip]);
         }
-        self
+        Ok(self)
     }
 
-    pub fn with_ip_range(mut self, range: impl Into<String>) -> Self {
-        let nip = NetworkIdentifier::from_cidr_str(&range.into()).expect("invalid CIDR range");
+    pub fn with_ip_range(mut self, range: impl Into<String>) -> Result<Self, crate::CatError> {
+        let nip = NetworkIdentifier::from_cidr_str(&range.into())?;
         if let Some(ref mut nips) = self.cat.catnip {
             nips.push(nip);
         } else {
             self.cat.catnip = Some(vec![nip]);
         }
-        self
+        Ok(self)
     }
 
     pub fn with_asn(mut self, asn: u32) -> Self {
@@ -1411,7 +1792,12 @@ impl CatToken {
     }
 
     #[cfg(feature = "moqt")]
-    pub fn allows_moqt_action(&self, action: &MoqtAction, namespace: &[u8], track: &[u8]) -> bool {
+    pub fn allows_moqt_action(
+        &self,
+        action: &MoqtAction,
+        namespace: &[Vec<u8>],
+        track: &[u8],
+    ) -> bool {
         if let Some(ref scopes) = self.moqt.moqt {
             scopes.iter().any(|scope| {
                 scope.allows_action(action)
@@ -1422,6 +1808,61 @@ impl CatToken {
             false
         }
     }
+
+    pub fn custom_claims(&self) -> &HashMap<i64, ciborium::Value> {
+        &self.custom
+    }
+
+    pub fn custom_claim(&self, key: i64) -> Option<&ciborium::Value> {
+        self.custom.get(&key)
+    }
+
+    pub fn set_custom_claim(
+        &mut self,
+        key: i64,
+        value: ciborium::Value,
+    ) -> Result<(), crate::CatError> {
+        if is_reserved_claim_id(key) {
+            return Err(crate::CatError::InvalidClaimValue(format!(
+                "Claim ID {key} is reserved and cannot be set as a custom claim"
+            )));
+        }
+        self.custom.insert(key, value);
+        Ok(())
+    }
+}
+
+fn is_reserved_claim_id(key: i64) -> bool {
+    matches!(
+        key,
+        CLAIM_ISS
+            | CLAIM_SUB
+            | CLAIM_AUD
+            | CLAIM_EXP
+            | CLAIM_NBF
+            | CLAIM_IAT
+            | CLAIM_CTI
+            | CLAIM_CNF
+            | CLAIM_GEOHASH
+            | CLAIM_CATREPLAY
+            | CLAIM_CATPOR
+            | CLAIM_CATV
+            | CLAIM_CATNIP
+            | CLAIM_CATU
+            | CLAIM_CATM
+            | CLAIM_CATALPN
+            | CLAIM_CATH
+            | CLAIM_CATGEOISO3166
+            | CLAIM_CATGEOCOORD
+            | CLAIM_CATGEOALT
+            | CLAIM_CATTPK
+            | CLAIM_CATIFDATA
+            | CLAIM_CATDPOP
+            | CLAIM_CATIF
+            | CLAIM_CATR
+            | CLAIM_MOQT
+            | CLAIM_MOQT_REVAL
+    )
 }
 
 /// Utility functions for creating composite claims

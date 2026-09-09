@@ -1,5 +1,12 @@
 // URI normalization per RFC 3986 §6.2.2-6.2.3 and RFC 9110 §4.2.3.
+//
+// This module provides a single URI parser used across the crate. The parser
+// is fail-closed for the strict CAT profile: userinfo (`user:pass@`) and
+// fragments (`#frag`) are rejected because both are stripped or ignored by
+// most HTTP servers/relays before authorization, creating a divergence between
+// what the token grants and what the request actually names.
 
+use crate::CatError;
 use crate::claims::*;
 
 #[derive(Debug, Clone, Default)]
@@ -62,22 +69,31 @@ impl UriComponents {
     }
 }
 
-pub fn decompose_uri(uri: &str) -> UriComponents {
-    let normalized = normalize_uri(uri);
+/// Parse and normalize a URI into components. Fail-closed per the strict
+/// CAT profile: userinfo and fragments are rejected because either form
+/// enables a divergence between the token's authorization surface and the
+/// URI a relay actually applies rules to.
+pub fn decompose_uri(uri: &str) -> Result<UriComponents, CatError> {
+    let normalized = normalize_uri(uri)?;
     parse_uri(&normalized)
 }
 
-fn parse_uri(uri: &str) -> UriComponents {
+fn parse_uri(uri: &str) -> Result<UriComponents, CatError> {
     let mut components = UriComponents::default();
+
+    if uri.contains('#') {
+        return Err(CatError::InvalidClaimValue(
+            "URI fragments are not permitted in this profile".to_string(),
+        ));
+    }
+
     let mut rest = uri;
 
-    // Extract scheme
     if let Some(pos) = rest.find("://") {
         components.scheme = rest[..pos].to_string();
         rest = &rest[pos + 3..];
     }
 
-    // Split authority from path
     let (authority, path_and_query) = if let Some(pos) = rest.find('/') {
         (&rest[..pos], &rest[pos..])
     } else if let Some(pos) = rest.find('?') {
@@ -86,15 +102,26 @@ fn parse_uri(uri: &str) -> UriComponents {
         (rest, "")
     };
 
-    // Strip userinfo (RFC 3986 §3.2.1) before host extraction
-    let authority = if let Some(at) = authority.rfind('@') {
-        &authority[at + 1..]
-    } else {
-        authority
-    };
+    if authority.contains('@') {
+        return Err(CatError::InvalidClaimValue(
+            "URI userinfo is not permitted in this profile".to_string(),
+        ));
+    }
 
-    // Parse authority: host[:port]
-    if let Some(pos) = authority.rfind(':') {
+    if authority.starts_with('[') {
+        if let Some(bracket_end) = authority.find(']') {
+            components.host = authority[..bracket_end + 1].to_string();
+            let after_bracket = &authority[bracket_end + 1..];
+            if let Some(port_str) = after_bracket.strip_prefix(':')
+                && !port_str.is_empty()
+                && port_str.chars().all(|c| c.is_ascii_digit())
+            {
+                components.port = port_str.to_string();
+            }
+        } else {
+            components.host = authority.to_string();
+        }
+    } else if let Some(pos) = authority.rfind(':') {
         let potential_port = &authority[pos + 1..];
         if potential_port.chars().all(|c| c.is_ascii_digit()) && !potential_port.is_empty() {
             components.host = authority[..pos].to_string();
@@ -106,7 +133,6 @@ fn parse_uri(uri: &str) -> UriComponents {
         components.host = authority.to_string();
     }
 
-    // Split path and query
     if let Some(pos) = path_and_query.find('?') {
         components.path = path_and_query[..pos].to_string();
         components.query = path_and_query[pos + 1..].to_string();
@@ -114,10 +140,18 @@ fn parse_uri(uri: &str) -> UriComponents {
         components.path = path_and_query.to_string();
     }
 
-    components
+    Ok(components)
 }
 
-pub fn normalize_uri(uri: &str) -> String {
+/// Normalize a URI per RFC 3986 §6.2.2-6.2.3. Rejects userinfo and fragments
+/// per the strict CAT profile — see [`decompose_uri`].
+pub fn normalize_uri(uri: &str) -> Result<String, CatError> {
+    if uri.contains('#') {
+        return Err(CatError::InvalidClaimValue(
+            "URI fragments are not permitted in this profile".to_string(),
+        ));
+    }
+
     let mut result = String::with_capacity(uri.len());
     let mut rest = uri;
 
@@ -128,7 +162,6 @@ pub fn normalize_uri(uri: &str) -> String {
         rest = &rest[pos + 3..];
     }
 
-    // Split authority from path+query
     let (authority, path_and_query) = if let Some(pos) = rest.find('/') {
         (&rest[..pos], &rest[pos..])
     } else if let Some(pos) = rest.find('?') {
@@ -137,12 +170,11 @@ pub fn normalize_uri(uri: &str) -> String {
         (rest, "")
     };
 
-    // Strip userinfo (RFC 3986 §3.2.1) before normalization
-    let authority = if let Some(at) = authority.rfind('@') {
-        &authority[at + 1..]
-    } else {
-        authority
-    };
+    if authority.contains('@') {
+        return Err(CatError::InvalidClaimValue(
+            "URI userinfo is not permitted in this profile".to_string(),
+        ));
+    }
 
     // §6.2.2.1 Case normalization: host to lowercase
     // §6.2.3 Scheme-based: remove default ports
@@ -173,7 +205,6 @@ pub fn normalize_uri(uri: &str) -> String {
         result.push_str(&authority.to_ascii_lowercase());
     }
 
-    // Process path
     let (path, query) = if let Some(pos) = path_and_query.find('?') {
         (&path_and_query[..pos], Some(&path_and_query[pos..]))
     } else {
@@ -195,7 +226,7 @@ pub fn normalize_uri(uri: &str) -> String {
         result.push_str(q);
     }
 
-    result
+    Ok(result)
 }
 
 fn remove_dot_segments(path: &str) -> String {
@@ -227,21 +258,23 @@ fn normalize_percent_encoding(s: &str) -> String {
     let mut i = 0;
 
     while i < bytes.len() {
-        if bytes[i] == b'%'
-            && i + 2 < bytes.len()
-            && let (Some(hi), Some(lo)) = (hex_val(bytes[i + 1]), hex_val(bytes[i + 2]))
-        {
-            let decoded = (hi << 4) | lo;
-            if is_unreserved(decoded) {
-                // §6.2.2.2: decode unreserved characters
-                result.push(decoded as char);
+        if bytes[i] == b'%' {
+            if i + 2 < bytes.len()
+                && let (Some(hi), Some(lo)) = (hex_val(bytes[i + 1]), hex_val(bytes[i + 2]))
+            {
+                let decoded = (hi << 4) | lo;
+                if is_unreserved(decoded) {
+                    result.push(decoded as char);
+                } else {
+                    result.push('%');
+                    result.push(to_upper_hex(hi));
+                    result.push(to_upper_hex(lo));
+                }
+                i += 3;
             } else {
-                // §6.2.2.2: uppercase hex digits for reserved/other
-                result.push('%');
-                result.push(to_upper_hex(hi));
-                result.push(to_upper_hex(lo));
+                result.push_str("%25");
+                i += 1;
             }
-            i += 3;
             continue;
         }
         result.push(bytes[i] as char);
@@ -279,9 +312,12 @@ mod tests {
 
     #[test]
     fn test_scheme_lowercase() {
-        assert_eq!(normalize_uri("HTTP://example.com/"), "http://example.com/");
         assert_eq!(
-            normalize_uri("HTTPS://Example.COM/path"),
+            normalize_uri("HTTP://example.com/").unwrap(),
+            "http://example.com/"
+        );
+        assert_eq!(
+            normalize_uri("HTTPS://Example.COM/path").unwrap(),
             "https://example.com/path"
         );
     }
@@ -289,7 +325,7 @@ mod tests {
     #[test]
     fn test_host_lowercase() {
         assert_eq!(
-            normalize_uri("https://EXAMPLE.COM/"),
+            normalize_uri("https://EXAMPLE.COM/").unwrap(),
             "https://example.com/"
         );
     }
@@ -297,57 +333,58 @@ mod tests {
     #[test]
     fn test_default_port_removal() {
         assert_eq!(
-            normalize_uri("http://example.com:80/"),
+            normalize_uri("http://example.com:80/").unwrap(),
             "http://example.com/"
         );
         assert_eq!(
-            normalize_uri("https://example.com:443/"),
+            normalize_uri("https://example.com:443/").unwrap(),
             "https://example.com/"
         );
         assert_eq!(
-            normalize_uri("https://example.com:8080/"),
+            normalize_uri("https://example.com:8080/").unwrap(),
             "https://example.com:8080/"
         );
     }
 
     #[test]
     fn test_empty_path() {
-        assert_eq!(normalize_uri("https://example.com"), "https://example.com/");
+        assert_eq!(
+            normalize_uri("https://example.com").unwrap(),
+            "https://example.com/"
+        );
     }
 
     #[test]
     fn test_dot_segments() {
         assert_eq!(
-            normalize_uri("https://example.com/a/b/../c"),
+            normalize_uri("https://example.com/a/b/../c").unwrap(),
             "https://example.com/a/c"
         );
         assert_eq!(
-            normalize_uri("https://example.com/a/./b"),
+            normalize_uri("https://example.com/a/./b").unwrap(),
             "https://example.com/a/b"
         );
         assert_eq!(
-            normalize_uri("https://example.com/a/b/c/../../d"),
+            normalize_uri("https://example.com/a/b/c/../../d").unwrap(),
             "https://example.com/a/d"
         );
     }
 
     #[test]
     fn test_percent_encoding_normalization() {
-        // Unreserved chars should be decoded
         assert_eq!(
-            normalize_uri("https://example.com/%61%62%63"),
+            normalize_uri("https://example.com/%61%62%63").unwrap(),
             "https://example.com/abc"
         );
-        // Reserved chars stay encoded but with uppercase hex
         assert_eq!(
-            normalize_uri("https://example.com/%2f"),
+            normalize_uri("https://example.com/%2f").unwrap(),
             "https://example.com/%2F"
         );
     }
 
     #[test]
     fn test_decompose() {
-        let c = decompose_uri("https://example.com:8080/api/v1/resource.json?key=value");
+        let c = decompose_uri("https://example.com:8080/api/v1/resource.json?key=value").unwrap();
         assert_eq!(c.scheme, "https");
         assert_eq!(c.host, "example.com");
         assert_eq!(c.port, "8080");
@@ -357,7 +394,7 @@ mod tests {
 
     #[test]
     fn test_decompose_components() {
-        let c = decompose_uri("https://example.com/api/v1/data.json");
+        let c = decompose_uri("https://example.com/api/v1/data.json").unwrap();
         assert_eq!(c.component(URI_COMPONENT_SCHEME), "https");
         assert_eq!(c.component(URI_COMPONENT_HOST), "example.com");
         assert_eq!(c.component(URI_COMPONENT_PATH), "/api/v1/data.json");
@@ -365,5 +402,19 @@ mod tests {
         assert_eq!(c.component(URI_COMPONENT_FILENAME), "data.json");
         assert_eq!(c.component(URI_COMPONENT_STEM), "data");
         assert_eq!(c.component(URI_COMPONENT_EXTENSION), "json");
+    }
+
+    #[test]
+    fn test_userinfo_rejected() {
+        assert!(decompose_uri("https://user:pass@example.com/").is_err());
+        assert!(decompose_uri("https://user@example.com/").is_err());
+        assert!(normalize_uri("https://alice@example.com/api").is_err());
+    }
+
+    #[test]
+    fn test_fragment_rejected() {
+        assert!(decompose_uri("https://example.com/path#frag").is_err());
+        assert!(normalize_uri("https://example.com/path#").is_err());
+        assert!(decompose_uri("https://example.com/p?k=v#f").is_err());
     }
 }

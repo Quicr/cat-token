@@ -48,7 +48,7 @@ fn test_comprehensive_token_creation() {
         .uri_match_rules(uri_match_rules.clone())
         .header_match_rules(header_match_rules.clone())
         .replay_protection(cat_token::ReplayProtection::Prohibited)
-        .geo_coordinate(40.7128, -74.0060, Some(100)) // New York City
+        .geo_coordinate(40.7128, -74.0060, 100) // New York City
         .geohash("dr5regw")
         // Informational claims
         .subject("user@example.com")
@@ -56,18 +56,12 @@ fn test_comprehensive_token_creation() {
         .interface_data("mobile-interface-v2")
         // DPoP claims
         .confirmation(b"jwk-thumbprint-xyz".to_vec())
-        .dpop_settings(cat_token::CatDpopSettings::new().with_window(300))
+        .dpop_settings(cat_token::CatDpopSettings::new().with_window(300).unwrap())
         // Request claims
-        .if_action(
-            CLAIM_EXP,
-            CatIfAction {
-                status: 401,
-                headers: None,
-                kid: None,
-            },
-        )
-        .renewal(CatRenewal::automatic().with_expadd(3600))
-        .build();
+        .if_action(CLAIM_EXP, CatIfAction::new(401).unwrap())
+        .renewal(CatRenewal::automatic().with_expadd(3600.0).unwrap())
+        .build()
+        .unwrap();
 
     // Verify all claims are properly set
     assert_eq!(token.core.iss, Some("https://auth.example.com".to_string()));
@@ -113,14 +107,14 @@ fn test_comprehensive_token_creation() {
         b"jwk-thumbprint-xyz".to_vec()
     );
     assert!(token.dpop.catdpop.is_some());
-    assert_eq!(token.dpop.catdpop.as_ref().unwrap().window, Some(300));
+    assert_eq!(token.dpop.catdpop.as_ref().unwrap().window(), Some(300));
 
     let catif = token.request.catif.as_ref().unwrap();
     assert_eq!(catif[0].0, CLAIM_EXP);
-    assert_eq!(catif[0].1.status, 401);
+    assert_eq!(catif[0].1.status(), 401);
     let catr = token.request.catr.as_ref().unwrap();
-    assert_eq!(catr.renewal_type, CatRenewalType::Automatic);
-    assert_eq!(catr.expadd, Some(3600));
+    assert_eq!(catr.renewal_type(), CatRenewalType::Automatic);
+    assert_eq!(catr.expadd(), Some(3600.0));
 }
 
 #[test]
@@ -134,14 +128,15 @@ fn test_token_validation_comprehensive() {
         .with_audience(vec!["expected-audience".to_string()])
         .with_expiration(exp)
         .with_not_before(nbf)
-        .with_geo_coordinate(37.7749, -122.4194, Some(50)); // San Francisco
+        .with_geo_coordinate(37.7749, -122.4194, 50); // San Francisco
 
     let validator = CatTokenValidator::new()
         .with_expected_issuers(vec!["https://trusted.issuer.com".to_string()])
         .with_expected_audiences(vec!["expected-audience".to_string()])
-        .with_clock_skew_tolerance(120);
+        .with_clock_skew_tolerance(120)
+        .unwrap()
+        .allow_unencrypted_privacy_claims();
 
-    // Should pass validation
     assert!(validator.validate(&token).is_ok());
 }
 
@@ -189,17 +184,17 @@ fn test_token_validation_failures() {
 
 #[test]
 fn test_geographic_validation() {
-    let validator = CatTokenValidator::new();
+    let validator = CatTokenValidator::new().allow_unencrypted_privacy_claims();
 
     // Valid coordinates
     let valid_token = CatToken::new()
-        .with_geo_coordinate(45.0, 90.0, Some(10))
+        .with_geo_coordinate(45.0, 90.0, 10)
         .with_geohash("u4pruydq");
 
     assert!(validator.validate(&valid_token).is_ok());
 
     // Invalid latitude
-    let invalid_lat_token = CatToken::new().with_geo_coordinate(91.0, 0.0, None);
+    let invalid_lat_token = CatToken::new().with_geo_coordinate(91.0, 0.0, 0);
 
     match validator.validate(&invalid_lat_token) {
         Err(CatError::GeographicValidationFailed(_)) => (),
@@ -207,7 +202,7 @@ fn test_geographic_validation() {
     }
 
     // Invalid longitude
-    let invalid_lon_token = CatToken::new().with_geo_coordinate(0.0, 181.0, None);
+    let invalid_lon_token = CatToken::new().with_geo_coordinate(0.0, 181.0, 0);
 
     match validator.validate(&invalid_lon_token) {
         Err(CatError::GeographicValidationFailed(_)) => (),
@@ -241,14 +236,7 @@ fn test_cwt_encoding_decoding() {
         .with_version(1)
         .with_subject("test-user")
         .with_confirmation(b"test-confirmation".to_vec())
-        .with_if_action(
-            CLAIM_EXP,
-            CatIfAction {
-                status: 403,
-                headers: None,
-                kid: None,
-            },
-        );
+        .with_if_action(CLAIM_EXP, CatIfAction::new(403).unwrap());
 
     let cwt = Cwt::new(-7, original_token.clone()); // ES256 algorithm
 
@@ -432,7 +420,7 @@ fn test_maximal_token() {
             ],
         }])
         .with_replay_protection(cat_token::ReplayProtection::Prohibited)
-        .with_geo_coordinate(51.5074, -0.1278, Some(25)) // London
+        .with_geo_coordinate(51.5074, -0.1278, 25) // London
         .with_geohash("gcpvj0du")
         .with_header_match_rules(vec![HeaderMatchRule {
             name: "Accept".to_string(),
@@ -447,18 +435,12 @@ fn test_maximal_token() {
         .with_dpop_settings(
             cat_token::CatDpopSettings::new()
                 .with_window(600)
+                .unwrap()
                 .with_jti_processing(true),
         )
         // All request claims
-        .with_if_action(
-            CLAIM_EXP,
-            CatIfAction {
-                status: 401,
-                headers: None,
-                kid: None,
-            },
-        )
-        .with_renewal(CatRenewal::cookie("token").with_expadd(7200));
+        .with_if_action(CLAIM_EXP, CatIfAction::new(401).unwrap())
+        .with_renewal(CatRenewal::cookie("token").with_expadd(7200.0).unwrap());
 
     // Verify all claims are set
     assert!(token.core.iss.is_some());

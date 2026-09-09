@@ -137,5 +137,5 @@ fn test_sf_normalized_matching_with_cath() {
     }]);
 
     let input = normalize_sf_value("gzip,  deflate,   br").unwrap();
-    assert!(validate_header(&token, "accept-encoding", &input).is_ok());
+    assert!(validate_all_headers(&token, &[("accept-encoding", &input)]).is_ok());
 }

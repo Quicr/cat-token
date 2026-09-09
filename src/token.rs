@@ -1,30 +1,63 @@
 // SPDX-FileCopyrightText: Copyright (c) 2022 Quicr
 // SPDX-License-Identifier: BSD-2-Clause
 
+use crate::cwt::CwtLimits;
+use crate::pipeline::{TokenHeader, TokenProvenance, VerifiedToken};
 use crate::{CatError, CatToken, CryptographicAlgorithm, Cwt, CwtHeader, NetworkIdentifier};
-use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use base64::{
+    Engine as _,
+    engine::general_purpose::{URL_SAFE, URL_SAFE_NO_PAD},
+};
 use chrono::{DateTime, Utc};
 use lru::LruCache;
+use std::cell::RefCell;
 use std::collections::HashSet;
 use std::num::NonZeroUsize;
 use std::sync::Mutex;
 
 const COSE_TAG_SIGN1: u64 = 18;
 const COSE_TAG_MAC0: u64 = 17;
+const REGEX_CACHE_SIZE: usize = 64;
+
+/// Maximum accepted clock-skew tolerance (seconds). RFC 8392 and CTA-5007-B do
+/// not specify a cap; we bound it defensively so operators cannot inadvertently
+/// disable expiry enforcement by configuring an unbounded tolerance. 1 hour is
+/// well above realistic NTP drift while keeping expired tokens meaningfully
+/// rejected.
+pub const MAX_CLOCK_SKEW_TOLERANCE_SECS: i64 = 3600;
+
+thread_local! {
+    static REGEX_CACHE: RefCell<LruCache<String, regex::Regex>> = RefCell::new(
+        LruCache::new(NonZeroUsize::new(REGEX_CACHE_SIZE).unwrap())
+    );
+}
 
 pub struct CatTokenValidator {
     expected_issuers: Option<HashSet<String>>,
     expected_audiences: Option<HashSet<String>>,
-    /// Clock skew tolerance for expiration (seconds past exp that token is still valid)
     exp_tolerance: i64,
-    /// Clock skew tolerance for not-before (seconds before nbf that token is valid)
     nbf_tolerance: i64,
+    allow_unencrypted_privacy_claims: bool,
 }
 
 impl Default for CatTokenValidator {
     fn default() -> Self {
         Self::new()
     }
+}
+
+fn check_tolerance(name: &str, seconds: i64) -> Result<(), CatError> {
+    if seconds < 0 {
+        return Err(CatError::InvalidClaimValue(format!(
+            "{name} must not be negative"
+        )));
+    }
+    if seconds > MAX_CLOCK_SKEW_TOLERANCE_SECS {
+        return Err(CatError::InvalidClaimValue(format!(
+            "{name} {seconds}s exceeds cap of {MAX_CLOCK_SKEW_TOLERANCE_SECS}s"
+        )));
+    }
+    Ok(())
 }
 
 impl CatTokenValidator {
@@ -34,6 +67,7 @@ impl CatTokenValidator {
             expected_audiences: None,
             exp_tolerance: 0,
             nbf_tolerance: 0,
+            allow_unencrypted_privacy_claims: false,
         }
     }
 
@@ -47,36 +81,63 @@ impl CatTokenValidator {
         self
     }
 
-    /// Set symmetric clock skew tolerance for both exp and nbf
-    pub fn with_clock_skew_tolerance(mut self, tolerance_seconds: i64) -> Self {
+    pub fn with_clock_skew_tolerance(mut self, tolerance_seconds: i64) -> Result<Self, CatError> {
+        check_tolerance("clock skew tolerance", tolerance_seconds)?;
         self.exp_tolerance = tolerance_seconds;
         self.nbf_tolerance = tolerance_seconds;
-        self
+        Ok(self)
     }
 
-    /// Set separate tolerances for expiration and not-before checks.
-    ///
-    /// - `exp_tolerance`: seconds past expiration that token is still accepted
-    /// - `nbf_tolerance`: seconds before not-before that token is accepted
-    pub fn with_separate_tolerances(mut self, exp_tolerance: i64, nbf_tolerance: i64) -> Self {
+    pub fn with_separate_tolerances(
+        mut self,
+        exp_tolerance: i64,
+        nbf_tolerance: i64,
+    ) -> Result<Self, CatError> {
+        check_tolerance("exp tolerance", exp_tolerance)?;
+        check_tolerance("nbf tolerance", nbf_tolerance)?;
         self.exp_tolerance = exp_tolerance;
         self.nbf_tolerance = nbf_tolerance;
+        Ok(self)
+    }
+
+    pub fn allow_unencrypted_privacy_claims(mut self) -> Self {
+        self.allow_unencrypted_privacy_claims = true;
         self
     }
 
     pub fn validate(&self, token: &CatToken) -> Result<(), CatError> {
+        self.validate_with_provenance(token, TokenProvenance::Signed)
+    }
+
+    pub fn validate_with_provenance(
+        &self,
+        token: &CatToken,
+        provenance: TokenProvenance,
+    ) -> Result<(), CatError> {
         let now = Utc::now().timestamp();
 
-        if let Some(exp) = token.core.exp
-            && now > exp + self.exp_tolerance
-        {
-            return Err(CatError::TokenExpired);
+        if let Some(exp) = token.core.exp {
+            let effective_exp = exp.checked_add(self.exp_tolerance).ok_or_else(|| {
+                CatError::InvalidClaimValue(
+                    "exp + tolerance overflows i64 — reject rather than accept an unbounded window"
+                        .to_string(),
+                )
+            })?;
+            if now > effective_exp {
+                return Err(CatError::TokenExpired);
+            }
         }
 
-        if let Some(nbf) = token.core.nbf
-            && now < nbf - self.nbf_tolerance
-        {
-            return Err(CatError::TokenNotYetValid);
+        if let Some(nbf) = token.core.nbf {
+            let effective_nbf = nbf.checked_sub(self.nbf_tolerance).ok_or_else(|| {
+                CatError::InvalidClaimValue(
+                    "nbf - tolerance underflows i64 — reject rather than accept an unbounded window"
+                        .to_string(),
+                )
+            })?;
+            if now < effective_nbf {
+                return Err(CatError::TokenNotYetValid);
+            }
         }
 
         if let Some(ref expected_issuers) = self.expected_issuers {
@@ -107,11 +168,34 @@ impl CatTokenValidator {
             )));
         }
 
+        self.validate_privacy_claims(token, provenance)?;
         self.validate_geographic_restrictions(token)?;
-        self.validate_usage_limits(token)?;
         self.validate_regex_ere(token)?;
         self.validate_composite_claims(token)?;
 
+        Ok(())
+    }
+
+    fn validate_privacy_claims(
+        &self,
+        token: &CatToken,
+        provenance: TokenProvenance,
+    ) -> Result<(), CatError> {
+        if self.allow_unencrypted_privacy_claims || provenance == TokenProvenance::Encrypted {
+            return Ok(());
+        }
+        if token.informational.sub.is_some() {
+            return Err(CatError::UnencryptedPrivacyClaim("sub".to_string()));
+        }
+        if token.cat.catgeocoord.is_some() {
+            return Err(CatError::UnencryptedPrivacyClaim("catgeocoord".to_string()));
+        }
+        if token.cat.geohash.is_some() {
+            return Err(CatError::UnencryptedPrivacyClaim("geohash".to_string()));
+        }
+        if token.cat.catgeoalt.is_some() {
+            return Err(CatError::UnencryptedPrivacyClaim("catgeoalt".to_string()));
+        }
         Ok(())
     }
 
@@ -163,10 +247,6 @@ impl CatTokenValidator {
             }
         }
 
-        Ok(())
-    }
-
-    fn validate_usage_limits(&self, _token: &CatToken) -> Result<(), CatError> {
         Ok(())
     }
 
@@ -245,12 +325,24 @@ pub fn apply_match_value(mv: &crate::claims::MatchValue, input: &str) -> bool {
         MatchValue::Prefix(s) => input.starts_with(s.as_str()),
         MatchValue::Suffix(s) => input.ends_with(s.as_str()),
         MatchValue::Contains(s) => input.contains(s.as_str()),
-        MatchValue::Regex(pattern) => regex::RegexBuilder::new(pattern)
-            .size_limit(1 << 20) // 1MB NFA size limit
-            .dfa_size_limit(1 << 20)
-            .build()
-            .map(|re| re.is_match(input))
-            .unwrap_or(false),
+        MatchValue::Regex(pattern) => REGEX_CACHE.with(|cache| {
+            let mut cache = cache.borrow_mut();
+            if let Some(re) = cache.get(pattern) {
+                return re.is_match(input);
+            }
+            match regex::RegexBuilder::new(pattern)
+                .size_limit(1 << 20)
+                .dfa_size_limit(1 << 20)
+                .build()
+            {
+                Ok(re) => {
+                    let result = re.is_match(input);
+                    cache.put(pattern.clone(), re);
+                    result
+                }
+                Err(_) => false,
+            }
+        }),
         MatchValue::Sha256(expected) => {
             use sha2::{Digest, Sha256};
             let hash = Sha256::digest(input.as_bytes());
@@ -264,23 +356,47 @@ pub fn apply_match_value(mv: &crate::claims::MatchValue, input: &str) -> bool {
     }
 }
 
-/// Validate an HTTP header against `cath` rules.
-/// Header name comparison is case-insensitive per CTA-5007-B §4.6.13.
-pub fn validate_header(token: &CatToken, name: &str, value: &str) -> Result<(), CatError> {
+/// Validate every `cath` header rule against the request's full header set.
+///
+/// This is the only supported entry point for `cath` enforcement. It is
+/// fail-closed: every rule in the token must be satisfied by at least one
+/// matching header in `request_headers`, and a missing header is a failure.
+///
+/// Header name comparison is case-insensitive per CTA-5007-B §4.6.13. Values
+/// are unfolded per RFC 9110 §5.2 before matching.
+///
+/// A previous single-header entry point that silently succeeded when the
+/// caller failed to check a header has been removed: callers must pass the
+/// complete header list so no rule can be bypassed.
+pub fn validate_all_headers(
+    token: &CatToken,
+    request_headers: &[(&str, &str)],
+) -> Result<(), CatError> {
     if let Some(ref rules) = token.cat.cath {
         for rule in rules {
-            if rule.name.eq_ignore_ascii_case(name) {
-                let unfolded = unfold_header_value(value);
-                if !rule
-                    .matches
-                    .iter()
-                    .any(|mv| apply_match_value(mv, &unfolded))
-                {
+            let matching_header = request_headers
+                .iter()
+                .find(|(name, _)| rule.name.eq_ignore_ascii_case(name));
+            match matching_header {
+                Some((_, value)) => {
+                    let unfolded = unfold_header_value(value);
+                    if !rule
+                        .matches
+                        .iter()
+                        .any(|mv| apply_match_value(mv, &unfolded))
+                    {
+                        return Err(CatError::InvalidClaimValue(format!(
+                            "Header '{}' value does not match any rule",
+                            rule.name
+                        )));
+                    }
+                }
+                None => {
                     return Err(CatError::InvalidClaimValue(format!(
-                        "Header '{name}' value does not match any rule"
+                        "Required header '{}' is missing from request",
+                        rule.name
                     )));
                 }
-                return Ok(());
             }
         }
     }
@@ -310,6 +426,142 @@ pub fn unfold_header_value(value: &str) -> String {
         }
     }
     result
+}
+
+/// Caller-side replay guard used to enforce the token's `catreplay` claim.
+///
+/// Implementations back this with whatever storage matches the deployment
+/// (e.g. in-memory LRU, Redis, distributed key-value store). The
+/// authorization pipeline calls `check_and_record` before granting the
+/// request: the guard returns whether the token's cti has been seen
+/// previously and atomically records the observation for future calls.
+///
+/// Called only when the token carries a `catreplay` claim that requires
+/// per-cti bookkeeping (`Prohibited` or `ReuseDetection`).
+pub trait ReplayGuard: Send + Sync {
+    /// Returns true if the token's `cti` has been observed before. Records
+    /// this observation atomically so a concurrent request sees the same
+    /// answer. Callers pass the token's `cti` (which the encoder guarantees
+    /// is non-empty when `catreplay` is `Prohibited` or `ReuseDetection`).
+    fn check_and_record(&self, cti: &[u8]) -> Result<bool, CatError>;
+}
+
+/// Enforce the token's `catreplay` claim using the supplied guard.
+///
+/// - `Permitted`: no-op; the token allows unlimited reuse.
+/// - `Prohibited`: on first observation, `Ok(false)`; on any repeat,
+///   `Err(ReplayDetected)`.
+/// - `ReuseDetection`: on first observation, `Ok(false)`; on repeat,
+///   `Ok(true)` — the caller may still authorize but should flag the reuse
+///   for audit. The return value signals whether reuse was detected.
+///
+/// Fail-closed: a token that requires replay bookkeeping but has no `cti` is
+/// rejected. A guard-side error propagates as `Err`.
+pub fn enforce_catreplay<G: ReplayGuard + ?Sized>(
+    token: &CatToken,
+    guard: &G,
+) -> Result<bool, CatError> {
+    let mode = match token.cat.catreplay {
+        Some(m) => m,
+        None => return Ok(false),
+    };
+    match mode {
+        crate::claims::ReplayProtection::Permitted => Ok(false),
+        crate::claims::ReplayProtection::Prohibited => {
+            let cti = token.core.cti.as_ref().ok_or_else(|| {
+                CatError::MissingRequiredClaim("cti required when catreplay=Prohibited".to_string())
+            })?;
+            if guard.check_and_record(cti)? {
+                Err(CatError::ReplayAttackDetected)
+            } else {
+                Ok(false)
+            }
+        }
+        crate::claims::ReplayProtection::ReuseDetection => {
+            let cti = token.core.cti.as_ref().ok_or_else(|| {
+                CatError::MissingRequiredClaim(
+                    "cti required when catreplay=ReuseDetection".to_string(),
+                )
+            })?;
+            let seen = guard.check_and_record(cti)?;
+            Ok(seen)
+        }
+    }
+}
+
+/// Enforce a token's `catu` URI match rules against a request URI. Fail-closed:
+/// every rule in the token must be satisfied by at least one match value on
+/// the corresponding component of `request_uri`. A missing token claim is a
+/// no-op; a malformed request URI or an unsatisfied rule is an error.
+pub fn enforce_catu(token: &CatToken, request_uri: &str) -> Result<(), CatError> {
+    let rules = match token.cat.catu.as_ref() {
+        Some(r) => r,
+        None => return Ok(()),
+    };
+    let components = crate::uri::decompose_uri(request_uri)?;
+    for rule in rules {
+        let target = components.component(rule.component);
+        if !rule.matches.iter().any(|mv| apply_match_value(mv, target)) {
+            return Err(CatError::InvalidClaimValue(format!(
+                "catu: URI component {} does not match any allowed value",
+                rule.component
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Enforce a token's `catnip` (network identifier) claim against the peer's
+/// IP address and/or ASN. Fail-closed: if the token has any IP-typed
+/// identifier, the caller must supply `peer_ip`; likewise for ASN-typed
+/// identifiers and `peer_asn`. Approval requires at least one identifier
+/// (across both families) to match.
+pub fn enforce_catnip(
+    token: &CatToken,
+    peer_ip: Option<std::net::IpAddr>,
+    peer_asn: Option<u32>,
+) -> Result<(), CatError> {
+    let nips = match token.cat.catnip.as_ref() {
+        Some(n) => n,
+        None => return Ok(()),
+    };
+    if nips.is_empty() {
+        return Ok(());
+    }
+
+    let has_ip_rule = nips.iter().any(|n| n.is_ip_based());
+    let has_asn_rule = nips.iter().any(|n| n.is_asn_based());
+
+    if has_ip_rule && peer_ip.is_none() {
+        return Err(CatError::InvalidClaimValue(
+            "catnip: token asserts IP restriction but request context has no peer IP".to_string(),
+        ));
+    }
+    if has_asn_rule && peer_asn.is_none() {
+        return Err(CatError::InvalidClaimValue(
+            "catnip: token asserts ASN restriction but request context has no peer ASN".to_string(),
+        ));
+    }
+
+    let matched = nips.iter().any(|n| {
+        if let Some(ip) = peer_ip
+            && n.matches_ip(ip)
+        {
+            return true;
+        }
+        if let Some(asn) = peer_asn
+            && n.matches_asn(asn)
+        {
+            return true;
+        }
+        false
+    });
+    if !matched {
+        return Err(CatError::InvalidClaimValue(
+            "catnip: peer network identifier does not match any token identifier".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 /// Block list for catpor probability-of-rejection enforcement.
@@ -392,7 +644,8 @@ pub fn strip_token_from_uri(uri: &str, param_names: &[&str]) -> String {
             .split('&')
             .filter(|param| {
                 let key = param.split('=').next().unwrap_or("");
-                !param_names.contains(&key)
+                let decoded_key = percent_decode(key);
+                !param_names.contains(&decoded_key.as_str())
             })
             .collect();
         if filtered.is_empty() {
@@ -403,6 +656,26 @@ pub fn strip_token_from_uri(uri: &str, param_names: &[&str]) -> String {
     } else {
         uri.to_string()
     }
+}
+
+fn percent_decode(s: &str) -> String {
+    let mut result = Vec::with_capacity(s.len());
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%'
+            && i + 2 < bytes.len()
+            && let Ok(byte) =
+                u8::from_str_radix(std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or(""), 16)
+        {
+            result.push(byte);
+            i += 3;
+            continue;
+        }
+        result.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8(result).unwrap_or_else(|_| s.to_string())
 }
 
 pub struct CatTokenBuilder {
@@ -487,7 +760,7 @@ impl CatTokenBuilder {
         self
     }
 
-    pub fn geo_coordinate(mut self, lat: f64, lon: f64, radius: Option<u32>) -> Self {
+    pub fn geo_coordinate(mut self, lat: f64, lon: f64, radius: u32) -> Self {
         self.inner = self.inner.with_geo_coordinate(lat, lon, radius);
         self
     }
@@ -532,9 +805,9 @@ impl CatTokenBuilder {
         self
     }
 
-    pub fn dpop_window(mut self, window_seconds: i64) -> Self {
-        self.inner = self.inner.with_dpop_window(window_seconds);
-        self
+    pub fn dpop_window(mut self, window_seconds: i64) -> Result<Self, CatError> {
+        self.inner = self.inner.with_dpop_window(window_seconds)?;
+        Ok(self)
     }
 
     pub fn if_action(mut self, claim_key: i64, action: crate::claims::CatIfAction) -> Self {
@@ -562,14 +835,14 @@ impl CatTokenBuilder {
         self
     }
 
-    pub fn ip_address(mut self, ip: impl Into<String>) -> Self {
-        self.inner = self.inner.with_ip_address(ip);
-        self
+    pub fn ip_address(mut self, ip: impl Into<String>) -> Result<Self, CatError> {
+        self.inner = self.inner.with_ip_address(ip)?;
+        Ok(self)
     }
 
-    pub fn ip_range(mut self, range: impl Into<String>) -> Self {
-        self.inner = self.inner.with_ip_range(range);
-        self
+    pub fn ip_range(mut self, range: impl Into<String>) -> Result<Self, CatError> {
+        self.inner = self.inner.with_ip_range(range)?;
+        Ok(self)
     }
 
     pub fn asn(mut self, asn: u32) -> Self {
@@ -616,8 +889,31 @@ impl CatTokenBuilder {
         self
     }
 
-    pub fn build(self) -> CatToken {
-        self.inner
+    pub fn build(self) -> Result<CatToken, CatError> {
+        if let Some(ref coords) = self.inner.cat.catgeocoord {
+            for coord in coords {
+                if coord.lat < -90.0 || coord.lat > 90.0 {
+                    return Err(CatError::InvalidClaimValue(format!(
+                        "latitude {} out of range [-90, 90]",
+                        coord.lat
+                    )));
+                }
+                if coord.lon < -180.0 || coord.lon > 180.0 {
+                    return Err(CatError::InvalidClaimValue(format!(
+                        "longitude {} out of range [-180, 180]",
+                        coord.lon
+                    )));
+                }
+            }
+        }
+        if let Some(ref dpop) = self.inner.dpop.catdpop
+            && dpop.effective_window() < 0
+        {
+            return Err(CatError::InvalidClaimValue(
+                "DPoP window must not be negative".to_string(),
+            ));
+        }
+        Ok(self.inner)
     }
 }
 
@@ -696,21 +992,129 @@ pub fn encode_token_base64(
     Ok(URL_SAFE_NO_PAD.encode(&bytes))
 }
 
-const MAX_TOKEN_SIZE: usize = 1024 * 1024; // 1MB
+const MAX_TOKEN_SIZE: usize = 16 * 1024; // 16KB — relay-appropriate default
 
 /// Decode a CatToken from COSE_Sign1 (tag 18) or COSE_Mac0 (tag 17) CBOR bytes.
+///
+/// Returns a `VerifiedToken` whose signature has been verified. Call
+/// `.validate()` on it to produce a `ValidatedToken` suitable for authorization.
 pub fn decode_token(
     cose_bytes: &[u8],
     algorithm: &dyn CryptographicAlgorithm,
-) -> Result<CatToken, CatError> {
+) -> Result<VerifiedToken, CatError> {
+    decode_token_with_limits(cose_bytes, algorithm, &CwtLimits::default())
+}
+
+pub fn decode_token_with_limits(
+    cose_bytes: &[u8],
+    algorithm: &dyn CryptographicAlgorithm,
+    limits: &CwtLimits,
+) -> Result<VerifiedToken, CatError> {
+    let envelope = parse_cose_envelope(cose_bytes)?;
+    verify_and_decode(&envelope, algorithm, limits, cose_bytes.to_vec())
+}
+
+/// Decode a CatToken from a base64url-encoded COSE structure.
+pub fn decode_token_base64(
+    token_str: &str,
+    algorithm: &dyn CryptographicAlgorithm,
+) -> Result<VerifiedToken, CatError> {
+    let bytes = URL_SAFE_NO_PAD
+        .decode(token_str)
+        .or_else(|_| URL_SAFE.decode(token_str))
+        .map_err(|e| CatError::InvalidBase64(e.to_string()))?;
+    decode_token(&bytes, algorithm)
+}
+
+/// Decode a CatToken from a COSE_Encrypt0 envelope wrapping a signed/MACed token.
+pub fn decode_encrypted_token(
+    cose_bytes: &[u8],
+    encryption_key: &[u8],
+    signing_algorithm: &dyn CryptographicAlgorithm,
+) -> Result<VerifiedToken, CatError> {
+    decode_encrypted_token_with_limits(
+        cose_bytes,
+        encryption_key,
+        signing_algorithm,
+        &CwtLimits::default(),
+    )
+}
+
+pub fn decode_encrypted_token_with_limits(
+    cose_bytes: &[u8],
+    encryption_key: &[u8],
+    signing_algorithm: &dyn CryptographicAlgorithm,
+    limits: &CwtLimits,
+) -> Result<VerifiedToken, CatError> {
+    // The inner signed token is bounded by MAX_TOKEN_SIZE; the CBOR payload
+    // inside that signed token is further bounded by limits.max_cbor_payload_size.
+    // Use the tighter of the two so a hostile Encrypt0 cannot bypass the CBOR
+    // budget by hiding oversize plaintext inside an outer envelope.
+    let max_plaintext = MAX_TOKEN_SIZE.min(limits.max_cbor_payload_size());
+    let inner_bytes = crate::encrypt::cose_decrypt0_with_max_plaintext(
+        cose_bytes,
+        encryption_key,
+        max_plaintext,
+    )?;
+    let verified = decode_token_with_limits(&inner_bytes, signing_algorithm, limits)?;
+    let header = verified.header().clone();
+    // Preserve the *outer* Encrypt0 wire bytes so DPoP `ath` binds to what the
+    // client sent — the inner signed COSE is an implementation detail the peer
+    // never sees on the wire.
+    Ok(VerifiedToken::new(
+        verified.into_unvalidated_token(),
+        TokenHeader {
+            algorithm_id: header.algorithm_id,
+            kid: header.kid,
+        },
+        TokenProvenance::Encrypted,
+        cose_bytes.to_vec(),
+    ))
+}
+
+/// Encode a CatToken into a COSE_Encrypt0 envelope wrapping a signed/MACed token.
+pub fn encode_encrypted_token(
+    token: &CatToken,
+    signing_algorithm: &dyn CryptographicAlgorithm,
+    encryption_key: &[u8],
+    encryption_algorithm: &crate::encrypt::EncryptionAlgorithm,
+) -> Result<Vec<u8>, CatError> {
+    let signed_bytes = encode_token(token, signing_algorithm)?;
+    crate::encrypt::cose_encrypt0(&signed_bytes, encryption_key, encryption_algorithm)
+}
+
+pub fn decode_token_with_resolver(
+    cose_bytes: &[u8],
+    resolver: &dyn crate::key_resolver::KeyResolver,
+) -> Result<VerifiedToken, CatError> {
+    decode_token_with_resolver_and_limits(cose_bytes, resolver, &CwtLimits::default())
+}
+
+struct ParsedCoseEnvelope {
+    tag: u64,
+    header_cbor: Vec<u8>,
+    payload_cbor: Vec<u8>,
+    signature: Vec<u8>,
+    header_alg: i64,
+    header_kid: Option<Vec<u8>>,
+}
+
+fn parse_cose_envelope(cose_bytes: &[u8]) -> Result<ParsedCoseEnvelope, CatError> {
     if cose_bytes.len() > MAX_TOKEN_SIZE {
         return Err(CatError::InvalidTokenFormat);
     }
 
+    let mut cursor = std::io::Cursor::new(cose_bytes);
     let value: ciborium::Value =
-        ciborium::de::from_reader(cose_bytes).map_err(|e| CatError::InvalidCbor(e.to_string()))?;
+        ciborium::de::from_reader(&mut cursor).map_err(|e| CatError::InvalidCbor(e.to_string()))?;
+    if (cursor.position() as usize) < cose_bytes.len() {
+        return Err(CatError::InvalidCbor(format!(
+            "Trailing bytes after COSE envelope: {} unconsumed bytes",
+            cose_bytes.len() - cursor.position() as usize
+        )));
+    }
 
-    let (expected_tag, arr) = match value {
+    let (tag, arr) = match value {
         ciborium::Value::Tag(tag, inner) => {
             if tag != COSE_TAG_SIGN1 && tag != COSE_TAG_MAC0 {
                 return Err(CatError::InvalidTokenFormat);
@@ -727,7 +1131,15 @@ pub fn decode_token(
         ciborium::Value::Bytes(b) => b.clone(),
         _ => return Err(CatError::InvalidTokenFormat),
     };
-    // arr[1] is the unprotected header — we ignore it
+
+    match &arr[1] {
+        ciborium::Value::Map(m) if m.is_empty() => {}
+        ciborium::Value::Bytes(b) if b.is_empty() => {}
+        _ => {
+            return Err(CatError::InvalidTokenFormat);
+        }
+    }
+
     let payload_cbor = match &arr[2] {
         ciborium::Value::Bytes(b) => b.clone(),
         _ => return Err(CatError::InvalidTokenFormat),
@@ -737,44 +1149,117 @@ pub fn decode_token(
         _ => return Err(CatError::InvalidTokenFormat),
     };
 
-    // Verify the COSE tag matches the algorithm type
+    let (header_alg, header_kid) = extract_header_info(&header_cbor)?;
+
+    Ok(ParsedCoseEnvelope {
+        tag,
+        header_cbor,
+        payload_cbor,
+        signature,
+        header_alg,
+        header_kid,
+    })
+}
+
+fn verify_and_decode(
+    envelope: &ParsedCoseEnvelope,
+    algorithm: &dyn CryptographicAlgorithm,
+    limits: &CwtLimits,
+    serialized: Vec<u8>,
+) -> Result<VerifiedToken, CatError> {
     let alg_id = algorithm.algorithm_id();
     let correct_tag = if alg_id == crate::crypto::ALG_HMAC256_256 {
         COSE_TAG_MAC0
     } else {
         COSE_TAG_SIGN1
     };
-    if expected_tag != correct_tag {
+    if envelope.tag != correct_tag {
         return Err(CatError::InvalidTokenFormat);
     }
 
-    let header_alg = extract_algorithm_from_header(&header_cbor)?;
-    if header_alg != alg_id {
+    if envelope.header_alg != alg_id {
         return Err(CatError::AlgorithmMismatch {
             expected: alg_id,
-            found: header_alg,
+            found: envelope.header_alg,
         });
     }
 
-    let signing_input = crate::crypto::create_signing_input(&header_cbor, &payload_cbor, alg_id)?;
+    let signing_input =
+        crate::crypto::create_signing_input(&envelope.header_cbor, &envelope.payload_cbor, alg_id)?;
+    algorithm.verify(&signing_input, &envelope.signature)?;
 
-    algorithm.verify(&signing_input, &signature)?;
-
-    Cwt::decode_payload(&payload_cbor)
+    let token = Cwt::decode_payload_with_limits(&envelope.payload_cbor, limits)?;
+    let header = TokenHeader {
+        algorithm_id: envelope.header_alg,
+        kid: envelope.header_kid.clone(),
+    };
+    Ok(VerifiedToken::new(
+        token,
+        header,
+        TokenProvenance::Signed,
+        serialized,
+    ))
 }
 
-/// Decode a CatToken from a base64url-encoded COSE structure.
-pub fn decode_token_base64(
-    token_str: &str,
-    algorithm: &dyn CryptographicAlgorithm,
-) -> Result<CatToken, CatError> {
-    let bytes = URL_SAFE_NO_PAD
-        .decode(token_str)
-        .map_err(|e| CatError::InvalidBase64(e.to_string()))?;
-    decode_token(&bytes, algorithm)
+pub fn decode_token_with_resolver_and_limits(
+    cose_bytes: &[u8],
+    resolver: &dyn crate::key_resolver::KeyResolver,
+    limits: &CwtLimits,
+) -> Result<VerifiedToken, CatError> {
+    let envelope = parse_cose_envelope(cose_bytes)?;
+
+    // Peek `iss` from the still-unverified payload so the resolver can enforce
+    // an (iss, kid, alg) exact match. The peeked value is only trusted for key
+    // selection: if the wrong key is selected, signature verification below
+    // rejects the token, and if the right key is selected the full decoder
+    // re-parses `iss` for downstream validation.
+    let peeked_issuer = crate::cwt::peek_issuer(&envelope.payload_cbor)?;
+
+    let hint = crate::key_resolver::KeyHint {
+        algorithm_id: envelope.header_alg,
+        kid: envelope.header_kid.clone(),
+        issuer: peeked_issuer,
+    };
+    let algorithm = resolver.resolve(&hint)?;
+
+    verify_and_decode(&envelope, algorithm, limits, cose_bytes.to_vec())
 }
 
-fn extract_algorithm_from_header(header_cbor: &[u8]) -> Result<i64, CatError> {
+pub fn decode_token_with_admission(
+    cose_bytes: &[u8],
+    resolver: &dyn crate::key_resolver::KeyResolver,
+    policy: &crate::pipeline::AdmissionPolicy,
+) -> Result<VerifiedToken, CatError> {
+    decode_token_with_admission_and_limits(cose_bytes, resolver, policy, &CwtLimits::default())
+}
+
+pub fn decode_token_with_admission_and_limits(
+    cose_bytes: &[u8],
+    resolver: &dyn crate::key_resolver::KeyResolver,
+    policy: &crate::pipeline::AdmissionPolicy,
+    limits: &CwtLimits,
+) -> Result<VerifiedToken, CatError> {
+    let envelope = parse_cose_envelope(cose_bytes)?;
+
+    let header = TokenHeader {
+        algorithm_id: envelope.header_alg,
+        kid: envelope.header_kid.clone(),
+    };
+    policy.check(cose_bytes, &header)?;
+
+    let peeked_issuer = crate::cwt::peek_issuer(&envelope.payload_cbor)?;
+
+    let hint = crate::key_resolver::KeyHint {
+        algorithm_id: envelope.header_alg,
+        kid: envelope.header_kid.clone(),
+        issuer: peeked_issuer,
+    };
+    let algorithm = resolver.resolve(&hint)?;
+
+    verify_and_decode(&envelope, algorithm, limits, cose_bytes.to_vec())
+}
+
+fn extract_header_info(header_cbor: &[u8]) -> Result<(i64, Option<Vec<u8>>), CatError> {
     let value: ciborium::Value =
         ciborium::de::from_reader(header_cbor).map_err(|e| CatError::InvalidCbor(e.to_string()))?;
 
@@ -783,16 +1268,40 @@ fn extract_algorithm_from_header(header_cbor: &[u8]) -> Result<i64, CatError> {
         _ => return Err(CatError::InvalidTokenFormat),
     };
 
-    for (key, val) in map {
+    let mut found_alg: Option<i64> = None;
+    let mut found_kid: Option<Vec<u8>> = None;
+    for (key, val) in &map {
         if let ciborium::Value::Integer(k) = key {
-            let k_i64: i64 = k.try_into().map_err(|_| CatError::InvalidTokenFormat)?;
-            if k_i64 == 1
-                && let ciborium::Value::Integer(alg) = val
-            {
-                return alg.try_into().map_err(|_| CatError::InvalidTokenFormat);
+            let k_i64: i64 = (*k).try_into().map_err(|_| CatError::InvalidTokenFormat)?;
+            match k_i64 {
+                1 => {
+                    if found_alg.is_some() {
+                        return Err(CatError::InvalidCbor(
+                            "Duplicate alg in protected header".to_string(),
+                        ));
+                    }
+                    if let ciborium::Value::Integer(alg) = val {
+                        found_alg = Some(
+                            (*alg)
+                                .try_into()
+                                .map_err(|_| CatError::InvalidTokenFormat)?,
+                        );
+                    } else {
+                        return Err(CatError::InvalidClaimValue(
+                            "alg must be an integer".to_string(),
+                        ));
+                    }
+                }
+                4 => match val {
+                    ciborium::Value::Bytes(b) => found_kid = Some(b.clone()),
+                    ciborium::Value::Text(s) => found_kid = Some(s.as_bytes().to_vec()),
+                    _ => {}
+                },
+                _ => {}
             }
         }
     }
 
-    Err(CatError::MissingRequiredClaim("alg".to_string()))
+    let alg = found_alg.ok_or_else(|| CatError::MissingRequiredClaim("alg".to_string()))?;
+    Ok((alg, found_kid))
 }

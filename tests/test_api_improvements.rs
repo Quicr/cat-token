@@ -1,8 +1,38 @@
 // SPDX-FileCopyrightText: Copyright (c) 2022 Quicr
 // SPDX-License-Identifier: BSD-2-Clause
 
-use cat_token::moqt::{C4M_TOKEN_TYPE, MoqtAuthRequest, MoqtScopeBuilder, MoqtValidator};
+#![cfg(feature = "moqt")]
+
+use cat_token::moqt::{C4M_TOKEN_TYPE, MoqtScopeBuilder, MoqtValidator, RelayRequestContext};
 use cat_token::*;
+
+const RELAY: &str = "relay";
+
+fn make_validated(token: &CatToken) -> ValidatedToken {
+    let key = HmacSha256Algorithm::new(b"test-key-for-roundtrip-000000000");
+    let encoded = encode_token(token, &key).unwrap();
+    let validator = CatTokenValidator::new().allow_unencrypted_privacy_claims();
+    decode_token(&encoded, &key)
+        .unwrap()
+        .validate(&validator)
+        .unwrap()
+}
+
+fn ctx(action: MoqtAction, ns: Vec<Vec<u8>>, track: Vec<u8>) -> RelayRequestContext {
+    RelayRequestContext::new(RELAY, action, ns, track)
+}
+
+fn moqt_validator_permissive() -> MoqtValidator {
+    MoqtValidator::new().allow_missing_audience()
+}
+
+fn authorize(
+    v: &MoqtValidator,
+    token: &ValidatedToken,
+    req: &RelayRequestContext,
+) -> Result<cat_token::moqt::AuthorizedRequest, CatError> {
+    v.authorize::<dyn ReplayGuard>(token, req, None, None)
+}
 
 // --- CatTokenBuilder::expires_in ---
 
@@ -13,10 +43,13 @@ fn test_expires_in_creates_future_expiration() {
         .issuer("test")
         .single_audience("relay")
         .expires_in(3600)
-        .build();
+        .build()
+        .unwrap();
 
     let encoded = encode_token(&token, &key).unwrap();
-    let decoded = decode_token(&encoded, &key).unwrap();
+    let decoded = decode_token(&encoded, &key)
+        .unwrap()
+        .into_unvalidated_token();
 
     // Token should be valid (exp is in the future)
     let validator = CatTokenValidator::new()
@@ -32,12 +65,17 @@ fn test_expires_in_negative_already_expired() {
         .issuer("test")
         .single_audience("relay")
         .expires_in(-10)
-        .build();
+        .build()
+        .unwrap();
 
     let encoded = encode_token(&token, &key).unwrap();
-    let decoded = decode_token(&encoded, &key).unwrap();
+    let decoded = decode_token(&encoded, &key)
+        .unwrap()
+        .into_unvalidated_token();
 
-    let validator = CatTokenValidator::new().with_clock_skew_tolerance(0);
+    let validator = CatTokenValidator::new()
+        .with_clock_skew_tolerance(0)
+        .unwrap();
     assert!(matches!(
         validator.validate(&decoded),
         Err(CatError::TokenExpired)
@@ -53,10 +91,13 @@ fn test_single_audience_convenience() {
         .issuer("issuer")
         .single_audience("my-relay")
         .expires_in(3600)
-        .build();
+        .build()
+        .unwrap();
 
     let encoded = encode_token(&token, &key).unwrap();
-    let decoded = decode_token(&encoded, &key).unwrap();
+    let decoded = decode_token(&encoded, &key)
+        .unwrap()
+        .into_unvalidated_token();
 
     let validator = CatTokenValidator::new().with_expected_audiences(vec!["my-relay".to_string()]);
     assert!(validator.validate(&decoded).is_ok());
@@ -79,10 +120,13 @@ fn test_decode_token_valid_cose() {
         .single_audience("relay")
         .subject("user-1")
         .expires_in(3600)
-        .build();
+        .build()
+        .unwrap();
 
     let encoded = encode_token(&token, &key).unwrap();
-    let decoded = decode_token(&encoded, &key).unwrap();
+    let decoded = decode_token(&encoded, &key)
+        .unwrap()
+        .into_unvalidated_token();
 
     assert_eq!(decoded.informational.sub.as_deref(), Some("user-1"));
 }
@@ -113,10 +157,13 @@ fn test_decode_token_base64_roundtrip() {
     let token = CatTokenBuilder::new()
         .issuer("b64-test")
         .expires_in(3600)
-        .build();
+        .build()
+        .unwrap();
 
     let encoded_b64 = encode_token_base64(&token, &key).unwrap();
-    let decoded = decode_token_base64(&encoded_b64, &key).unwrap();
+    let decoded = decode_token_base64(&encoded_b64, &key)
+        .unwrap()
+        .into_unvalidated_token();
     assert_eq!(decoded.core.iss.as_deref(), Some("b64-test"));
 }
 
@@ -138,10 +185,13 @@ fn test_from_public_key_pem_roundtrip() {
     let token = CatTokenBuilder::new()
         .issuer("pem-test")
         .expires_in(3600)
-        .build();
+        .build()
+        .unwrap();
 
     let encoded = encode_token(&token, &key_pair).unwrap();
-    let decoded = decode_token(&encoded, &verifier).unwrap();
+    let decoded = decode_token(&encoded, &verifier)
+        .unwrap()
+        .into_unvalidated_token();
     assert_eq!(decoded.core.iss.as_deref(), Some("pem-test"));
 }
 
@@ -163,10 +213,13 @@ fn test_from_public_key_der_roundtrip() {
     let token = CatTokenBuilder::new()
         .issuer("der-test")
         .expires_in(3600)
-        .build();
+        .build()
+        .unwrap();
 
     let encoded = encode_token(&token, &key_pair).unwrap();
-    let decoded = decode_token(&encoded, &verifier).unwrap();
+    let decoded = decode_token(&encoded, &verifier)
+        .unwrap()
+        .into_unvalidated_token();
     assert_eq!(decoded.core.iss.as_deref(), Some("der-test"));
 }
 
@@ -188,7 +241,8 @@ fn test_verifying_key_reexport() {
     let token = CatTokenBuilder::new()
         .issuer("reexport-test")
         .expires_in(60)
-        .build();
+        .build()
+        .unwrap();
 
     let encoded = encode_token(&token, &key_pair).unwrap();
     assert!(decode_token(&encoded, &verifier).is_ok());
@@ -207,33 +261,34 @@ fn test_namespace_path_splits_by_slash() {
     let token = CatTokenBuilder::new()
         .issuer("test")
         .moqt_scope(scope)
-        .build();
+        .build()
+        .unwrap();
 
-    let validator = MoqtValidator::new();
+    let v = moqt_validator_permissive();
 
     // Exact match on all 3 elements
-    let request = MoqtAuthRequest::new(
+    let request = ctx(
         MoqtAction::Publish,
         vec![b"sports".to_vec(), b"football".to_vec(), b"live".to_vec()],
         b"video".to_vec(),
     );
-    assert!(validator.authorize(&token, &request).authorized);
+    assert!(authorize(&v, &make_validated(&token), &request).is_ok());
 
     // Wrong first element
-    let request = MoqtAuthRequest::new(
+    let request = ctx(
         MoqtAction::Publish,
         vec![b"music".to_vec(), b"football".to_vec(), b"live".to_vec()],
         b"video".to_vec(),
     );
-    assert!(!validator.authorize(&token, &request).authorized);
+    assert!(authorize(&v, &make_validated(&token), &request).is_err());
 
     // Wrong second element
-    let request = MoqtAuthRequest::new(
+    let request = ctx(
         MoqtAction::Publish,
         vec![b"sports".to_vec(), b"basketball".to_vec(), b"live".to_vec()],
         b"video".to_vec(),
     );
-    assert!(!validator.authorize(&token, &request).authorized);
+    assert!(authorize(&v, &make_validated(&token), &request).is_err());
 }
 
 #[test]
@@ -247,17 +302,18 @@ fn test_namespace_path_ignores_empty_segments() {
     let token = CatTokenBuilder::new()
         .issuer("test")
         .moqt_scope(scope)
-        .build();
+        .build()
+        .unwrap();
 
-    let validator = MoqtValidator::new();
+    let v = moqt_validator_permissive();
 
     // Should only match ["sports", "football"] (empty segments ignored)
-    let request = MoqtAuthRequest::new(
+    let request = ctx(
         MoqtAction::Publish,
         vec![b"sports".to_vec(), b"football".to_vec()],
         b"video".to_vec(),
     );
-    assert!(validator.authorize(&token, &request).authorized);
+    assert!(authorize(&v, &make_validated(&token), &request).is_ok());
 }
 
 // --- MoqtScopeBuilder::namespace_path tuple-prefix semantics ---
@@ -275,45 +331,41 @@ fn test_namespace_path_allows_additional_trailing_elements() {
     let token = CatTokenBuilder::new()
         .issuer("test")
         .moqt_scope(scope)
-        .build();
+        .build()
+        .unwrap();
 
-    let validator = MoqtValidator::new();
+    let v = moqt_validator_permissive();
 
     // Exact 2-element match
-    let request = MoqtAuthRequest::new(
+    let request = ctx(
         MoqtAction::Publish,
         vec![b"sports".to_vec(), b"football".to_vec()],
         b"video".to_vec(),
     );
-    assert!(validator.authorize(&token, &request).authorized);
+    assert!(authorize(&v, &make_validated(&token), &request).is_ok());
 
     // 3 elements — trailing "spain" is allowed (tuple-prefix semantics)
-    let request = MoqtAuthRequest::new(
+    let request = ctx(
         MoqtAction::Publish,
         vec![b"sports".to_vec(), b"football".to_vec(), b"spain".to_vec()],
         b"video".to_vec(),
     );
-    assert!(validator.authorize(&token, &request).authorized);
+    assert!(authorize(&v, &make_validated(&token), &request).is_ok());
 
     // Partial byte match on a tuple element must NOT work
-    let request = MoqtAuthRequest::new(
+    let request = ctx(
         MoqtAction::Publish,
         vec![b"sports".to_vec(), b"foot".to_vec()],
         b"video".to_vec(),
     );
-    assert!(!validator.authorize(&token, &request).authorized);
+    assert!(authorize(&v, &make_validated(&token), &request).is_err());
 }
 
 // --- C4M_TOKEN_TYPE constant ---
 
 #[test]
 fn test_c4m_token_type_value() {
-    // "c4m" = 0x63 ('c'), 0x34 ('4'), 0x6d ('m') → 0x63346d
-    assert_eq!(C4M_TOKEN_TYPE, 0x63346d);
-    assert_eq!(
-        C4M_TOKEN_TYPE,
-        (b'c' as u64) << 16 | (b'4' as u64) << 8 | (b'm' as u64)
-    );
+    assert_eq!(C4M_TOKEN_TYPE, 0x01);
 }
 
 // --- Full round-trip with new APIs ---
@@ -348,36 +400,42 @@ fn test_full_roundtrip_new_apis() {
         .expires_in(7200)
         .moqt_scope(scope)
         .moqt_scope(setup_scope)
-        .build();
+        .build()
+        .unwrap();
 
     // Encode with signing key, decode with PEM-loaded verifier
     let encoded = encode_token(&token, &key_pair).unwrap();
-    let decoded = decode_token(&encoded, &verifier).unwrap();
+    let decoded = decode_token(&encoded, &verifier)
+        .unwrap()
+        .into_unvalidated_token();
 
     // Validate standard claims
     let validator = CatTokenValidator::new()
         .with_expected_issuers(vec!["auth-server".to_string()])
-        .with_expected_audiences(vec!["relay-01".to_string()]);
+        .with_expected_audiences(vec!["relay-01".to_string()])
+        .allow_unencrypted_privacy_claims();
     assert!(validator.validate(&decoded).is_ok());
 
-    // Authorize operations
+    // Authorize operations — token audience is "relay-01"
     let moqt_validator = MoqtValidator::new();
 
-    let setup_req = MoqtAuthRequest::new(MoqtAction::ClientSetup, vec![], vec![]);
-    assert!(moqt_validator.authorize(&decoded, &setup_req).authorized);
+    let setup_req = RelayRequestContext::new("relay-01", MoqtAction::ClientSetup, vec![], vec![]);
+    assert!(authorize(&moqt_validator, &make_validated(&decoded), &setup_req).is_ok());
 
-    let publish_req = MoqtAuthRequest::new(
+    let publish_req = RelayRequestContext::new(
+        "relay-01",
         MoqtAction::Publish,
         vec![b"live".to_vec(), b"sports".to_vec(), b"football".to_vec()],
         b"video-1080p".to_vec(),
     );
-    assert!(moqt_validator.authorize(&decoded, &publish_req).authorized);
+    assert!(authorize(&moqt_validator, &make_validated(&decoded), &publish_req).is_ok());
 
     // Subscribe should be denied (publisher token)
-    let sub_req = MoqtAuthRequest::new(
+    let sub_req = RelayRequestContext::new(
+        "relay-01",
         MoqtAction::Subscribe,
         vec![b"live".to_vec(), b"sports".to_vec(), b"football".to_vec()],
         b"video-1080p".to_vec(),
     );
-    assert!(!moqt_validator.authorize(&decoded, &sub_req).authorized);
+    assert!(authorize(&moqt_validator, &make_validated(&decoded), &sub_req).is_err());
 }

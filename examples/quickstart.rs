@@ -25,7 +25,7 @@ fn main() -> Result<(), CatError> {
                 .track_prefix(b"/streams/")
                 .build(),
         )
-        .build();
+        .build()?;
 
     // 3. Encode the token (returns COSE_Sign1 CBOR bytes)
     let encoded = encode_token(&token, &key)?;
@@ -36,24 +36,30 @@ fn main() -> Result<(), CatError> {
         encoded.len()
     );
 
-    // 4. Decode and verify (relay does this)
-    let decoded = decode_token(&encoded, &key)?;
+    // 4. Decode and verify signature (relay does this)
+    let verified = decode_token(&encoded, &key)?;
 
-    // 5. Validate claims
+    // 5. Validate claims (produces ValidatedToken)
     let validator = CatTokenValidator::new()
         .with_expected_issuers(vec!["https://auth.example.com".to_string()])
         .with_expected_audiences(vec!["relay.example.com".to_string()]);
-    validator.validate(&decoded)?;
+    let validated = verified.validate(&validator)?;
 
-    // 6. Authorize MOQT action
+    // 6. Authorize MOQT action (requires ValidatedToken). `authorize` enforces
+    //    every signed CAT restriction against the RelayRequestContext.
     let moqt_validator = MoqtValidator::new();
-    let request = MoqtAuthRequest::new(
+    let request = RelayRequestContext::new(
+        "relay.example.com",
         MoqtAction::Publish,
         vec![b"live.example.com".to_vec(), b"streaming-123".to_vec()],
-        b"/video".to_vec(),
+        b"/streams/video".to_vec(),
     );
-    let result = moqt_validator.authorize(&decoded, &request);
-
-    println!("Authorized: {}", result.authorized);
+    match moqt_validator.authorize::<dyn ReplayGuard>(&validated, &request, None, None) {
+        Ok(result) => println!(
+            "Authorized (scope {}, revalidation={:?})",
+            result.matched_scope_index, result.revalidation_interval
+        ),
+        Err(e) => println!("Denied: {e}"),
+    }
     Ok(())
 }
