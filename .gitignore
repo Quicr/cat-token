@@ -1,5 +1,4 @@
 /target/
-Cargo.lock
 .DS_Store
 SECURITY-AUDIT.md
 docs/std-compliance-req.md
