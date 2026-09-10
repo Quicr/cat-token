@@ -109,7 +109,8 @@ fn test_catif_roundtrip() {
         .with_if_action(CLAIM_AUD, CatIfAction::new(403).unwrap().with_kid("k1"));
 
     let encoded = encode_token(&token, &algorithm).unwrap();
-    let decoded = decode_token(&encoded, &algorithm)
+    let decoded = Decoder::with_algorithm(&algorithm)
+        .decode(&encoded)
         .unwrap()
         .into_unvalidated_token();
 
@@ -329,7 +330,8 @@ fn test_catr_roundtrip() {
     );
 
     let encoded = encode_token(&token, &algorithm).unwrap();
-    let decoded = decode_token(&encoded, &algorithm)
+    let decoded = Decoder::with_algorithm(&algorithm)
+        .decode(&encoded)
         .unwrap()
         .into_unvalidated_token();
 
@@ -351,7 +353,8 @@ fn test_catr_redirect_roundtrip() {
         .with_renewal(CatRenewal::redirect(307).with_expadd(1800.0).unwrap());
 
     let encoded = encode_token(&token, &algorithm).unwrap();
-    let decoded = decode_token(&encoded, &algorithm)
+    let decoded = Decoder::with_algorithm(&algorithm)
+        .decode(&encoded)
         .unwrap()
         .into_unvalidated_token();
 
@@ -397,7 +400,8 @@ fn test_catif_and_catr_together_roundtrip() {
         .with_renewal(CatRenewal::automatic().with_expadd(3600.0).unwrap());
 
     let encoded = encode_token(&token, &algorithm).unwrap();
-    let decoded = decode_token(&encoded, &algorithm)
+    let decoded = Decoder::with_algorithm(&algorithm)
+        .decode(&encoded)
         .unwrap()
         .into_unvalidated_token();
 

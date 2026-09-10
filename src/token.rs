@@ -40,7 +40,7 @@ pub struct CatTokenValidator {
     expected_audiences: Option<HashSet<String>>,
     exp_tolerance: i64,
     nbf_tolerance: i64,
-    allow_unencrypted_privacy_claims: bool,
+    dangerously_allow_unencrypted_privacy_claims: bool,
 }
 
 impl Default for CatTokenValidator {
@@ -70,7 +70,7 @@ impl CatTokenValidator {
             expected_audiences: None,
             exp_tolerance: 0,
             nbf_tolerance: 0,
-            allow_unencrypted_privacy_claims: false,
+            dangerously_allow_unencrypted_privacy_claims: false,
         }
     }
 
@@ -103,8 +103,8 @@ impl CatTokenValidator {
         Ok(self)
     }
 
-    pub fn allow_unencrypted_privacy_claims(mut self) -> Self {
-        self.allow_unencrypted_privacy_claims = true;
+    pub fn dangerously_allow_unencrypted_privacy_claims(mut self) -> Self {
+        self.dangerously_allow_unencrypted_privacy_claims = true;
         self
     }
 
@@ -184,7 +184,9 @@ impl CatTokenValidator {
         token: &CatToken,
         provenance: TokenProvenance,
     ) -> Result<(), CatError> {
-        if self.allow_unencrypted_privacy_claims || provenance == TokenProvenance::Encrypted {
+        if self.dangerously_allow_unencrypted_privacy_claims
+            || provenance == TokenProvenance::Encrypted
+        {
             return Ok(());
         }
         if token.informational.sub.is_some() {
@@ -499,14 +501,16 @@ pub(crate) fn enforce_catnip(
     let has_asn_rule = nips.iter().any(|n| n.is_asn_based());
 
     if has_ip_rule && peer_ip.is_none() {
-        return Err(CatError::InvalidClaimValue(
-            "catnip: token asserts IP restriction but request context has no peer IP".to_string(),
-        ));
+        return Err(CatError::MissingRelayContext {
+            claim: "catnip",
+            field: "peer_ip",
+        });
     }
     if has_asn_rule && peer_asn.is_none() {
-        return Err(CatError::InvalidClaimValue(
-            "catnip: token asserts ASN restriction but request context has no peer ASN".to_string(),
-        ));
+        return Err(CatError::MissingRelayContext {
+            claim: "catnip",
+            field: "peer_asn",
+        });
     }
 
     let matched = nips.iter().any(|n| {
@@ -963,36 +967,6 @@ pub fn encode_token_base64(
 }
 
 const MAX_TOKEN_SIZE: usize = 16 * 1024; // 16KB — relay-appropriate default
-
-/// Decode a CatToken from COSE_Sign1 (tag 18) or COSE_Mac0 (tag 17) CBOR bytes
-/// using a caller-supplied verifying algorithm.
-///
-/// Convenience shortcut for the common "verify with this one key" case; for
-/// key rotation, admission policy, encryption, or custom CBOR limits use the
-/// [`Decoder`] builder.
-///
-/// Returns a `VerifiedToken` whose signature has been verified. Call
-/// `.validate()` on it to produce a `ValidatedToken` suitable for authorization.
-pub fn decode_token(
-    cose_bytes: &[u8],
-    algorithm: &dyn CryptographicAlgorithm,
-) -> Result<VerifiedToken, CatError> {
-    Decoder::with_algorithm(algorithm).decode(cose_bytes)
-}
-
-/// Decode a CatToken from a COSE_Encrypt0 envelope wrapping a signed/MACed token.
-///
-/// Convenience shortcut; equivalent to
-/// `Decoder::with_algorithm(alg).encryption_key(key).decode(bytes)`.
-pub fn decode_encrypted_token(
-    cose_bytes: &[u8],
-    encryption_key: &[u8],
-    signing_algorithm: &dyn CryptographicAlgorithm,
-) -> Result<VerifiedToken, CatError> {
-    Decoder::with_algorithm(signing_algorithm)
-        .encryption_key(encryption_key)
-        .decode(cose_bytes)
-}
 
 /// Encode a CatToken into a COSE_Encrypt0 envelope wrapping a signed/MACed token.
 pub fn encode_encrypted_token(

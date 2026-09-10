@@ -78,7 +78,8 @@ fn test_hmac_token_encoding_decoding() {
     assert!(!encoded.is_empty());
     assert!(encoded.len() > 10);
 
-    let decoded = decode_token(&encoded, &algorithm)
+    let decoded = Decoder::with_algorithm(&algorithm)
+        .decode(&encoded)
         .unwrap()
         .into_unvalidated_token();
     assert_eq!(decoded.core.iss, token.core.iss);
@@ -107,7 +108,8 @@ fn test_es256_token_encoding_decoding() {
     assert!(!encoded.is_empty());
     assert!(encoded.len() > 10);
 
-    let decoded = decode_token(&encoded, &algorithm)
+    let decoded = Decoder::with_algorithm(&algorithm)
+        .decode(&encoded)
         .unwrap()
         .into_unvalidated_token();
     assert_eq!(decoded.core.iss, token.core.iss);
@@ -136,7 +138,8 @@ fn test_ps256_token_encoding_decoding() {
     assert!(!encoded.is_empty());
     assert!(encoded.len() > 10);
 
-    let decoded = decode_token(&encoded, &algorithm)
+    let decoded = Decoder::with_algorithm(&algorithm)
+        .decode(&encoded)
         .unwrap()
         .into_unvalidated_token();
     assert_eq!(decoded.core.iss, token.core.iss);
@@ -167,7 +170,7 @@ fn test_token_validation_success() {
         .with_expected_audiences(vec!["https://my-service.com".to_string()])
         .with_clock_skew_tolerance(60)
         .unwrap()
-        .allow_unencrypted_privacy_claims();
+        .dangerously_allow_unencrypted_privacy_claims();
 
     assert!(validator.validate(&token).is_ok());
 }
@@ -304,60 +307,44 @@ fn test_cwt_payload_encoding_decoding() {
 #[test]
 fn test_all_cat_claims() {
     let mut token = CatToken::new();
-    token.core = CoreClaims {
-        iss: Some("https://issuer.com".to_string()),
-        aud: Some(vec!["aud1".to_string(), "aud2".to_string()]),
-        exp: Some(1234567890),
-        nbf: Some(1234567800),
-        cti: Some(b"unique-token-id".to_vec()),
-    };
-    token.cat = CatClaims {
-        catreplay: Some(cat_token::ReplayProtection::Prohibited),
-        catpor: None,
-        catv: Some(1),
-        catnip: Some(vec![
-            NetworkIdentifier::IpPrefix("192.168.1.0".parse().unwrap(), 24),
-            NetworkIdentifier::IpPrefix("10.0.0.0".parse().unwrap(), 8),
-        ]),
-        catu: Some(vec![
-            UriMatchRule {
-                component: URI_COMPONENT_HOST,
-                matches: vec![MatchValue::Exact("api.example.com".to_string())],
-            },
-            UriMatchRule {
-                component: URI_COMPONENT_PATH,
-                matches: vec![MatchValue::Prefix("/v1/".to_string())],
-            },
-        ]),
-        catm: Some(vec!["GET".to_string(), "POST".to_string()]),
-        catalpn: Some(vec![b"h2".to_vec(), b"http/1.1".to_vec()]),
-        cath: Some(vec![
-            HeaderMatchRule {
-                name: "Host".to_string(),
-                matches: vec![MatchValue::Exact("api.example.com".to_string())],
-            },
-            HeaderMatchRule {
-                name: "X-Forwarded-Host".to_string(),
-                matches: vec![MatchValue::Suffix(".example.org".to_string())],
-            },
-        ]),
-        catgeoiso3166: Some(vec!["US".to_string(), "CA".to_string()]),
-        catgeocoord: Some(vec![GeoCoordinate {
-            lat: 34.0522,
-            lon: -118.2437,
-            radius: 25,
-        }]),
-        geohash: Some(vec!["9q5ct".to_string()]),
-        catgeoalt: Some(cat_token::GeoAltitude {
-            altitude: 100.0,
-            deviation: 10.0,
-        }),
-        cattpk: Some(b"thumbprint-data".to_vec()),
-    };
-    token.moqt = cat_token::claims::MoqtClaims {
-        moqt: None,
-        moqt_reval: None,
-    };
+    token.core.iss = Some("https://issuer.com".to_string());
+    token.core.aud = Some(vec!["aud1".to_string(), "aud2".to_string()]);
+    token.core.exp = Some(1234567890);
+    token.core.nbf = Some(1234567800);
+    token.core.cti = Some(b"unique-token-id".to_vec());
+    token.cat.catreplay = Some(cat_token::ReplayProtection::Prohibited);
+    token.cat.catv = Some(1);
+    token.cat.catnip = Some(vec![
+        NetworkIdentifier::IpPrefix("192.168.1.0".parse().unwrap(), 24),
+        NetworkIdentifier::IpPrefix("10.0.0.0".parse().unwrap(), 8),
+    ]);
+    token.cat.catu = Some(vec![
+        UriMatchRule {
+            component: URI_COMPONENT_HOST,
+            matches: vec![MatchValue::Exact("api.example.com".to_string())],
+        },
+        UriMatchRule {
+            component: URI_COMPONENT_PATH,
+            matches: vec![MatchValue::Prefix("/v1/".to_string())],
+        },
+    ]);
+    token.cat.catm = Some(vec!["GET".to_string(), "POST".to_string()]);
+    token.cat.catalpn = Some(vec![b"h2".to_vec(), b"http/1.1".to_vec()]);
+    token.cat.cath = Some(vec![
+        HeaderMatchRule {
+            name: "Host".to_string(),
+            matches: vec![MatchValue::Exact("api.example.com".to_string())],
+        },
+        HeaderMatchRule {
+            name: "X-Forwarded-Host".to_string(),
+            matches: vec![MatchValue::Suffix(".example.org".to_string())],
+        },
+    ]);
+    token.cat.catgeoiso3166 = Some(vec!["US".to_string(), "CA".to_string()]);
+    token.cat.catgeocoord = Some(vec![GeoCoordinate::new(34.0522, -118.2437, 25)]);
+    token.cat.geohash = Some(vec!["9q5ct".to_string()]);
+    token.cat.catgeoalt = Some(cat_token::GeoAltitude::new(100.0, 10.0));
+    token.cat.cattpk = Some(b"thumbprint-data".to_vec());
 
     let cwt = Cwt::new(-4, token.clone()); // HMAC256
     let encoded_payload = cwt.encode_payload().unwrap();
@@ -407,7 +394,7 @@ fn test_invalid_signature_verification() {
     let encoded = encode_token(&token, &algorithm1).unwrap();
 
     // Try to verify with different key - should fail
-    let result = decode_token(&encoded, &algorithm2);
+    let result = Decoder::with_algorithm(&algorithm2).decode(&encoded);
     assert!(matches!(result, Err(CatError::SignatureVerificationFailed)));
 }
 
@@ -417,27 +404,24 @@ fn test_invalid_token_format() {
     let algorithm = HmacSha256Algorithm::from_secret_key(&key);
 
     // Test with invalid CBOR bytes
-    let result = decode_token(b"invalid", &algorithm);
+    let result = Decoder::with_algorithm(&algorithm).decode(b"invalid");
     assert!(result.is_err());
 
-    let result = decode_token(b"\x00\x01", &algorithm);
+    let result = Decoder::with_algorithm(&algorithm).decode(b"\x00\x01");
     assert!(result.is_err());
 
-    let result = decode_token(&[], &algorithm);
+    let result = Decoder::with_algorithm(&algorithm).decode(&[]);
     assert!(result.is_err());
 }
 
 #[test]
 fn test_geographic_validation() {
-    let validator = CatTokenValidator::new().allow_unencrypted_privacy_claims();
+    let validator = CatTokenValidator::new().dangerously_allow_unencrypted_privacy_claims();
 
     // Test invalid coordinates
     let mut token = CatToken::new();
-    token.cat.catgeocoord = Some(vec![GeoCoordinate {
-        lat: 91.0, // Invalid latitude
-        lon: 0.0,
-        radius: 0,
-    }]);
+    // Invalid latitude (>90.0)
+    token.cat.catgeocoord = Some(vec![GeoCoordinate::new(91.0, 0.0, 0)]);
 
     let result = validator.validate(&token);
     assert!(matches!(
@@ -581,7 +565,8 @@ fn test_moqt_token_encoding_decoding() {
         .unwrap();
 
     let encoded = encode_token(&token, &algorithm).unwrap();
-    let decoded = decode_token(&encoded, &algorithm)
+    let decoded = Decoder::with_algorithm(&algorithm)
+        .decode(&encoded)
         .unwrap()
         .into_unvalidated_token();
 

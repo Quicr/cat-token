@@ -22,8 +22,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 fn make_validated(token: &CatToken) -> ValidatedToken {
     let key = HmacSha256Algorithm::new(b"test-key-for-roundtrip-000000000");
     let encoded = encode_token(token, &key).unwrap();
-    let validator = CatTokenValidator::new().allow_unencrypted_privacy_claims();
-    decode_token(&encoded, &key)
+    let validator = CatTokenValidator::new().dangerously_allow_unencrypted_privacy_claims();
+    Decoder::with_algorithm(&key)
+        .decode(&encoded)
         .unwrap()
         .validate(&validator)
         .unwrap()
@@ -44,7 +45,7 @@ fn build_dpop_proof(alg: &Es256Algorithm, jwk: Jwk, validated: &ValidatedToken) 
         ALG_ES256,
         jwk,
     )
-    .with_jti(generate_jti())
+    .with_replay_id(generate_jti())
     .with_access_token_hash(compute_access_token_hash(validated.serialized()));
     proof.sign(alg).unwrap();
     proof

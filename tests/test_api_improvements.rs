@@ -11,8 +11,9 @@ const RELAY: &str = "relay";
 fn make_validated(token: &CatToken) -> ValidatedToken {
     let key = HmacSha256Algorithm::new(b"test-key-for-roundtrip-000000000");
     let encoded = encode_token(token, &key).unwrap();
-    let validator = CatTokenValidator::new().allow_unencrypted_privacy_claims();
-    decode_token(&encoded, &key)
+    let validator = CatTokenValidator::new().dangerously_allow_unencrypted_privacy_claims();
+    Decoder::with_algorithm(&key)
+        .decode(&encoded)
         .unwrap()
         .validate(&validator)
         .unwrap()
@@ -47,7 +48,8 @@ fn test_expires_in_creates_future_expiration() {
         .unwrap();
 
     let encoded = encode_token(&token, &key).unwrap();
-    let decoded = decode_token(&encoded, &key)
+    let decoded = Decoder::with_algorithm(&key)
+        .decode(&encoded)
         .unwrap()
         .into_unvalidated_token();
 
@@ -69,7 +71,8 @@ fn test_expires_in_negative_already_expired() {
         .unwrap();
 
     let encoded = encode_token(&token, &key).unwrap();
-    let decoded = decode_token(&encoded, &key)
+    let decoded = Decoder::with_algorithm(&key)
+        .decode(&encoded)
         .unwrap()
         .into_unvalidated_token();
 
@@ -95,7 +98,8 @@ fn test_single_audience_convenience() {
         .unwrap();
 
     let encoded = encode_token(&token, &key).unwrap();
-    let decoded = decode_token(&encoded, &key)
+    let decoded = Decoder::with_algorithm(&key)
+        .decode(&encoded)
         .unwrap()
         .into_unvalidated_token();
 
@@ -124,7 +128,8 @@ fn test_decode_token_valid_cose() {
         .unwrap();
 
     let encoded = encode_token(&token, &key).unwrap();
-    let decoded = decode_token(&encoded, &key)
+    let decoded = Decoder::with_algorithm(&key)
+        .decode(&encoded)
         .unwrap()
         .into_unvalidated_token();
 
@@ -136,7 +141,7 @@ fn test_decode_token_invalid_cbor() {
     let key = Es256Algorithm::new_with_key_pair().unwrap();
     let invalid_bytes: &[u8] = &[0xFF, 0xFE, 0xFD];
 
-    let result = decode_token(invalid_bytes, &key);
+    let result = Decoder::with_algorithm(&key).decode(invalid_bytes);
     assert!(result.is_err());
 }
 
@@ -145,7 +150,7 @@ fn test_decode_token_malformed() {
     let key = Es256Algorithm::new_with_key_pair().unwrap();
     let malformed = b"not-valid-cose-bytes";
 
-    let result = decode_token(malformed, &key);
+    let result = Decoder::with_algorithm(&key).decode(malformed);
     assert!(result.is_err());
 }
 
@@ -190,7 +195,8 @@ fn test_from_public_key_pem_roundtrip() {
         .unwrap();
 
     let encoded = encode_token(&token, &key_pair).unwrap();
-    let decoded = decode_token(&encoded, &verifier)
+    let decoded = Decoder::with_algorithm(&verifier)
+        .decode(&encoded)
         .unwrap()
         .into_unvalidated_token();
     assert_eq!(decoded.core.iss.as_deref(), Some("pem-test"));
@@ -218,7 +224,8 @@ fn test_from_public_key_der_roundtrip() {
         .unwrap();
 
     let encoded = encode_token(&token, &key_pair).unwrap();
-    let decoded = decode_token(&encoded, &verifier)
+    let decoded = Decoder::with_algorithm(&verifier)
+        .decode(&encoded)
         .unwrap()
         .into_unvalidated_token();
     assert_eq!(decoded.core.iss.as_deref(), Some("der-test"));
@@ -246,7 +253,7 @@ fn test_verifying_key_reexport() {
         .unwrap();
 
     let encoded = encode_token(&token, &key_pair).unwrap();
-    assert!(decode_token(&encoded, &verifier).is_ok());
+    assert!(Decoder::with_algorithm(&verifier).decode(&encoded).is_ok());
 }
 
 // --- MoqtScopeBuilder::namespace_path ---
@@ -406,7 +413,8 @@ fn test_full_roundtrip_new_apis() {
 
     // Encode with signing key, decode with PEM-loaded verifier
     let encoded = encode_token(&token, &key_pair).unwrap();
-    let decoded = decode_token(&encoded, &verifier)
+    let decoded = Decoder::with_algorithm(&verifier)
+        .decode(&encoded)
         .unwrap()
         .into_unvalidated_token();
 
@@ -414,7 +422,7 @@ fn test_full_roundtrip_new_apis() {
     let validator = CatTokenValidator::new()
         .with_expected_issuers(vec!["auth-server".to_string()])
         .with_expected_audiences(vec!["relay-01".to_string()])
-        .allow_unencrypted_privacy_claims();
+        .dangerously_allow_unencrypted_privacy_claims();
     assert!(validator.validate(&decoded).is_ok());
 
     // Authorize operations — token audience is "relay-01"

@@ -12,7 +12,8 @@ fn test_cti_utf8_string_roundtrip() {
         .with_cwt_id_str("my-token-id");
 
     let encoded = encode_token(&token, &algorithm).unwrap();
-    let decoded = decode_token(&encoded, &algorithm)
+    let decoded = Decoder::with_algorithm(&algorithm)
+        .decode(&encoded)
         .unwrap()
         .into_unvalidated_token();
 
@@ -30,7 +31,8 @@ fn test_cti_arbitrary_bytes_roundtrip() {
         .with_cwt_id(cti_bytes.clone());
 
     let encoded = encode_token(&token, &algorithm).unwrap();
-    let decoded = decode_token(&encoded, &algorithm)
+    let decoded = Decoder::with_algorithm(&algorithm)
+        .decode(&encoded)
         .unwrap()
         .into_unvalidated_token();
 
@@ -48,7 +50,8 @@ fn test_cti_uuid_bytes() {
         .with_cwt_id(uuid_bytes.clone());
 
     let encoded = encode_token(&token, &algorithm).unwrap();
-    let decoded = decode_token(&encoded, &algorithm)
+    let decoded = Decoder::with_algorithm(&algorithm)
+        .decode(&encoded)
         .unwrap()
         .into_unvalidated_token();
 

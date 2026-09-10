@@ -14,7 +14,8 @@ fn test_cose_sig_structure_es256() {
         .unwrap();
 
     let encoded = encode_token(&token, &alg).unwrap();
-    let decoded = decode_token(&encoded, &alg)
+    let decoded = Decoder::with_algorithm(&alg)
+        .decode(&encoded)
         .unwrap()
         .into_unvalidated_token();
     assert_eq!(decoded.core.iss, token.core.iss);
@@ -30,7 +31,8 @@ fn test_cose_sig_structure_ps256() {
         .unwrap();
 
     let encoded = encode_token(&token, &alg).unwrap();
-    let decoded = decode_token(&encoded, &alg)
+    let decoded = Decoder::with_algorithm(&alg)
+        .decode(&encoded)
         .unwrap()
         .into_unvalidated_token();
     assert_eq!(decoded.core.iss, token.core.iss);
@@ -47,7 +49,8 @@ fn test_cose_mac0_structure_hmac() {
         .unwrap();
 
     let encoded = encode_token(&token, &alg).unwrap();
-    let decoded = decode_token(&encoded, &alg)
+    let decoded = Decoder::with_algorithm(&alg)
+        .decode(&encoded)
         .unwrap()
         .into_unvalidated_token();
     assert_eq!(decoded.core.iss, token.core.iss);
@@ -147,7 +150,7 @@ fn test_tampered_token_rejected_with_cose_structure() {
         tampered[20] ^= 0xff;
     }
 
-    let result = decode_token(&tampered, &alg);
+    let result = Decoder::with_algorithm(&alg).decode(&tampered);
     assert!(result.is_err());
 }
 
@@ -164,7 +167,7 @@ fn test_wrong_key_rejected_with_cose_structure() {
         .unwrap();
 
     let encoded = encode_token(&token, &alg1).unwrap();
-    let result = decode_token(&encoded, &alg2);
+    let result = Decoder::with_algorithm(&alg2).decode(&encoded);
     assert!(matches!(result, Err(CatError::SignatureVerificationFailed)));
 }
 
@@ -185,7 +188,8 @@ fn test_roundtrip_all_algorithms_with_cose() {
     let hmac_key = HmacSha256Algorithm::generate_key().unwrap();
     let hmac_alg = HmacSha256Algorithm::from_secret_key(&hmac_key);
     let hmac_encoded = encode_token(&token, &hmac_alg).unwrap();
-    let hmac_decoded = decode_token(&hmac_encoded, &hmac_alg)
+    let hmac_decoded = Decoder::with_algorithm(&hmac_alg)
+        .decode(&hmac_encoded)
         .unwrap()
         .into_unvalidated_token();
     assert_eq!(hmac_decoded.core.iss, token.core.iss);
@@ -195,7 +199,8 @@ fn test_roundtrip_all_algorithms_with_cose() {
     // ES256
     let es256_alg = Es256Algorithm::new_with_key_pair().unwrap();
     let es256_encoded = encode_token(&token, &es256_alg).unwrap();
-    let es256_decoded = decode_token(&es256_encoded, &es256_alg)
+    let es256_decoded = Decoder::with_algorithm(&es256_alg)
+        .decode(&es256_encoded)
         .unwrap()
         .into_unvalidated_token();
     assert_eq!(es256_decoded.core.iss, token.core.iss);
@@ -204,7 +209,8 @@ fn test_roundtrip_all_algorithms_with_cose() {
     // PS256
     let ps256_alg = Ps256Algorithm::new_with_key_pair().unwrap();
     let ps256_encoded = encode_token(&token, &ps256_alg).unwrap();
-    let ps256_decoded = decode_token(&ps256_encoded, &ps256_alg)
+    let ps256_decoded = Decoder::with_algorithm(&ps256_alg)
+        .decode(&ps256_encoded)
         .unwrap()
         .into_unvalidated_token();
     assert_eq!(ps256_decoded.core.iss, token.core.iss);

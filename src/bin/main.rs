@@ -75,7 +75,9 @@ fn generate_hmac_example() -> Result<(), Box<dyn std::error::Error>> {
         encode_token_base64(&token, &algorithm)?
     );
 
-    let decoded = decode_token(&encoded, &algorithm)?.into_unvalidated_token();
+    let decoded = Decoder::with_algorithm(&algorithm)
+        .decode(&encoded)?
+        .into_unvalidated_token();
     println!("Token verified and decoded successfully!");
     println!("Issuer: {:?}", decoded.core.iss);
     println!("Audience: {:?}", decoded.core.aud);
@@ -101,7 +103,9 @@ fn generate_es256_example() -> Result<(), Box<dyn std::error::Error>> {
         encode_token_base64(&token, &algorithm)?
     );
 
-    let decoded = decode_token(&encoded, &algorithm)?.into_unvalidated_token();
+    let decoded = Decoder::with_algorithm(&algorithm)
+        .decode(&encoded)?
+        .into_unvalidated_token();
     println!("Token verified and decoded successfully!");
     println!("Issuer: {:?}", decoded.core.iss);
     println!("Audience: {:?}", decoded.core.aud);
@@ -127,7 +131,9 @@ fn generate_ps256_example() -> Result<(), Box<dyn std::error::Error>> {
         encode_token_base64(&token, &algorithm)?
     );
 
-    let decoded = decode_token(&encoded, &algorithm)?.into_unvalidated_token();
+    let decoded = Decoder::with_algorithm(&algorithm)
+        .decode(&encoded)?
+        .into_unvalidated_token();
     println!("Token verified and decoded successfully!");
     println!("Issuer: {:?}", decoded.core.iss);
     println!("Audience: {:?}", decoded.core.aud);
@@ -138,7 +144,7 @@ fn generate_ps256_example() -> Result<(), Box<dyn std::error::Error>> {
 
 fn verify_token(_token_str: &str, _alg: &str) -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("Error: token verification is not yet implemented in this CLI.");
-    eprintln!("Use the cat_token library API (decode_token) directly.");
+    eprintln!("Use the cat_token library API (Decoder) directly.");
     std::process::exit(1);
 }
 

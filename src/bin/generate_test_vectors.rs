@@ -342,10 +342,7 @@ fn generate_cbor_encoding_vectors() -> JsonValue {
             .with_geohash("9q8yyk");
         let mut token = token;
         token.cat.catgeoiso3166 = Some(vec!["US".to_string(), "CA".to_string()]);
-        token.cat.catgeoalt = Some(cat_token::GeoAltitude {
-            altitude: 10.0,
-            deviation: 5.0,
-        });
+        token.cat.catgeoalt = Some(cat_token::GeoAltitude::new(10.0, 5.0));
 
         let cwt = Cwt::new(ALG_HMAC256_256, token);
         let payload_cbor = cwt.encode_payload().unwrap();

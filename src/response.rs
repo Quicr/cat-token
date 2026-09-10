@@ -21,6 +21,7 @@ pub enum CacheScope {
 }
 
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct CatResponsePolicy {
     pub cache_control: String,
     pub additional_headers: Vec<(String, String)>,

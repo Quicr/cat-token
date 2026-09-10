@@ -62,11 +62,8 @@ fn test_single_resolver_rejects_alg_mismatch() {
     let hs_alg = HmacSha256Algorithm::from_secret_key(&hs_key);
     let resolver = SingleKeyResolver::new(hs_alg);
 
-    let hint = KeyHint {
-        algorithm_id: -7,
-        kid: Some(KID.to_vec()),
-        issuer: Some(ISS.to_string()),
-    };
+    let mut hint = KeyHint::new(-7).with_kid(KID.to_vec());
+    hint.issuer = Some(ISS.to_string());
     let err = resolve_err(&resolver, &hint);
     assert!(matches!(err, CatError::AlgorithmMismatch { .. }));
 
@@ -157,18 +154,12 @@ fn test_keyring_registers_by_triple() {
 
     assert_eq!(resolver.key_count(), 2);
 
-    let hint_a = KeyHint {
-        algorithm_id: -7,
-        kid: Some(b"kid-a".to_vec()),
-        issuer: Some("issuer-a".to_string()),
-    };
+    let mut hint_a = KeyHint::new(-7).with_kid(b"kid-a".to_vec());
+    hint_a.issuer = Some("issuer-a".to_string());
     assert!(resolver.resolve(&hint_a).is_ok());
 
-    let hint_b = KeyHint {
-        algorithm_id: -7,
-        kid: Some(b"kid-b".to_vec()),
-        issuer: Some("issuer-b".to_string()),
-    };
+    let mut hint_b = KeyHint::new(-7).with_kid(b"kid-b".to_vec());
+    hint_b.issuer = Some("issuer-b".to_string());
     assert!(resolver.resolve(&hint_b).is_ok());
 }
 
@@ -182,11 +173,8 @@ fn test_keyring_cross_issuer_confusion_rejected() {
         Box::new(Es256Algorithm::new_verifier(*key1.verifying_key())),
     );
 
-    let hint = KeyHint {
-        algorithm_id: -7,
-        kid: Some(b"kid-a".to_vec()),
-        issuer: Some("issuer-b".to_string()),
-    };
+    let mut hint = KeyHint::new(-7).with_kid(b"kid-a".to_vec());
+    hint.issuer = Some("issuer-b".to_string());
     let err = resolve_err(&resolver, &hint);
     assert!(matches!(err, CatError::ConfigurationRefused(_)));
 }
@@ -202,11 +190,9 @@ fn test_keyring_algorithm_mismatch_rejected() {
         Box::new(Es256Algorithm::new_verifier(*key1.verifying_key())),
     );
 
-    let hint = KeyHint {
-        algorithm_id: 5, // HMAC-256, not the registered -7
-        kid: Some(b"kid-a".to_vec()),
-        issuer: Some("issuer-a".to_string()),
-    };
+    // HMAC-256 (id 5), not the registered -7
+    let mut hint = KeyHint::new(5).with_kid(b"kid-a".to_vec());
+    hint.issuer = Some("issuer-a".to_string());
     let err = resolve_err(&resolver, &hint);
     assert!(matches!(err, CatError::ConfigurationRefused(_)));
 }
@@ -220,11 +206,8 @@ fn test_keyring_no_kid_rejected() {
         Box::new(Es256Algorithm::new_verifier(*key1.verifying_key())),
     );
 
-    let hint = KeyHint {
-        algorithm_id: -7,
-        kid: None,
-        issuer: Some("issuer-a".to_string()),
-    };
+    let mut hint = KeyHint::new(-7);
+    hint.issuer = Some("issuer-a".to_string());
     let err = resolve_err(&resolver, &hint);
     assert!(matches!(err, CatError::ConfigurationRefused(_)));
 }
@@ -241,11 +224,7 @@ fn test_keyring_no_issuer_rejected() {
         Box::new(Es256Algorithm::new_verifier(*key1.verifying_key())),
     );
 
-    let hint = KeyHint {
-        algorithm_id: -7,
-        kid: Some(b"kid-a".to_vec()),
-        issuer: None,
-    };
+    let hint = KeyHint::new(-7).with_kid(b"kid-a".to_vec());
     let err = resolve_err(&resolver, &hint);
     assert!(matches!(err, CatError::MissingRequiredClaim(_)));
 }

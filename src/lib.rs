@@ -108,7 +108,7 @@ pub use crate::structured_header::{
 };
 pub use crate::token::{
     CatPorBlockList, CatTokenBuilder, CatTokenValidator, Decoder, MAX_CLOCK_SKEW_TOLERANCE_SECS,
-    ReplayGuard, decode_encrypted_token, decode_token, encode_token, encode_token_base64,
+    ReplayGuard, encode_token, encode_token_base64,
 };
 pub use crate::x509::{
     PathValidator, VerifiedPeerCertificate, authenticate_and_pin, check_cattpk_pin,

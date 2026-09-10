@@ -36,11 +36,37 @@ pub enum CatError {
     #[error("Invalid claim value: {0}")]
     InvalidClaimValue(String),
 
+    /// The token asserts a claim that requires a piece of request context
+    /// (peer IP, ALPN, URI, request method, header set, block list, replay
+    /// guard) the integrator did not populate. This is a wiring bug —
+    /// authorization is refused because the required input was absent, not
+    /// because the token was malformed.
+    #[error("Token claim {claim} requires request context {field}, but it was not provided")]
+    MissingRelayContext {
+        claim: &'static str,
+        field: &'static str,
+    },
+
     #[error("Unsupported algorithm: {0}")]
     UnsupportedAlgorithm(String),
 
     #[error("Algorithm mismatch: expected {expected}, found {found}")]
     AlgorithmMismatch { expected: i64, found: i64 },
+
+    /// The token's protected-header `alg` is not in the admission policy's
+    /// allow-list. Distinct from [`CatError::AlgorithmMismatch`], which
+    /// signals a resolver-vs-token disagreement on a single expected `alg`.
+    #[error("Algorithm {found} not permitted by admission policy (allowed: {allowed:?})")]
+    AlgorithmNotAllowed { found: i64, allowed: Vec<i64> },
+
+    /// The token's protected-header `kid` is not in the admission policy's
+    /// allow-list, or the policy requires a `kid` and none was present.
+    /// `found` is `None` when the header omitted `kid`.
+    #[error("Key ID {found:?} not permitted by admission policy (allowed: {allowed:?})")]
+    KidNotAllowed {
+        found: Option<Vec<u8>>,
+        allowed: Vec<Vec<u8>>,
+    },
 
     /// A cryptographic key operation (sign, verify, MAC, encrypt,
     /// decrypt, JWK parse) failed. Signals bad key material or corrupt

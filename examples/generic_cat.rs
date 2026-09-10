@@ -7,9 +7,8 @@
 //! This example shows how to create tokens for a generic CDN or API gateway.
 
 use cat_token::{
-    CatTokenBuilder, CatTokenValidator, Es256Algorithm, MatchValue, NetworkIdentifier,
-    URI_COMPONENT_EXTENSION, URI_COMPONENT_PATH, UriMatchRule, decode_token, encode_token,
-    encode_token_base64,
+    CatTokenBuilder, CatTokenValidator, Decoder, Es256Algorithm, MatchValue, NetworkIdentifier,
+    URI_COMPONENT_EXTENSION, URI_COMPONENT_PATH, UriMatchRule, encode_token, encode_token_base64,
 };
 use chrono::{Duration, Utc};
 
@@ -101,7 +100,8 @@ fn main() {
 
     // Validation example
     println!("\n4. Token Validation");
-    let decoded = decode_token(&encoded, &key)
+    let decoded = Decoder::with_algorithm(&key)
+        .decode(&encoded)
         .unwrap()
         .into_unvalidated_token();
 

@@ -177,24 +177,24 @@ impl AdmissionPolicy {
         if let Some(allowed) = &self.allowed_algorithms
             && !allowed.contains(&header.algorithm_id)
         {
-            return Err(CatError::AlgorithmMismatch {
-                expected: *allowed.iter().next().unwrap_or(&0),
+            let mut allowed_list: Vec<i64> = allowed.iter().copied().collect();
+            allowed_list.sort();
+            return Err(CatError::AlgorithmNotAllowed {
                 found: header.algorithm_id,
+                allowed: allowed_list,
             });
         }
 
         if let Some(allowed_kids) = &self.allowed_kids {
             match &header.kid {
                 Some(kid) if allowed_kids.contains(kid) => {}
-                Some(_) => {
-                    return Err(CatError::ConfigurationRefused(
-                        "kid not in admission allowlist".to_string(),
-                    ));
-                }
-                None => {
-                    return Err(CatError::ConfigurationRefused(
-                        "token has no kid but admission policy requires one".to_string(),
-                    ));
+                found => {
+                    let mut allowed_list: Vec<Vec<u8>> = allowed_kids.iter().cloned().collect();
+                    allowed_list.sort();
+                    return Err(CatError::KidNotAllowed {
+                        found: found.clone(),
+                        allowed: allowed_list,
+                    });
                 }
             }
         }

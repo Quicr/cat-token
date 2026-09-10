@@ -37,7 +37,7 @@ fn main() -> Result<(), CatError> {
     );
 
     // 4. Decode and verify signature (relay does this)
-    let verified = decode_token(&encoded, &key)?;
+    let verified = Decoder::with_algorithm(&key).decode(&encoded)?;
 
     // 5. Validate claims (produces ValidatedToken)
     let validator = CatTokenValidator::new()

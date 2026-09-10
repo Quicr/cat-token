@@ -135,7 +135,7 @@ fn test_token_validation_comprehensive() {
         .with_expected_audiences(vec!["expected-audience".to_string()])
         .with_clock_skew_tolerance(120)
         .unwrap()
-        .allow_unencrypted_privacy_claims();
+        .dangerously_allow_unencrypted_privacy_claims();
 
     assert!(validator.validate(&token).is_ok());
 }
@@ -184,7 +184,7 @@ fn test_token_validation_failures() {
 
 #[test]
 fn test_geographic_validation() {
-    let validator = CatTokenValidator::new().allow_unencrypted_privacy_claims();
+    let validator = CatTokenValidator::new().dangerously_allow_unencrypted_privacy_claims();
 
     // Valid coordinates
     let valid_token = CatToken::new()

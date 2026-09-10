@@ -111,8 +111,9 @@ fn build_token_and_proof(dpop_alg: &Es256Algorithm) -> (ValidatedToken, DpopProo
         .unwrap();
     let key = HmacSha256Algorithm::new(b"test-key-for-roundtrip-000000000");
     let encoded = encode_token(&token, &key).unwrap();
-    let cat_validator = CatTokenValidator::new().allow_unencrypted_privacy_claims();
-    let validated = decode_token(&encoded, &key)
+    let cat_validator = CatTokenValidator::new().dangerously_allow_unencrypted_privacy_claims();
+    let validated = Decoder::with_algorithm(&key)
+        .decode(&encoded)
         .unwrap()
         .validate(&cat_validator)
         .unwrap();
@@ -124,7 +125,7 @@ fn build_token_and_proof(dpop_alg: &Es256Algorithm) -> (ValidatedToken, DpopProo
         ALG_ES256,
         dpop_jwk,
     )
-    .with_jti(generate_jti())
+    .with_replay_id(generate_jti())
     .with_access_token_hash(ath);
     proof.sign(dpop_alg).unwrap();
     (validated, proof, thumbprint)
@@ -210,9 +211,10 @@ fn test_transient_backend_failure_does_not_burn_jti() {
         .unwrap();
     let key = HmacSha256Algorithm::new(b"test-key-for-roundtrip-000000000");
     let encoded = encode_token(&token, &key).unwrap();
-    let validated = decode_token(&encoded, &key)
+    let validated = Decoder::with_algorithm(&key)
+        .decode(&encoded)
         .unwrap()
-        .validate(&CatTokenValidator::new().allow_unencrypted_privacy_claims())
+        .validate(&CatTokenValidator::new().dangerously_allow_unencrypted_privacy_claims())
         .unwrap();
     let ath = compute_access_token_hash(validated.serialized());
 
@@ -223,7 +225,7 @@ fn test_transient_backend_failure_does_not_burn_jti() {
         ALG_ES256,
         dpop_jwk.clone(),
     )
-    .with_jti(generate_jti())
+    .with_replay_id(generate_jti())
     .with_access_token_hash(ath.clone());
     proof1.sign(&dpop_alg).unwrap();
 
@@ -246,7 +248,7 @@ fn test_transient_backend_failure_does_not_burn_jti() {
         ALG_ES256,
         dpop_jwk,
     )
-    .with_jti(generate_jti())
+    .with_replay_id(generate_jti())
     .with_access_token_hash(ath);
     proof2.sign(&dpop_alg).unwrap();
     let ctx2 = authorize_ctx(b"track1").with_dpop_proof(proof2);

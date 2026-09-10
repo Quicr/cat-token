@@ -14,8 +14,9 @@ const RELAY: &str = "relay";
 fn make_validated(token: &CatToken) -> ValidatedToken {
     let key = HmacSha256Algorithm::new(b"test-key-for-roundtrip-000000000");
     let encoded = encode_token(token, &key).unwrap();
-    let validator = CatTokenValidator::new().allow_unencrypted_privacy_claims();
-    decode_token(&encoded, &key)
+    let validator = CatTokenValidator::new().dangerously_allow_unencrypted_privacy_claims();
+    Decoder::with_algorithm(&key)
+        .decode(&encoded)
         .unwrap()
         .validate(&validator)
         .unwrap()
@@ -314,7 +315,7 @@ fn test_moqt_validator_no_revalidation_support() {
         .unwrap();
 
     // Validator that doesn't support revalidation
-    let v = MoqtValidator::new().without_revalidation_support();
+    let v = MoqtValidator::new().disable_revalidation_support();
 
     let result = v.validate_moqt_claims(&token);
     assert!(matches!(result, Err(CatError::RevalidationRequired)));
@@ -480,14 +481,16 @@ fn test_dpop_validator_concurrent_jti() {
                     ALG_ES256,
                     jwk_clone.clone(),
                 )
-                .with_jti(jti.clone());
+                .with_replay_id(jti.clone());
                 proof.sign(alg_clone.as_ref()).unwrap();
 
-                let result = validator.validate(&proof, MoqtAction::Publish, &thumbprint, None);
+                let result =
+                    validator.validate(&proof, MoqtAction::Publish, &thumbprint, None, None);
                 assert!(result.is_ok(), "First use of JTI {} should succeed", jti);
 
                 // Second use should fail (replay)
-                let result = validator.validate(&proof, MoqtAction::Publish, &thumbprint, None);
+                let result =
+                    validator.validate(&proof, MoqtAction::Publish, &thumbprint, None, None);
                 assert!(
                     matches!(result, Err(CatError::ReplayAttackDetected)),
                     "Replay of JTI {} should fail",
@@ -528,10 +531,10 @@ fn test_jti_cache_stats() {
             ALG_ES256,
             jwk.clone(),
         )
-        .with_jti(jti);
+        .with_replay_id(jti);
         proof.sign(&alg).unwrap();
 
-        let result = validator.validate(&proof, MoqtAction::Publish, &thumbprint, None);
+        let result = validator.validate(&proof, MoqtAction::Publish, &thumbprint, None, None);
         assert!(
             result.is_ok(),
             "Validation must not hard-fail once the cache is full (LRU eviction)"

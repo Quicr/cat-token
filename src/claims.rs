@@ -109,7 +109,8 @@ pub(crate) const MATCH_TYPE_PREFIX: i64 = 1;
 #[cfg(feature = "moqt")]
 pub(crate) const MATCH_TYPE_SUFFIX: i64 = 2;
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Default)]
+#[non_exhaustive]
 pub struct CoreClaims {
     pub iss: Option<String>,
     pub aud: Option<Vec<String>>,
@@ -141,19 +142,46 @@ impl TryFrom<u32> for ReplayProtection {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[non_exhaustive]
 pub struct ProbabilityOfRejection {
     pub probability: f64,
     pub id: Vec<u8>,
     pub expiration: Option<i64>,
 }
 
+impl ProbabilityOfRejection {
+    pub fn new(probability: f64, id: Vec<u8>) -> Self {
+        Self {
+            probability,
+            id,
+            expiration: None,
+        }
+    }
+
+    pub fn with_expiration(mut self, exp: i64) -> Self {
+        self.expiration = Some(exp);
+        self
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[non_exhaustive]
 pub struct GeoAltitude {
     pub altitude: f64,
     pub deviation: f64,
 }
 
+impl GeoAltitude {
+    pub fn new(altitude: f64, deviation: f64) -> Self {
+        Self {
+            altitude,
+            deviation,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Default)]
+#[non_exhaustive]
 pub struct CatClaims {
     pub catreplay: Option<ReplayProtection>,
     pub catpor: Option<ProbabilityOfRejection>,
@@ -170,7 +198,8 @@ pub struct CatClaims {
     pub cattpk: Option<Vec<u8>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Default)]
+#[non_exhaustive]
 pub struct InformationalClaims {
     pub sub: Option<String>,
     pub iat: Option<i64>,
@@ -327,7 +356,8 @@ impl CatDpopSettings {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Default)]
+#[non_exhaustive]
 pub struct DpopClaims {
     pub cnf: Option<ConfirmationClaim>,
     pub catdpop: Option<CatDpopSettings>,
@@ -619,7 +649,8 @@ impl CatRenewal {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Default)]
+#[non_exhaustive]
 pub struct RequestClaims {
     pub catif: Option<Vec<(i64, CatIfAction)>>,
     pub catr: Option<CatRenewal>,
@@ -789,6 +820,7 @@ impl CompositeClaim {
 
 /// Container for composite claims in a CAT token
 #[derive(Debug, Clone, PartialEq, Serialize, Default)]
+#[non_exhaustive]
 pub struct CompositeClaims {
     /// OR composite claim
     pub or_claim: Option<CompositeClaim>,
@@ -869,10 +901,17 @@ impl CompositeClaims {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[non_exhaustive]
 pub struct GeoCoordinate {
     pub lat: f64,
     pub lon: f64,
     pub radius: u32,
+}
+
+impl GeoCoordinate {
+    pub fn new(lat: f64, lon: f64, radius: u32) -> Self {
+        Self { lat, lon, radius }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -1471,13 +1510,15 @@ impl MoqtScope {
 }
 
 #[cfg(feature = "moqt")]
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Default)]
+#[non_exhaustive]
 pub struct MoqtClaims {
     pub moqt: Option<Vec<MoqtScope>>,
     pub moqt_reval: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
+#[non_exhaustive]
 pub struct CatToken {
     pub core: CoreClaims,
     pub cat: CatClaims,

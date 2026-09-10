@@ -111,7 +111,8 @@ fn test_integer_coords_roundtrip() {
         .unwrap();
 
     let encoded = encode_token(&token, &alg).unwrap();
-    let decoded = decode_token(&encoded, &alg)
+    let decoded = Decoder::with_algorithm(&alg)
+        .decode(&encoded)
         .unwrap()
         .into_unvalidated_token();
     let coords = decoded.cat.catgeocoord.unwrap();

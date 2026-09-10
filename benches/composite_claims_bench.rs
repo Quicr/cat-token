@@ -220,16 +220,14 @@ fn bench_composite_claims_container(c: &mut Criterion) {
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
         };
 
-        let container = CompositeClaims {
-            or_claim: Some(composite_utils::create_or_from_tokens(vec![
-                create_valid_token("issuer1"),
-            ])),
-            and_claim: Some(composite_utils::create_and_from_tokens(vec![
-                create_valid_token("issuer2"),
-                create_valid_token("issuer3"),
-            ])),
-            ..Default::default()
-        };
+        let mut container = CompositeClaims::default();
+        container.or_claim = Some(composite_utils::create_or_from_tokens(vec![
+            create_valid_token("issuer1"),
+        ]));
+        container.and_claim = Some(composite_utils::create_and_from_tokens(vec![
+            create_valid_token("issuer2"),
+            create_valid_token("issuer3"),
+        ]));
 
         b.iter(|| {
             let has_composites = container.has_composites();
