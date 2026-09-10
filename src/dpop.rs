@@ -268,10 +268,9 @@ impl AuthorizationContext {
             return false;
         }
         match self.action.resource_shape() {
-            crate::MoqtResourceShape::Endpoint => true,
-            crate::MoqtResourceShape::Namespace | crate::MoqtResourceShape::Track => {
-                !self.tns.is_empty()
-            }
+            crate::claims::MoqtResourceShape::Endpoint => true,
+            crate::claims::MoqtResourceShape::Namespace
+            | crate::claims::MoqtResourceShape::Track => !self.tns.is_empty(),
         }
     }
 
@@ -1545,10 +1544,10 @@ pub mod jwt {
         map.insert(
             "jwk".to_string(),
             serde_json::to_value(&header.jwk)
-                .map_err(|e| CatError::CryptoError(format!("jwk serialize: {e}")))?,
+                .map_err(|e| CatError::KeyOperationFailed(format!("jwk serialize: {e}")))?,
         );
         serde_json::to_vec(&Json::Object(map))
-            .map_err(|e| CatError::CryptoError(format!("header serialize: {e}")))
+            .map_err(|e| CatError::KeyOperationFailed(format!("header serialize: {e}")))
     }
 
     fn decode_header(bytes: &[u8]) -> Result<DpopHeader, CatError> {
@@ -1605,7 +1604,7 @@ pub mod jwt {
             map.insert("ath".to_string(), Json::String(URL_SAFE_NO_PAD.encode(ath)));
         }
         serde_json::to_vec(&Json::Object(map))
-            .map_err(|e| CatError::CryptoError(format!("payload serialize: {e}")))
+            .map_err(|e| CatError::KeyOperationFailed(format!("payload serialize: {e}")))
     }
 
     fn decode_payload(bytes: &[u8]) -> Result<DpopPayload, CatError> {
@@ -1924,7 +1923,7 @@ impl JtiStore for LruJtiStore {
         let mut cache = shard
             .cache
             .lock()
-            .map_err(|_| CatError::CryptoError("Lock poisoned".to_string()))?;
+            .map_err(|_| CatError::BackendUnavailable("Lock poisoned".to_string()))?;
         if cache.contains(&key) {
             return Err(CatError::ReplayAttackDetected);
         }
@@ -2054,7 +2053,7 @@ impl JtiStore for InMemoryStrictJtiStore {
         let mut entries = self
             .entries
             .lock()
-            .map_err(|_| CatError::CryptoError("Lock poisoned".to_string()))?;
+            .map_err(|_| CatError::BackendUnavailable("Lock poisoned".to_string()))?;
         if entries.contains_key(&key) {
             return Err(CatError::ReplayAttackDetected);
         }
@@ -2164,10 +2163,10 @@ impl DpopValidator {
                 "DPoP freshness window must be > 0 (got {window}s)"
             )));
         }
-        if window > crate::CATDPOP_MAX_WINDOW_SECS {
+        if window > crate::claims::CATDPOP_MAX_WINDOW_SECS {
             return Err(CatError::InvalidClaimValue(format!(
                 "DPoP freshness window {window}s exceeds cap {}s",
-                crate::CATDPOP_MAX_WINDOW_SECS
+                crate::claims::CATDPOP_MAX_WINDOW_SECS
             )));
         }
         Ok(())
@@ -2190,8 +2189,8 @@ impl DpopValidator {
 
     /// Construct a validator backed by a strict JTI store. The store MUST
     /// return `true` from [`JtiStore::is_strict`] — otherwise this
-    /// constructor returns [`CatError::CryptoError`] to force the caller
-    /// to either mark the store strict or fall back to
+    /// constructor returns [`CatError::ConfigurationRefused`] to force
+    /// the caller to either mark the store strict or fall back to
     /// [`DpopValidator::with_jti_store`] with eyes-open.
     ///
     /// A "strict" store retains every accepted JTI for at least the
@@ -2202,7 +2201,7 @@ impl DpopValidator {
         store: Arc<dyn JtiStore>,
     ) -> Result<Self, CatError> {
         if !store.is_strict() {
-            return Err(CatError::CryptoError(
+            return Err(CatError::ConfigurationRefused(
                 "JtiStore::is_strict() returned false; strict CDN deployments \
                  require a distributed TTL-backed store"
                     .to_string(),
@@ -3182,7 +3181,7 @@ mod tests {
             Ok(_) => panic!("expected strict-store rejection"),
             Err(e) => e,
         };
-        assert!(matches!(err, CatError::CryptoError(_)));
+        assert!(matches!(err, CatError::ConfigurationRefused(_)));
     }
 
     #[cfg(feature = "moqt")]
@@ -3195,7 +3194,7 @@ mod tests {
         // valid. Verify a too-large window is caught if smuggled through
         // the internal setter.
         let mut bad = CatDpopSettings::new();
-        bad.set_window_from_decode(crate::CATDPOP_MAX_WINDOW_SECS + 1);
+        bad.set_window_from_decode(crate::claims::CATDPOP_MAX_WINDOW_SECS + 1);
         assert!(DpopValidator::preflight(&bad).is_err());
     }
 

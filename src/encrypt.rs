@@ -67,7 +67,7 @@ pub fn cose_encrypt0(
     algorithm: &EncryptionAlgorithm,
 ) -> Result<Vec<u8>, CatError> {
     if key.len() != algorithm.key_size() {
-        return Err(CatError::CryptoError(format!(
+        return Err(CatError::KeyOperationFailed(format!(
             "Key size mismatch: expected {}, got {}",
             algorithm.key_size(),
             key.len()
@@ -79,8 +79,8 @@ pub fn cose_encrypt0(
 
     let (nonce_bytes, ciphertext) = match algorithm {
         EncryptionAlgorithm::A128Gcm => {
-            let cipher =
-                Aes128Gcm::new_from_slice(key).map_err(|e| CatError::CryptoError(e.to_string()))?;
+            let cipher = Aes128Gcm::new_from_slice(key)
+                .map_err(|e| CatError::KeyOperationFailed(e.to_string()))?;
             let nonce = Aes128Gcm::generate_nonce(&mut OsRng);
             let ct = cipher
                 .encrypt(
@@ -90,12 +90,12 @@ pub fn cose_encrypt0(
                         aad: &aad,
                     },
                 )
-                .map_err(|e| CatError::CryptoError(e.to_string()))?;
+                .map_err(|e| CatError::KeyOperationFailed(e.to_string()))?;
             (nonce.to_vec(), ct)
         }
         EncryptionAlgorithm::A256Gcm => {
-            let cipher =
-                Aes256Gcm::new_from_slice(key).map_err(|e| CatError::CryptoError(e.to_string()))?;
+            let cipher = Aes256Gcm::new_from_slice(key)
+                .map_err(|e| CatError::KeyOperationFailed(e.to_string()))?;
             let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
             let ct = cipher
                 .encrypt(
@@ -105,7 +105,7 @@ pub fn cose_encrypt0(
                         aad: &aad,
                     },
                 )
-                .map_err(|e| CatError::CryptoError(e.to_string()))?;
+                .map_err(|e| CatError::KeyOperationFailed(e.to_string()))?;
             (nonce.to_vec(), ct)
         }
     };
@@ -239,7 +239,7 @@ pub fn cose_decrypt0_with_max_plaintext(
     let aad = build_enc_structure(&protected)?;
 
     if nonce_bytes.len() != 12 {
-        return Err(CatError::CryptoError(format!(
+        return Err(CatError::KeyOperationFailed(format!(
             "Invalid nonce length: expected 12, got {}",
             nonce_bytes.len()
         )));
@@ -247,8 +247,8 @@ pub fn cose_decrypt0_with_max_plaintext(
 
     match alg_id {
         ALG_A128GCM => {
-            let cipher =
-                Aes128Gcm::new_from_slice(key).map_err(|e| CatError::CryptoError(e.to_string()))?;
+            let cipher = Aes128Gcm::new_from_slice(key)
+                .map_err(|e| CatError::KeyOperationFailed(e.to_string()))?;
             let nonce = Nonce::from_slice(&nonce_bytes);
             cipher
                 .decrypt(
@@ -258,11 +258,13 @@ pub fn cose_decrypt0_with_max_plaintext(
                         aad: &aad,
                     },
                 )
-                .map_err(|_| CatError::CryptoError("AES-128-GCM decryption failed".to_string()))
+                .map_err(|_| {
+                    CatError::KeyOperationFailed("AES-128-GCM decryption failed".to_string())
+                })
         }
         ALG_A256GCM => {
-            let cipher =
-                Aes256Gcm::new_from_slice(key).map_err(|e| CatError::CryptoError(e.to_string()))?;
+            let cipher = Aes256Gcm::new_from_slice(key)
+                .map_err(|e| CatError::KeyOperationFailed(e.to_string()))?;
             let nonce = Nonce::from_slice(&nonce_bytes);
             cipher
                 .decrypt(
@@ -272,7 +274,9 @@ pub fn cose_decrypt0_with_max_plaintext(
                         aad: &aad,
                     },
                 )
-                .map_err(|_| CatError::CryptoError("AES-256-GCM decryption failed".to_string()))
+                .map_err(|_| {
+                    CatError::KeyOperationFailed("AES-256-GCM decryption failed".to_string())
+                })
         }
         _ => Err(CatError::UnsupportedAlgorithm(format!(
             "Unknown encryption algorithm: {alg_id}"

@@ -149,7 +149,7 @@ struct FaultyJtiStore;
 #[async_trait]
 impl AsyncJtiStore for FaultyJtiStore {
     async fn check_and_insert(&self, _key: String, _iat: i64) -> Result<(), CatError> {
-        Err(CatError::CryptoError("simulated outage".to_string()))
+        Err(CatError::BackendUnavailable("simulated outage".to_string()))
     }
     fn is_strict(&self) -> bool {
         // We're asserting the fail-closed contract, not the strictness
@@ -196,8 +196,8 @@ async fn async_authorize_fails_closed_on_store_outage() {
         .await
         .expect_err("store outage must fail authorization closed");
     assert!(
-        matches!(err, CatError::CryptoError(_)),
-        "expected CryptoError, got {err:?}"
+        matches!(err, CatError::BackendUnavailable(_)),
+        "expected BackendUnavailable, got {err:?}"
     );
 }
 
@@ -226,10 +226,10 @@ fn async_validator_refuses_non_strict_store() {
     let sync = cat_token::moqt::MoqtValidator::new().dpop_best_effort(settings);
     match AsyncMoqtValidator::strict(sync, Arc::new(NonStrictJtiStore)) {
         Ok(_) => panic!("non-strict store must be refused"),
-        Err(CatError::CryptoError(msg)) => {
+        Err(CatError::ConfigurationRefused(msg)) => {
             assert!(msg.contains("is_strict"), "unexpected message: {msg}");
         }
-        Err(other) => panic!("expected strictness CryptoError, got {other:?}"),
+        Err(other) => panic!("expected strictness ConfigurationRefused, got {other:?}"),
     }
 }
 
@@ -394,8 +394,8 @@ async fn strict_validator_refuses_best_effort_replay_guard() {
         .await
         .expect_err("best-effort guard must be refused under require_strict_replay_guard");
     assert!(
-        matches!(&err, CatError::CryptoError(msg) if msg.contains("is_strict")),
-        "expected CryptoError referencing is_strict, got {err:?}"
+        matches!(&err, CatError::ConfigurationRefused(msg) if msg.contains("is_strict")),
+        "expected ConfigurationRefused referencing is_strict, got {err:?}"
     );
 }
 

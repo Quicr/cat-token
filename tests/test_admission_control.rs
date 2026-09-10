@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2022 Quicr
 // SPDX-License-Identifier: BSD-2-Clause
 
-use cat_token::prelude::*;
+use cat_token::*;
 use chrono::{Duration, Utc};
 
 fn make_token_bytes(key: &Es256Algorithm) -> Vec<u8> {

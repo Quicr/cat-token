@@ -17,7 +17,8 @@ pub use crate::crypto::{
 #[cfg(feature = "moqt")]
 pub use crate::dpop::{DpopProof, DpopValidator, JtiStore, LruJtiStore};
 pub use crate::dpop::{
-    compute_access_token_hash, confirmation_from_jwk, confirmation_matches_jwk, generate_jti,
+    compute_access_token_hash, compute_access_token_hash_b64, confirmation_from_jwk,
+    confirmation_matches_jwk, generate_jti,
 };
 pub use crate::encrypt::{EncryptionAlgorithm, cose_decrypt0, cose_encrypt0};
 pub use crate::error::CatError;
@@ -45,6 +46,5 @@ pub use crate::x509::{
 pub use crate::claims::{BinaryMatch, MoqtAction, MoqtClaims, MoqtScope, NamespaceMatch};
 #[cfg(feature = "moqt")]
 pub use crate::moqt::{
-    AuthorizedRequest, HttpRequest, MoqtScopeBuilder, MoqtValidator, RelayRequestContext,
-    TransportInfo,
+    AuthorizedRequest, MoqtScopeBuilder, MoqtValidator, RelayRequestContext, roles,
 };

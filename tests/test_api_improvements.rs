@@ -23,7 +23,7 @@ fn ctx(action: MoqtAction, ns: Vec<Vec<u8>>, track: Vec<u8>) -> RelayRequestCont
 }
 
 fn moqt_validator_permissive() -> MoqtValidator {
-    MoqtValidator::new().allow_missing_audience()
+    MoqtValidator::new().dangerously_allow_missing_audience()
 }
 
 fn authorize(

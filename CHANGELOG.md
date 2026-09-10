@@ -1,5 +1,85 @@
 # Changelog
 
+## 0.5.1 — 2026-09-09
+
+API-elegance follow-up on 0.5.0. Splits the generic `CryptoError`
+variant into three intent-explicit failure modes so a caller can tell
+"the key is bad" apart from "the replay store is down" apart from
+"the integrator wired this up wrong". Deletes two dead error variants,
+marks the error enum `#[non_exhaustive]`, tightens the crate-root
+re-export surface, and hides internal precommit/commit types from
+autocomplete. No behavioural changes to the authorization pipeline.
+
+### Changed (breaking)
+
+- **`CatError::CryptoError` is split into three variants.** Callers
+  matching on the old `CryptoError(_)` must migrate:
+  - `KeyOperationFailed(String)` — sign / verify / MAC / encrypt /
+    decrypt / JWK-parse failed. Bad key material or corrupt input.
+  - `BackendUnavailable(String)` — a replay store, key resolver, or
+    other pluggable backend failed (mutex poisoning, distributed-store
+    timeout, transient outage). The validator MUST fail closed.
+  - `ConfigurationRefused(String)` — the integrator's configuration
+    violates a fail-closed policy contract (strict-store requested but
+    a best-effort one was supplied, `catreplay` obligation without a
+    guard, etc.). Not transient; retrying will not help.
+- **`CatError` is now `#[non_exhaustive]`.** Downstream `match` arms
+  on the enum must add a wildcard.
+- **Removed `CatError::UsageLimitExceeded` and
+  `CatError::MethodNotAllowed`.** Neither was constructed anywhere in
+  the crate. Method violations flow through `InvalidClaimValue`.
+- **`MoqtValidator::allow_missing_audience` renamed to
+  `dangerously_allow_missing_audience`.** Audience binding is the
+  primary defense against cross-relay token replay; the old name did
+  not signal that turning it off is a security-posture decision.
+- **`RelayRequestContext::transport` / `.http` sub-structs removed.**
+  The 0.5.0 grouping was a false abstraction — every real caller
+  either reached through to the underlying fields or built the sub-
+  struct inline. Field access is now `pub(crate)` with `.peer_ip()`,
+  `.request_uri()`, etc. getters; the `with_*` builder setters are
+  unchanged so existing constructors keep compiling.
+- **`AuthorizedRequest` fields already private in 0.5.0 — this release
+  extends the same treatment to `RelayRequestContext`** so both
+  authorization boundary types are getter-only.
+- **`CatReplayObligation`, `PreCommit`, and
+  `MoqtValidator::validate_moqt_claims` are `#[doc(hidden)]`.** They
+  remain `pub` for the async integration path and for `moqt-reval`
+  contract tests, but they are not part of the surface a first-time
+  integrator should see.
+
+### Migration
+
+- `Err(CatError::CryptoError(msg))` from crypto primitives →
+  `Err(CatError::KeyOperationFailed(msg))`.
+- `Err(CatError::CryptoError(msg))` from replay-store / lock / backend
+  paths → `Err(CatError::BackendUnavailable(msg))`.
+- `Err(CatError::CryptoError(msg))` from strict-store contract
+  refusals or admission-policy misconfiguration →
+  `Err(CatError::ConfigurationRefused(msg))`.
+- `MoqtValidator::new().allow_missing_audience()` →
+  `MoqtValidator::new().dangerously_allow_missing_audience()`.
+- `ctx.transport.peer_ip` / `ctx.http.uri` → `ctx.peer_ip()` /
+  `ctx.request_uri()` (or keep using the `.with_peer_ip(ip)` /
+  `.with_request_uri(uri)` builders).
+
+### Added
+
+- Crate-level rustdoc on `lib.rs` documents the two feature profiles
+  (default = CAT-4-MOQT relay validator, no-default = generic
+  CWT/CTA-5007-B library) so the choice is discoverable without
+  reading `Cargo.toml`.
+- `MoqtValidator::dpop_strict` and `AsyncMoqtValidator::strict`
+  rustdoc now cross-reference each other and warn that a deployment
+  mixing sync and async paths must share the same underlying store
+  instance.
+
+### Fixed
+
+- Crate-root re-exports are now an explicit curated list rather than
+  `pub use module::*`. Prevents accidental leakage of module-private
+  helpers into the public surface. The `prelude` module remains the
+  recommended import path for integrators.
+
 ## 0.5.0 — 2026-09-09
 
 API cleanup release. Every change here is a rename or a visibility

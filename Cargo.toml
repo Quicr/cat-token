@@ -1,6 +1,6 @@
 [package]
 name = "cat-token"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2024"
 authors = ["Suhas Nandakumar"]
 description = "Strict fail-closed profile of CTA-5007-B CAT and CAT-4-MOQT (see docs/PROFILE.md for supported claim forms and rejections)"
@@ -111,9 +111,24 @@ name = "async_relay_validator"
 required-features = ["async"]
 
 [features]
+# The default profile is CAT-4-MOQT: a strict fail-closed MoQT relay
+# validator with an in-process prefix/suffix trie for catnip/catu match
+# rules. Turn `default-features = false` off for a generic CWT / CTA-
+# 5007-B CAT library — you get the CBOR + COSE + signature/mac + claim-
+# evaluation core but no MoQT-scope matching (`MoqtValidator`, MOQT
+# claim helpers, DPoP validator entry points), no URI trie, and no
+# async surface. Use this profile when integrating cat-token into a
+# non-MoQT authorization system.
 default = ["builtin-trie", "moqt"]
+# Built-in prefix/suffix trie for catnip/catu URI matching. Zero extra
+# dependencies. Sufficient for most deployments.
 builtin-trie = []
+# Alternative trie backend using the `qp-trie` crate. Faster lookup at
+# the cost of a dependency; takes precedence if both `builtin-trie` and
+# `qp-trie` are enabled.
 qp-trie = ["dep:qp-trie"]
+# CAT-4-MOQT scope matching and the MoqtValidator authorize pipeline.
+# Off = generic CWT library only.
 moqt = []
 # Adds AsyncJtiStore / AsyncReplayGuard / AsyncMoqtValidator::authorize so
 # relays can integrate cat-token into an async event loop without wrapping

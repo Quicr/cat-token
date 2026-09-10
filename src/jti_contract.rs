@@ -32,8 +32,8 @@
 //!   same JTI must succeed exactly once and be rejected as replay for
 //!   the other N-1. Fails a check-then-set implementation that races.
 //! - [`assert_fail_closed_on_backend_outage`] — an unavailable backend
-//!   must surface [`CatError::CryptoError`], not silently accept the
-//!   insert. Fails a client that retries into swallowed errors.
+//!   must surface [`CatError::BackendUnavailable`], not silently accept
+//!   the insert. Fails a client that retries into swallowed errors.
 //!
 //! # How to use
 //!
@@ -165,20 +165,20 @@ pub fn assert_atomic_insert_if_absent(store: &(dyn JtiStore + Sync), n: usize) {
 }
 
 /// Assert that a store which cannot reach its backend surfaces
-/// [`CatError::CryptoError`] on `check_and_insert`. Silent success on
-/// outage is the highest-severity failure mode — it authorizes a request
-/// whose replay defense has been bypassed. Integrators pass an
-/// implementation of [`JtiStore`] that simulates their outage path (a
-/// broken Redis client, a null-route DynamoDB, etc.); the harness
-/// asserts the correct error surface.
+/// [`CatError::BackendUnavailable`] on `check_and_insert`. Silent
+/// success on outage is the highest-severity failure mode — it
+/// authorizes a request whose replay defense has been bypassed.
+/// Integrators pass an implementation of [`JtiStore`] that simulates
+/// their outage path (a broken Redis client, a null-route DynamoDB,
+/// etc.); the harness asserts the correct error surface.
 pub fn assert_fail_closed_on_backend_outage(outage_store: &dyn JtiStore) {
     match outage_store.check_and_insert("outage-probe".to_string(), 1) {
-        Err(CatError::CryptoError(_)) => {}
+        Err(CatError::BackendUnavailable(_)) => {}
         Ok(()) => panic!(
             "store silently accepted an insert while the backend was \
              unreachable — replay defense is bypassed"
         ),
-        Err(other) => panic!("outage must surface CatError::CryptoError; got {other:?}"),
+        Err(other) => panic!("outage must surface CatError::BackendUnavailable; got {other:?}"),
     }
 }
 
@@ -268,12 +268,14 @@ pub mod asynchronous {
             .check_and_insert("outage-probe".to_string(), 1)
             .await
         {
-            Err(CatError::CryptoError(_)) => {}
+            Err(CatError::BackendUnavailable(_)) => {}
             Ok(()) => panic!(
                 "async store silently accepted an insert while the backend was \
                  unreachable — replay defense is bypassed"
             ),
-            Err(other) => panic!("outage must surface CatError::CryptoError; got {other:?}"),
+            Err(other) => {
+                panic!("outage must surface CatError::BackendUnavailable; got {other:?}")
+            }
         }
     }
 }

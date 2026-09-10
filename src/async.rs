@@ -32,9 +32,10 @@
 //! Enabling the `async` feature adds a single dependency
 //! (`async-trait`); no runtime is pulled in — callers pick their own.
 
+use crate::moqt::{CatReplayObligation, PreCommit};
 use crate::{
-    AuthorizedRequest, CatError, CatPorBlockList, CatReplayObligation, MoqtValidator, PreCommit,
-    RelayRequestContext, ValidatedToken,
+    AuthorizedRequest, CatError, CatPorBlockList, MoqtValidator, RelayRequestContext,
+    ValidatedToken,
 };
 use async_trait::async_trait;
 use std::sync::{Arc, Mutex};
@@ -46,8 +47,8 @@ use std::sync::{Arc, Mutex};
 ///   backend; check-then-set is not sufficient.
 /// - A duplicate JTI must surface as [`CatError::ReplayAttackDetected`],
 ///   not silently succeed.
-/// - Backend errors must surface as [`CatError::CryptoError`] so the
-///   authorization path fails closed on outage.
+/// - Backend errors must surface as [`CatError::BackendUnavailable`]
+///   so the authorization path fails closed on outage.
 /// - Entries must be retained for at least the DPoP freshness window.
 ///
 /// The sync `JtiStore` trait is only supplemented here — not replaced —
@@ -76,7 +77,7 @@ pub trait AsyncJtiStore: Send + Sync {
 /// a strict guard is self-attesting that it retains every observed `cti`
 /// for at least the token's `exp - iat` window, insert-if-absent is atomic
 /// across every node that shares the backend, and backend outage surfaces
-/// as [`CatError::CryptoError`] rather than `Ok(false)`. Distributed CDN
+/// as [`CatError::BackendUnavailable`] rather than `Ok(false)`. Distributed CDN
 /// deployments MUST use a strict guard behind
 /// [`AsyncMoqtValidator::require_strict_replay_guard`]; a best-effort LRU
 /// is a replay-defense bypass under memory pressure or restart.
@@ -175,24 +176,31 @@ impl AsyncMoqtValidator {
     /// Build the async validator with a strict JTI store — the CDN
     /// deployment path. The store MUST return `true` from
     /// [`AsyncJtiStore::is_strict`]; otherwise this returns
-    /// [`CatError::CryptoError`] rather than silently accept a backend
-    /// that could shed retained JTIs.
+    /// [`CatError::ConfigurationRefused`] rather than silently accept a
+    /// backend that could shed retained JTIs.
+    ///
+    /// Sync counterpart: [`MoqtValidator::dpop_strict`] applies the same
+    /// contract to a synchronous [`crate::JtiStore`]. A deployment
+    /// mixing sync and async authorize paths MUST share the same
+    /// underlying store instance, otherwise a JTI accepted on one path
+    /// can be replayed on the other.
     ///
     /// The `is_strict()` bit is *self-attestation*, matching the sync
     /// contract on [`MoqtValidator::dpop_strict`]. A
     /// distributed backend must additionally guarantee atomic
     /// insert-if-absent across nodes, TTL ≥ freshness window + skew, no
     /// silent eviction inside that TTL, and fail-closed on outage
-    /// (surfaced as [`CatError::CryptoError`] from `check_and_insert`).
-    /// The reference [`AsyncInMemoryStrictJtiStore`] satisfies these for
-    /// a single-relay deployment; distributed backends must be audited
-    /// against the same list before deployment.
+    /// (surfaced as [`CatError::BackendUnavailable`] from
+    /// `check_and_insert`). The reference
+    /// [`AsyncInMemoryStrictJtiStore`] satisfies these for a single-
+    /// relay deployment; distributed backends must be audited against
+    /// the same list before deployment.
     pub fn strict(
         sync: MoqtValidator,
         jti_store: Arc<dyn AsyncJtiStore>,
     ) -> Result<Self, CatError> {
         if !jti_store.is_strict() {
-            return Err(CatError::CryptoError(
+            return Err(CatError::ConfigurationRefused(
                 "AsyncJtiStore::is_strict() returned false; strict CDN \
                  deployments require a store that retains every accepted \
                  JTI for the DPoP freshness window. Use \
@@ -310,7 +318,7 @@ impl AsyncMoqtValidator {
             )
         })?;
         if self.require_strict_replay_guard && !guard.is_strict() {
-            return Err(CatError::CryptoError(
+            return Err(CatError::ConfigurationRefused(
                 "AsyncReplayGuard::is_strict() returned false but validator \
                  was constructed with require_strict_replay_guard(); refusing \
                  to commit catreplay through a best-effort backend"
@@ -389,7 +397,7 @@ impl AsyncJtiStore for AsyncInMemoryStrictJtiStore {
         let mut entries = self
             .entries
             .lock()
-            .map_err(|_| CatError::CryptoError("Lock poisoned".to_string()))?;
+            .map_err(|_| CatError::BackendUnavailable("Lock poisoned".to_string()))?;
         if entries.contains_key(&key) {
             return Err(CatError::ReplayAttackDetected);
         }

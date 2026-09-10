@@ -94,7 +94,7 @@ impl<A: CryptographicAlgorithm + Send + Sync> KeyResolver for SingleKeyResolver<
             match &hint.issuer {
                 Some(actual) if actual == expected_iss => {}
                 Some(actual) => {
-                    return Err(CatError::CryptoError(format!(
+                    return Err(CatError::ConfigurationRefused(format!(
                         "issuer mismatch: token iss '{actual}' does not match pinned '{expected_iss}'"
                     )));
                 }
@@ -108,12 +108,12 @@ impl<A: CryptographicAlgorithm + Send + Sync> KeyResolver for SingleKeyResolver<
             match &hint.kid {
                 Some(actual) if actual.as_slice() == expected_kid.as_slice() => {}
                 Some(_) => {
-                    return Err(CatError::CryptoError(
+                    return Err(CatError::ConfigurationRefused(
                         "kid mismatch: header kid does not match pinned kid".to_string(),
                     ));
                 }
                 None => {
-                    return Err(CatError::CryptoError(
+                    return Err(CatError::ConfigurationRefused(
                         "kid missing from protected header but required by resolver".to_string(),
                     ));
                 }
@@ -203,7 +203,7 @@ impl KeyResolver for KeyRingResolver {
             .as_ref()
             .ok_or_else(|| CatError::MissingRequiredClaim("iss".to_string()))?;
         let kid = hint.kid.as_ref().ok_or_else(|| {
-            CatError::CryptoError("kid missing from protected header".to_string())
+            CatError::ConfigurationRefused("kid missing from protected header".to_string())
         })?;
 
         self.keys
@@ -214,7 +214,7 @@ impl KeyResolver for KeyRingResolver {
             })
             .map(|a| a.as_ref() as &dyn CryptographicAlgorithm)
             .ok_or_else(|| {
-                CatError::CryptoError(format!(
+                CatError::ConfigurationRefused(format!(
                     "no key registered for (iss='{}', kid='{}', alg={})",
                     issuer,
                     String::from_utf8_lossy(kid),

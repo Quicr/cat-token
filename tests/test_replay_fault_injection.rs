@@ -19,8 +19,8 @@
 //!   the request.
 //!
 //! - **Replay backend timeout / transient failure**: an insert that
-//!   returns a `CryptoError` must NOT be treated as an accepted JTI.
-//!   The client retry must be admitted, not rejected as a replay.
+//!   returns a `BackendUnavailable` must NOT be treated as an accepted
+//!   JTI. The client retry must be admitted, not rejected as a replay.
 //!
 //! - **Relay restart mid-reservation**: simulated by dropping and
 //!   recreating the store; a JTI that was in flight when the store
@@ -70,7 +70,7 @@ impl JtiStore for FaultInjector {
     fn check_and_insert(&self, key: String, iat: i64) -> Result<(), CatError> {
         if self.fail_next_insert.swap(false, Ordering::SeqCst) {
             self.fail_count.fetch_add(1, Ordering::SeqCst);
-            return Err(CatError::CryptoError(
+            return Err(CatError::BackendUnavailable(
                 "injected replay backend fault".into(),
             ));
         }
@@ -171,7 +171,7 @@ fn test_dpop_jti_burned_on_first_success() {
 
 /// A JTI insert that returns a transient error must NOT poison the
 /// cache: the client's retry with a fresh JTI must succeed. The
-/// fault-injecting wrapper returns CryptoError on the first insert; the
+/// fault-injecting wrapper returns BackendUnavailable on the first insert; the
 /// underlying strict store never sees that key, so a fresh JTI is
 /// virgin.
 #[test]
@@ -231,7 +231,7 @@ fn test_transient_backend_failure_does_not_burn_jti() {
     injector.arm();
     let first = validator.authorize(&validated, &ctx1);
     assert!(
-        matches!(first, Err(CatError::CryptoError(_))),
+        matches!(first, Err(CatError::BackendUnavailable(_))),
         "arming the injector must surface the backend error: {first:?}"
     );
     assert_eq!(injector.injected_failures(), 1);

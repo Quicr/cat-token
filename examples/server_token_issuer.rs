@@ -7,7 +7,7 @@
 //! CAT tokens for MOQT clients. In production, this would be called after
 //! the user authenticates (e.g., OAuth2 flow).
 
-use cat_token::prelude::*;
+use cat_token::*;
 use chrono::{Duration, Utc};
 
 /// Your authorization server's signing key (in production, load from secure storage)

@@ -187,12 +187,12 @@ impl AdmissionPolicy {
             match &header.kid {
                 Some(kid) if allowed_kids.contains(kid) => {}
                 Some(_) => {
-                    return Err(CatError::CryptoError(
+                    return Err(CatError::ConfigurationRefused(
                         "kid not in admission allowlist".to_string(),
                     ));
                 }
                 None => {
-                    return Err(CatError::CryptoError(
+                    return Err(CatError::ConfigurationRefused(
                         "token has no kid but admission policy requires one".to_string(),
                     ));
                 }

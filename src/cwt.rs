@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 use crate::claims::*;
-use crate::{CatClaims, CatError, CatToken, CoreClaims, GeoCoordinate};
+use crate::claims::{CatClaims, CoreClaims};
+use crate::{CatError, CatToken, GeoCoordinate};
 use ciborium::Value;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};

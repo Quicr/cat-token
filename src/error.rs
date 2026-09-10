@@ -4,6 +4,7 @@
 use thiserror::Error;
 
 #[derive(Error, Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum CatError {
     #[error("Invalid token format")]
     InvalidTokenFormat,
@@ -41,17 +42,35 @@ pub enum CatError {
     #[error("Algorithm mismatch: expected {expected}, found {found}")]
     AlgorithmMismatch { expected: i64, found: i64 },
 
-    #[error("Cryptographic operation failed: {0}")]
-    CryptoError(String),
+    /// A cryptographic key operation (sign, verify, MAC, encrypt,
+    /// decrypt, JWK parse) failed. Signals bad key material or corrupt
+    /// input, not a storage or policy problem — those flow through
+    /// [`CatError::BackendUnavailable`] or
+    /// [`CatError::ConfigurationRefused`].
+    #[error("Key operation failed: {0}")]
+    KeyOperationFailed(String),
+
+    /// A replay store, key resolver, or other pluggable backend returned
+    /// an error. The validator MUST fail closed on this variant — the
+    /// authorization decision cannot be trusted. Used for `Mutex`
+    /// poisoning, distributed-store timeouts, and any transient outage
+    /// where the authoritative answer is unavailable.
+    #[error("Backend unavailable: {0}")]
+    BackendUnavailable(String),
+
+    /// The integrator's configuration violates a fail-closed policy
+    /// contract of this crate — asking for a strict store but supplying
+    /// a best-effort one, wiring a `catreplay` obligation without
+    /// providing a guard, etc. This is a configuration bug, not a
+    /// transient failure; retrying will not help.
+    #[error("Configuration refused: {0}")]
+    ConfigurationRefused(String),
 
     #[error("Geographic validation failed: {0}")]
     GeographicValidationFailed(String),
 
     #[error("Replay attack detected")]
     ReplayAttackDetected,
-
-    #[error("Token usage limit exceeded")]
-    UsageLimitExceeded,
 
     #[error("MOQT action not authorized: {0}")]
     MoqtActionNotAuthorized(String),
@@ -70,9 +89,6 @@ pub enum CatError {
 
     #[error("Token rejected by probability of rejection")]
     RejectedByProbability,
-
-    #[error("Method not allowed: {0}")]
-    MethodNotAllowed(String),
 
     #[error("Certificate validation failed: {0}")]
     CertificateValidationFailed(String),

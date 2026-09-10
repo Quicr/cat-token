@@ -167,7 +167,7 @@ fn bench_async_authorize_scale(c: &mut Criterion) {
                         let store_dyn: Arc<dyn AsyncJtiStore> = store.clone();
                         let validator = AsyncMoqtValidator::strict(
                             MoqtValidator::new()
-                                .allow_missing_audience()
+                                .dangerously_allow_missing_audience()
                                 .dpop_best_effort(dpop_settings.clone()),
                             store_dyn,
                         )
