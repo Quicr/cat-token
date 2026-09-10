@@ -10,8 +10,9 @@ use cat_token::*;
 fn make_validated(token: &CatToken) -> ValidatedToken {
     let key = HmacSha256Algorithm::new(b"test-key-for-roundtrip-000000000");
     let encoded = encode_token(token, &key).unwrap();
-    let validator = CatTokenValidator::new().allow_unencrypted_privacy_claims();
-    decode_token(&encoded, &key)
+    let validator = CatTokenValidator::new().dangerously_allow_unencrypted_privacy_claims();
+    Decoder::with_algorithm(&key)
+        .decode(&encoded)
         .unwrap()
         .validate(&validator)
         .unwrap()
@@ -34,7 +35,7 @@ fn test_dpop_uses_embedded_key() {
         ALG_ES256,
         jwk,
     )
-    .with_jti(generate_jti());
+    .with_replay_id(generate_jti());
     proof.sign(&alg).unwrap();
 
     let settings = CatDpopSettings::new().with_window(300).unwrap();
@@ -42,7 +43,7 @@ fn test_dpop_uses_embedded_key() {
 
     // validate() derives the key from the embedded JWK — no external algorithm needed
     validator
-        .validate(&proof, MoqtAction::Subscribe, &thumbprint, None)
+        .validate(&proof, MoqtAction::Subscribe, &thumbprint, None, None)
         .unwrap();
 }
 
@@ -64,7 +65,7 @@ fn test_dpop_wrong_embedded_key_rejected() {
         ALG_ES256,
         dpop_jwk,
     )
-    .with_jti(generate_jti());
+    .with_replay_id(generate_jti());
     // Sign with a DIFFERENT key than the one in the JWK header
     proof.sign(&cat_alg).unwrap();
 
@@ -72,7 +73,7 @@ fn test_dpop_wrong_embedded_key_rejected() {
     let validator = DpopValidator::new(settings);
 
     // Should fail — signature was made with cat_alg but JWK advertises dpop_alg's key
-    let result = validator.validate(&proof, MoqtAction::Subscribe, &dpop_thumbprint, None);
+    let result = validator.validate(&proof, MoqtAction::Subscribe, &dpop_thumbprint, None, None);
     assert!(result.is_err(), "Should reject proof signed with wrong key");
     assert!(matches!(result, Err(CatError::SignatureVerificationFailed)));
 }
@@ -91,7 +92,7 @@ fn test_dpop_namespace_mismatch_rejected() {
         ALG_ES256,
         jwk.clone(),
     )
-    .with_jti(generate_jti());
+    .with_replay_id(generate_jti());
     proof.sign(&alg).unwrap();
 
     let scope = cat_token::moqt::MoqtScopeBuilder::new()
@@ -138,7 +139,7 @@ fn test_dpop_track_mismatch_rejected() {
         ALG_ES256,
         jwk.clone(),
     )
-    .with_jti(generate_jti());
+    .with_replay_id(generate_jti());
     proof.sign(&alg).unwrap();
 
     let scope = cat_token::moqt::MoqtScopeBuilder::new()
@@ -201,7 +202,7 @@ fn test_dpop_matching_target_succeeds() {
         ALG_ES256,
         jwk.clone(),
     )
-    .with_jti(generate_jti())
+    .with_replay_id(generate_jti())
     .with_access_token_hash(ath_for(&validated));
     proof.sign(&alg).unwrap();
 
@@ -236,7 +237,7 @@ fn test_replay_cache_not_polluted_on_bad_signature() {
         ALG_ES256,
         good_jwk.clone(),
     )
-    .with_jti(jti.clone());
+    .with_replay_id(jti.clone());
     bad_proof.sign(&bad_alg).unwrap();
 
     let settings = CatDpopSettings::new()
@@ -246,7 +247,7 @@ fn test_replay_cache_not_polluted_on_bad_signature() {
     let validator = DpopValidator::new(settings);
 
     // Should fail — wrong signature
-    let result = validator.validate(&bad_proof, MoqtAction::Subscribe, &thumbprint, None);
+    let result = validator.validate(&bad_proof, MoqtAction::Subscribe, &thumbprint, None, None);
     assert!(result.is_err());
 
     // Now create a valid proof with the SAME JTI
@@ -257,11 +258,11 @@ fn test_replay_cache_not_polluted_on_bad_signature() {
         ALG_ES256,
         good_jwk,
     )
-    .with_jti(jti);
+    .with_replay_id(jti);
     good_proof.sign(&good_alg).unwrap();
 
     // Should succeed — the JTI was NOT consumed by the failed attempt
-    let result = validator.validate(&good_proof, MoqtAction::Subscribe, &thumbprint, None);
+    let result = validator.validate(&good_proof, MoqtAction::Subscribe, &thumbprint, None, None);
     assert!(
         result.is_ok(),
         "JTI should not be consumed by failed signature verification: {:?}",
@@ -286,14 +287,14 @@ fn test_dpop_key_mismatch_detected() {
         ALG_ES256,
         jwk,
     )
-    .with_jti(generate_jti());
+    .with_replay_id(generate_jti());
     proof.sign(&alg).unwrap();
 
     let settings = CatDpopSettings::new().with_window(300).unwrap();
     let validator = DpopValidator::new(settings);
 
     // Should fail — embedded JWK thumbprint doesn't match expected
-    let result = validator.validate(&proof, MoqtAction::Subscribe, &other_thumbprint, None);
+    let result = validator.validate(&proof, MoqtAction::Subscribe, &other_thumbprint, None, None);
     assert!(
         matches!(
             result,
@@ -349,7 +350,7 @@ fn test_authorize_rejects_missing_ath() {
         ALG_ES256,
         jwk,
     )
-    .with_jti(generate_jti());
+    .with_replay_id(generate_jti());
     proof.sign(&alg).unwrap();
 
     let settings = CatDpopSettings::new().with_window(300).unwrap();
@@ -391,7 +392,7 @@ fn test_authorize_rejects_ath_bound_to_different_token() {
         ALG_ES256,
         jwk,
     )
-    .with_jti(generate_jti())
+    .with_replay_id(generate_jti())
     .with_access_token_hash(ath_for(&validated_a));
     proof.sign(&alg).unwrap();
 
@@ -435,7 +436,7 @@ fn test_authorize_rejects_resource_endpoint_mismatch() {
         ALG_ES256,
         jwk,
     )
-    .with_jti(generate_jti())
+    .with_replay_id(generate_jti())
     .with_access_token_hash(ath_for(&validated))
     .with_resource("moqt://relay-a".to_string());
     proof.sign(&alg).unwrap();
@@ -483,7 +484,7 @@ fn test_dpop_setup_authorizes_with_empty_namespace_and_track() {
 
     let mut proof =
         DpopProof::create_for_moqt(MoqtAction::ClientSetup, Vec::new(), b"", ALG_ES256, jwk)
-            .with_jti(generate_jti())
+            .with_replay_id(generate_jti())
             .with_access_token_hash(ath_for(&validated));
     proof.sign(&alg).unwrap();
 
@@ -533,7 +534,7 @@ fn test_dpop_nonce_mismatch_rejected() {
         ALG_ES256,
         jwk,
     )
-    .with_jti(generate_jti())
+    .with_replay_id(generate_jti())
     .with_access_token_hash(ath_for(&validated))
     .with_nonce("server-nonce-a".to_string());
     proof.sign(&alg).unwrap();
@@ -583,7 +584,7 @@ fn test_dpop_missing_nonce_rejected_when_expected() {
         ALG_ES256,
         jwk,
     )
-    .with_jti(generate_jti())
+    .with_replay_id(generate_jti())
     .with_access_token_hash(ath_for(&validated));
     proof.sign(&alg).unwrap();
 
@@ -632,7 +633,7 @@ fn test_dpop_matching_nonce_accepted() {
         ALG_ES256,
         jwk,
     )
-    .with_jti(generate_jti())
+    .with_replay_id(generate_jti())
     .with_access_token_hash(ath_for(&validated))
     .with_nonce("server-nonce".to_string());
     proof.sign(&alg).unwrap();
@@ -680,7 +681,7 @@ fn test_dpop_setup_rejects_populated_namespace() {
         ALG_ES256,
         jwk,
     )
-    .with_jti(generate_jti())
+    .with_replay_id(generate_jti())
     .with_access_token_hash(ath_for(&validated));
     proof.sign(&alg).unwrap();
 

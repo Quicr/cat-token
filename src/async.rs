@@ -105,6 +105,7 @@ pub struct AsyncJtiStoreAdapter {
 }
 
 impl AsyncJtiStoreAdapter {
+    #[must_use = "AsyncJtiStoreAdapter::new returns the adapter; discarding it drops the wrapped store"]
     pub fn new(inner: Arc<dyn crate::JtiStore>) -> Self {
         Self { inner }
     }
@@ -195,6 +196,7 @@ impl AsyncMoqtValidator {
     /// [`AsyncInMemoryStrictJtiStore`] satisfies these for a single-
     /// relay deployment; distributed backends must be audited against
     /// the same list before deployment.
+    #[must_use = "AsyncMoqtValidator::strict returns a validator; discarding it silently skips replay defense"]
     pub fn strict(
         sync: MoqtValidator,
         jti_store: Arc<dyn AsyncJtiStore>,
@@ -222,6 +224,7 @@ impl AsyncMoqtValidator {
     /// pressure will let a previously-accepted JTI replay. Multi-relay
     /// production deployments MUST use
     /// [`AsyncMoqtValidator::strict`] instead.
+    #[must_use = "AsyncMoqtValidator::best_effort returns a validator; discarding it silently skips replay defense"]
     pub fn best_effort(sync: MoqtValidator, jti_store: Arc<dyn AsyncJtiStore>) -> Self {
         Self {
             sync,
@@ -341,6 +344,7 @@ pub struct AsyncInMemoryStrictJtiStore {
 }
 
 impl AsyncInMemoryStrictJtiStore {
+    #[must_use = "AsyncInMemoryStrictJtiStore::new returns the store; discarding it drops all replay state"]
     pub fn new() -> Self {
         Self {
             entries: Mutex::new(std::collections::HashMap::new()),
@@ -349,6 +353,7 @@ impl AsyncInMemoryStrictJtiStore {
         }
     }
 
+    #[must_use = "with_max_entries returns a modified store; discarding it drops the cap"]
     pub fn with_max_entries(mut self, max: usize) -> Self {
         self.max_entries = Some(max);
         self

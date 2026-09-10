@@ -18,7 +18,8 @@ fn test_sha512_256_match_roundtrip() {
         .with_uri_match_rules(rules.clone());
 
     let encoded = encode_token(&token, &algorithm).unwrap();
-    let decoded = decode_token(&encoded, &algorithm)
+    let decoded = Decoder::with_algorithm(&algorithm)
+        .decode(&encoded)
         .unwrap()
         .into_unvalidated_token();
 
@@ -41,7 +42,8 @@ fn test_sha512_256_in_header_match() {
         .with_header_match_rules(rules.clone());
 
     let encoded = encode_token(&token, &algorithm).unwrap();
-    let decoded = decode_token(&encoded, &algorithm)
+    let decoded = Decoder::with_algorithm(&algorithm)
+        .decode(&encoded)
         .unwrap()
         .into_unvalidated_token();
 
@@ -66,7 +68,8 @@ fn test_sha256_and_sha512_256_coexist() {
         .with_uri_match_rules(rules.clone());
 
     let encoded = encode_token(&token, &algorithm).unwrap();
-    let decoded = decode_token(&encoded, &algorithm)
+    let decoded = Decoder::with_algorithm(&algorithm)
+        .decode(&encoded)
         .unwrap()
         .into_unvalidated_token();
 

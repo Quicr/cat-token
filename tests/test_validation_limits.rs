@@ -42,7 +42,7 @@ fn test_catm_50_methods_accepted() {
     token.cat.catm = Some(methods);
 
     let encoded = encode_token(&token, &alg).unwrap();
-    assert!(decode_token(&encoded, &alg).is_ok());
+    assert!(Decoder::with_algorithm(&alg).decode(&encoded).is_ok());
 }
 
 #[test]
@@ -55,7 +55,7 @@ fn test_catm_51_methods_rejected() {
     token.cat.catm = Some(methods);
 
     let encoded = encode_token(&token, &alg).unwrap();
-    let result = decode_token(&encoded, &alg);
+    let result = Decoder::with_algorithm(&alg).decode(&encoded);
     assert!(result.is_err());
 }
 
@@ -69,7 +69,7 @@ fn test_catalpn_50_entries_accepted() {
     token.cat.catalpn = Some(alpns);
 
     let encoded = encode_token(&token, &alg).unwrap();
-    assert!(decode_token(&encoded, &alg).is_ok());
+    assert!(Decoder::with_algorithm(&alg).decode(&encoded).is_ok());
 }
 
 #[test]
@@ -82,6 +82,6 @@ fn test_catalpn_51_entries_rejected() {
     token.cat.catalpn = Some(alpns);
 
     let encoded = encode_token(&token, &alg).unwrap();
-    let result = decode_token(&encoded, &alg);
+    let result = Decoder::with_algorithm(&alg).decode(&encoded);
     assert!(result.is_err());
 }

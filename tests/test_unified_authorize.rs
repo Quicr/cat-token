@@ -40,8 +40,9 @@ impl ReplayGuard for MemReplayGuard {
 fn make_validated(token: &CatToken) -> ValidatedToken {
     let key = HmacSha256Algorithm::new(b"test-key-for-roundtrip-000000000");
     let encoded = encode_token(token, &key).unwrap();
-    let validator = CatTokenValidator::new().allow_unencrypted_privacy_claims();
-    decode_token(&encoded, &key)
+    let validator = CatTokenValidator::new().dangerously_allow_unencrypted_privacy_claims();
+    Decoder::with_algorithm(&key)
+        .decode(&encoded)
         .unwrap()
         .validate(&validator)
         .unwrap()
@@ -104,8 +105,11 @@ fn test_authorize_rejects_unknown_catv() {
         .unwrap();
     let key = HmacSha256Algorithm::new(b"test-key-for-roundtrip-000000000");
     let encoded = encode_token(&token, &key).unwrap();
-    let validator = CatTokenValidator::new().allow_unencrypted_privacy_claims();
-    let result = decode_token(&encoded, &key).unwrap().validate(&validator);
+    let validator = CatTokenValidator::new().dangerously_allow_unencrypted_privacy_claims();
+    let result = Decoder::with_algorithm(&key)
+        .decode(&encoded)
+        .unwrap()
+        .validate(&validator);
     assert!(matches!(result, Err(CatError::InvalidClaimValue(_))));
 }
 
@@ -162,7 +166,10 @@ fn test_authorize_rejects_catu_without_uri_context() {
         .build()
         .unwrap();
     let err = ok(&token, &baseline_ctx()).unwrap_err();
-    assert!(matches!(err, CatError::InvalidClaimValue(_)));
+    assert!(matches!(
+        err,
+        CatError::MissingRelayContext { claim: "catu", .. }
+    ));
 }
 
 // --- catm ---
@@ -184,7 +191,7 @@ fn test_authorize_enforces_catm() {
     let ctx_missing = baseline_ctx();
     assert!(matches!(
         ok(&token, &ctx_missing),
-        Err(CatError::InvalidClaimValue(_))
+        Err(CatError::MissingRelayContext { claim: "catm", .. })
     ));
 }
 
@@ -232,7 +239,10 @@ fn test_authorize_enforces_catnip_ip() {
     let ctx_missing = baseline_ctx();
     assert!(matches!(
         ok(&token, &ctx_missing),
-        Err(CatError::InvalidClaimValue(_))
+        Err(CatError::MissingRelayContext {
+            claim: "catnip",
+            ..
+        })
     ));
 }
 
@@ -256,24 +266,23 @@ fn test_authorize_enforces_catnip_asn() {
 #[test]
 fn test_authorize_rejects_catpor_without_block_list() {
     let mut token = baseline_token();
-    token.cat.catpor = Some(ProbabilityOfRejection {
-        probability: 0.0,
-        id: b"pol-1".to_vec(),
-        expiration: None,
-    });
+    token.cat.catpor = Some(ProbabilityOfRejection::new(0.0, b"pol-1".to_vec()));
 
     let err = ok(&token, &baseline_ctx()).unwrap_err();
-    assert!(matches!(err, CatError::InvalidClaimValue(_)));
+    assert!(matches!(
+        err,
+        CatError::MissingRelayContext {
+            claim: "catpor",
+            ..
+        }
+    ));
 }
 
 #[test]
 fn test_authorize_catpor_with_block_list_zero_probability() {
     let mut token = baseline_token();
-    token.cat.catpor = Some(ProbabilityOfRejection {
-        probability: 0.0, // never triggers a random rejection
-        id: b"pol-1".to_vec(),
-        expiration: None,
-    });
+    // probability 0.0 → never triggers a random rejection
+    token.cat.catpor = Some(ProbabilityOfRejection::new(0.0, b"pol-1".to_vec()));
 
     let list = CatPorBlockList::new();
     let guard = MemReplayGuard::new();
@@ -332,7 +341,13 @@ fn test_authorize_catreplay_missing_guard_rejects() {
     token.cat.catreplay = Some(ReplayProtection::Prohibited);
 
     let err = ok(&token, &baseline_ctx()).unwrap_err();
-    assert!(matches!(err, CatError::InvalidClaimValue(_)));
+    assert!(matches!(
+        err,
+        CatError::MissingRelayContext {
+            claim: "catreplay",
+            ..
+        }
+    ));
 }
 
 #[test]

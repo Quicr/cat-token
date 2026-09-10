@@ -44,7 +44,8 @@ fn test_crit_roundtrip_encode_decode() {
         .with_dpop_settings(settings);
 
     let encoded = encode_token(&token, &algorithm).unwrap();
-    let decoded = decode_token(&encoded, &algorithm)
+    let decoded = Decoder::with_algorithm(&algorithm)
+        .decode(&encoded)
         .unwrap()
         .into_unvalidated_token();
 

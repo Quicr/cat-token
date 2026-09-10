@@ -50,7 +50,7 @@ fn test_fractional_exp_rejected() {
 
     let cose_bytes = build_cose_mac0_with_payload(&payload_buf, &alg);
     assert!(matches!(
-        decode_token(&cose_bytes, &alg),
+        Decoder::with_algorithm(&alg).decode(&cose_bytes),
         Err(CatError::InvalidClaimValue(_))
     ));
 }
@@ -73,7 +73,7 @@ fn test_fractional_nbf_rejected() {
 
     let cose_bytes = build_cose_mac0_with_payload(&payload_buf, &alg);
     assert!(matches!(
-        decode_token(&cose_bytes, &alg),
+        Decoder::with_algorithm(&alg).decode(&cose_bytes),
         Err(CatError::InvalidClaimValue(_))
     ));
 }
@@ -96,7 +96,7 @@ fn test_fractional_iat_rejected() {
 
     let cose_bytes = build_cose_mac0_with_payload(&payload_buf, &alg);
     assert!(matches!(
-        decode_token(&cose_bytes, &alg),
+        Decoder::with_algorithm(&alg).decode(&cose_bytes),
         Err(CatError::InvalidClaimValue(_))
     ));
 }
@@ -120,7 +120,8 @@ fn test_integer_valued_float_exp_accepted() {
     ciborium::ser::into_writer(&ciborium::Value::Map(cbor_map), &mut payload_buf).unwrap();
 
     let cose_bytes = build_cose_mac0_with_payload(&payload_buf, &alg);
-    let decoded = decode_token(&cose_bytes, &alg)
+    let decoded = Decoder::with_algorithm(&alg)
+        .decode(&cose_bytes)
         .unwrap()
         .into_unvalidated_token();
     assert_eq!(decoded.core.exp, Some(1700000000));
@@ -143,7 +144,7 @@ fn test_nan_timestamp_rejected() {
     ciborium::ser::into_writer(&ciborium::Value::Map(cbor_map), &mut payload_buf).unwrap();
 
     let cose_bytes = build_cose_mac0_with_payload(&payload_buf, &alg);
-    assert!(decode_token(&cose_bytes, &alg).is_err());
+    assert!(Decoder::with_algorithm(&alg).decode(&cose_bytes).is_err());
 }
 
 #[test]
@@ -163,5 +164,5 @@ fn test_negative_zero_timestamp_rejected() {
     ciborium::ser::into_writer(&ciborium::Value::Map(cbor_map), &mut payload_buf).unwrap();
 
     let cose_bytes = build_cose_mac0_with_payload(&payload_buf, &alg);
-    assert!(decode_token(&cose_bytes, &alg).is_err());
+    assert!(Decoder::with_algorithm(&alg).decode(&cose_bytes).is_err());
 }

@@ -152,7 +152,8 @@ fn test_catu_roundtrip_encode_decode() {
     let alg = HmacSha256Algorithm::generate_key().unwrap();
     let algorithm = HmacSha256Algorithm::from_secret_key(&alg);
     let encoded = encode_token(&token, &algorithm).unwrap();
-    let decoded = decode_token(&encoded, &algorithm)
+    let decoded = Decoder::with_algorithm(&algorithm)
+        .decode(&encoded)
         .unwrap()
         .into_unvalidated_token();
 
@@ -172,7 +173,8 @@ fn test_cath_roundtrip_encode_decode() {
     let alg = HmacSha256Algorithm::generate_key().unwrap();
     let algorithm = HmacSha256Algorithm::from_secret_key(&alg);
     let encoded = encode_token(&token, &algorithm).unwrap();
-    let decoded = decode_token(&encoded, &algorithm)
+    let decoded = Decoder::with_algorithm(&algorithm)
+        .decode(&encoded)
         .unwrap()
         .into_unvalidated_token();
 
@@ -197,7 +199,8 @@ fn test_catu_and_cath_together() {
     let alg = HmacSha256Algorithm::generate_key().unwrap();
     let algorithm = HmacSha256Algorithm::from_secret_key(&alg);
     let encoded = encode_token(&token, &algorithm).unwrap();
-    let decoded = decode_token(&encoded, &algorithm)
+    let decoded = Decoder::with_algorithm(&algorithm)
+        .decode(&encoded)
         .unwrap()
         .into_unvalidated_token();
 
@@ -223,7 +226,8 @@ fn test_catu_sha256_match_roundtrip() {
     let alg = HmacSha256Algorithm::generate_key().unwrap();
     let algorithm = HmacSha256Algorithm::from_secret_key(&alg);
     let encoded = encode_token(&token, &algorithm).unwrap();
-    let decoded = decode_token(&encoded, &algorithm)
+    let decoded = Decoder::with_algorithm(&algorithm)
+        .decode(&encoded)
         .unwrap()
         .into_unvalidated_token();
 

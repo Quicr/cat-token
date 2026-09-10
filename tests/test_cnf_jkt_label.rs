@@ -117,7 +117,8 @@ fn test_decode_legacy_label_3() {
     let mut cose_bytes = Vec::new();
     ciborium::ser::into_writer(&tagged, &mut cose_bytes).unwrap();
 
-    let decoded = decode_token(&cose_bytes, &alg)
+    let decoded = Decoder::with_algorithm(&alg)
+        .decode(&cose_bytes)
         .unwrap()
         .into_unvalidated_token();
     assert!(decoded.dpop.cnf.is_some());
@@ -137,7 +138,8 @@ fn test_roundtrip_with_label_323() {
         .unwrap();
 
     let encoded = encode_token(&token, &alg).unwrap();
-    let decoded = decode_token(&encoded, &alg)
+    let decoded = Decoder::with_algorithm(&alg)
+        .decode(&encoded)
         .unwrap()
         .into_unvalidated_token();
     assert_eq!(decoded.dpop.cnf.unwrap().jkt, jkt_bytes);

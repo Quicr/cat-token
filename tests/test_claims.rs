@@ -171,28 +171,16 @@ fn test_token_builder() {
 #[test]
 fn test_geo_coordinate_validation() {
     // Valid coordinates
-    let coord1 = GeoCoordinate {
-        lat: 45.0,
-        lon: 90.0,
-        radius: 0,
-    };
+    let coord1 = GeoCoordinate::new(45.0, 90.0, 0);
     assert!(coord1.lat.abs() <= 90.0);
     assert!(coord1.lon.abs() <= 180.0);
 
     // Edge case coordinates
-    let coord2 = GeoCoordinate {
-        lat: -90.0,
-        lon: -180.0,
-        radius: 5,
-    };
+    let coord2 = GeoCoordinate::new(-90.0, -180.0, 5);
     assert!(coord2.lat.abs() <= 90.0);
     assert!(coord2.lon.abs() <= 180.0);
 
-    let coord3 = GeoCoordinate {
-        lat: 90.0,
-        lon: 180.0,
-        radius: 1,
-    };
+    let coord3 = GeoCoordinate::new(90.0, 180.0, 1);
     assert!(coord3.lat.abs() <= 90.0);
     assert!(coord3.lon.abs() <= 180.0);
 }

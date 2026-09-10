@@ -297,26 +297,39 @@ impl RelayRequestContext {
         &self.track
     }
 
+    /// ALPN negotiated on the peer's TLS connection. `None` when the caller
+    /// did not populate it; claims that require ALPN pinning fail closed.
     pub fn peer_tls_alpn(&self) -> Option<&[u8]> {
         self.peer_tls_alpn.as_deref()
     }
 
+    /// Peer IP as observed by the relay. `None` when unpopulated; claims that
+    /// require IP or ASN scoping fail closed.
     pub fn peer_ip(&self) -> Option<std::net::IpAddr> {
         self.peer_ip
     }
 
+    /// Peer ASN as resolved by the caller's routing table. `None` when
+    /// unpopulated; ASN-scoped claims fail closed.
     pub fn peer_asn(&self) -> Option<u32> {
         self.peer_asn
     }
 
+    /// Request URI supplied by the caller, used for URI-shape claims. `None`
+    /// when not applicable to the transport.
     pub fn request_uri(&self) -> Option<&str> {
         self.request_uri.as_deref()
     }
 
+    /// Request method (`GET`, `POST`, MOQT verb, ...). `None` when not
+    /// applicable to the transport.
     pub fn request_method(&self) -> Option<&str> {
         self.request_method.as_deref()
     }
 
+    /// Request headers observed by the relay, in `(name, value)` order. Empty
+    /// when the caller did not populate any; header-shape claims fail closed
+    /// against an empty set.
     pub fn request_headers(&self) -> &[(String, String)] {
         &self.request_headers
     }
@@ -329,10 +342,15 @@ impl RelayRequestContext {
         self.tenant_id.as_deref()
     }
 
+    /// DPoP proof presented on this request. `None` when the caller did not
+    /// attach one; tokens carrying a `cnf` binding fail closed here.
     pub fn dpop_proof(&self) -> Option<&DpopProof> {
         self.dpop_proof.as_ref()
     }
 
+    /// DPoP nonce this relay issued for the challenge that produced the
+    /// proof. `None` when no server-issued nonce is required; if set, the
+    /// proof must carry a matching `nonce`.
     pub fn expected_dpop_nonce(&self) -> Option<&str> {
         self.expected_dpop_nonce.as_deref()
     }
@@ -378,7 +396,7 @@ impl MoqtValidator {
     }
 
     /// Disable revalidation support
-    pub fn without_revalidation_support(mut self) -> Self {
+    pub fn disable_revalidation_support(mut self) -> Self {
         self.supports_revalidation = false;
         self
     }
@@ -625,11 +643,13 @@ impl MoqtValidator {
 
         // 4. ALPN.
         if let Some(ref token_alpns) = claims.cat.catalpn {
-            let peer_alpn = ctx.peer_tls_alpn.as_ref().ok_or_else(|| {
-                CatError::InvalidClaimValue(
-                    "token requires ALPN binding but no peer ALPN provided".to_string(),
-                )
-            })?;
+            let peer_alpn = ctx
+                .peer_tls_alpn
+                .as_ref()
+                .ok_or(CatError::MissingRelayContext {
+                    claim: "catalpn",
+                    field: "peer_tls_alpn",
+                })?;
             if !token_alpns.iter().any(|a| a == peer_alpn) {
                 return Err(CatError::InvalidClaimValue(
                     "peer TLS ALPN does not match token catalpn".to_string(),
@@ -639,21 +659,25 @@ impl MoqtValidator {
 
         // 5. catu — URI-component restrictions.
         if claims.cat.catu.is_some() {
-            let uri = ctx.request_uri.as_deref().ok_or_else(|| {
-                CatError::InvalidClaimValue(
-                    "token asserts catu but request context has no request_uri".to_string(),
-                )
-            })?;
+            let uri = ctx
+                .request_uri
+                .as_deref()
+                .ok_or(CatError::MissingRelayContext {
+                    claim: "catu",
+                    field: "request_uri",
+                })?;
             enforce_catu(claims, uri)?;
         }
 
         // 6. catm — HTTP method restrictions.
         if claims.cat.catm.is_some() {
-            let method = ctx.request_method.as_deref().ok_or_else(|| {
-                CatError::InvalidClaimValue(
-                    "token asserts catm but request context has no request_method".to_string(),
-                )
-            })?;
+            let method = ctx
+                .request_method
+                .as_deref()
+                .ok_or(CatError::MissingRelayContext {
+                    claim: "catm",
+                    field: "request_method",
+                })?;
             validate_method(claims, method)?;
         }
 
@@ -674,10 +698,9 @@ impl MoqtValidator {
         //    carries catpor and no block list is provided, the caller has
         //    misconfigured the relay; refuse rather than skip.
         if claims.cat.catpor.is_some() {
-            let block_list = catpor_block_list.ok_or_else(|| {
-                CatError::InvalidClaimValue(
-                    "token asserts catpor but no block list configured on relay".to_string(),
-                )
+            let block_list = catpor_block_list.ok_or(CatError::MissingRelayContext {
+                claim: "catpor",
+                field: "catpor_block_list",
             })?;
             enforce_catpor(claims, block_list)?;
         }
@@ -692,9 +715,10 @@ impl MoqtValidator {
         let replay_obligation = match replay_mode {
             Some(crate::ReplayProtection::Prohibited) => {
                 if !replay_guard_configured {
-                    return Err(CatError::InvalidClaimValue(
-                        "token asserts catreplay but no replay guard configured".to_string(),
-                    ));
+                    return Err(CatError::MissingRelayContext {
+                        claim: "catreplay",
+                        field: "replay_guard",
+                    });
                 }
                 let cti = claims.core.cti.as_ref().ok_or_else(|| {
                     CatError::MissingRequiredClaim(
@@ -705,9 +729,10 @@ impl MoqtValidator {
             }
             Some(crate::ReplayProtection::ReuseDetection) => {
                 if !replay_guard_configured {
-                    return Err(CatError::InvalidClaimValue(
-                        "token asserts catreplay but no replay guard configured".to_string(),
-                    ));
+                    return Err(CatError::MissingRelayContext {
+                        claim: "catreplay",
+                        field: "replay_guard",
+                    });
                 }
                 let cti = claims.core.cti.as_ref().ok_or_else(|| {
                     CatError::MissingRequiredClaim(
@@ -914,10 +939,9 @@ impl MoqtValidator {
 
         let reuse_detected = match pre.replay.clone() {
             Some(CatReplayObligation::Prohibited(cti)) => {
-                let guard = replay_guard.ok_or_else(|| {
-                    CatError::InvalidClaimValue(
-                        "token asserts catreplay but no replay guard configured".to_string(),
-                    )
+                let guard = replay_guard.ok_or(CatError::MissingRelayContext {
+                    claim: "catreplay",
+                    field: "replay_guard",
                 })?;
                 if guard.check_and_record(&cti)? {
                     return Err(CatError::ReplayAttackDetected);
@@ -925,10 +949,9 @@ impl MoqtValidator {
                 false
             }
             Some(CatReplayObligation::ReuseDetection(cti)) => {
-                let guard = replay_guard.ok_or_else(|| {
-                    CatError::InvalidClaimValue(
-                        "token asserts catreplay but no replay guard configured".to_string(),
-                    )
+                let guard = replay_guard.ok_or(CatError::MissingRelayContext {
+                    claim: "catreplay",
+                    field: "replay_guard",
                 })?;
                 guard.check_and_record(&cti)?
             }
@@ -1467,7 +1490,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let validator = MoqtValidator::new().without_revalidation_support();
+        let validator = MoqtValidator::new().disable_revalidation_support();
 
         let result = validator.validate_moqt_claims(&token);
         assert!(matches!(result, Err(CatError::RevalidationRequired)));

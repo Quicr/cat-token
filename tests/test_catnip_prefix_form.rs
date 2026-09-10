@@ -15,7 +15,8 @@ fn test_valid_prefix_form_accepted() {
         .unwrap();
 
     let encoded = encode_token(&token, &alg).unwrap();
-    let decoded = decode_token(&encoded, &alg)
+    let decoded = Decoder::with_algorithm(&alg)
+        .decode(&encoded)
         .unwrap()
         .into_unvalidated_token();
     assert!(decoded.cat.catnip.is_some());
@@ -68,7 +69,7 @@ fn test_address_with_prefix_form_rejected() {
     let mut cose_bytes = Vec::new();
     ciborium::ser::into_writer(&tagged, &mut cose_bytes).unwrap();
 
-    let result = decode_token(&cose_bytes, &alg);
+    let result = Decoder::with_algorithm(&alg).decode(&cose_bytes);
     assert!(result.is_err(), "address-with-prefix form must be rejected");
 }
 
@@ -120,5 +121,5 @@ fn test_ipv6_address_with_prefix_form_rejected() {
     let mut cose_bytes = Vec::new();
     ciborium::ser::into_writer(&tagged, &mut cose_bytes).unwrap();
 
-    assert!(decode_token(&cose_bytes, &alg).is_err());
+    assert!(Decoder::with_algorithm(&alg).decode(&cose_bytes).is_err());
 }

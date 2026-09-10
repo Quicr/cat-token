@@ -180,20 +180,19 @@ impl std::fmt::Debug for DpopHeader {
 }
 
 impl DpopHeader {
-    pub fn new(alg: i64, jwk: Jwk) -> Self {
+    /// Header constructor. `wire_format` selects `typ`:
+    /// [`DpopWireFormat::Cwt`] → [`DPOP_TYP`], [`DpopWireFormat::Jwt`] →
+    /// [`DPOP_TYP_JWT`]. The wire format on the header must match the
+    /// codec that will encode the proof, since `is_valid` accepts either
+    /// label.
+    pub fn new(wire_format: DpopWireFormat, alg: i64, jwk: Jwk) -> Self {
+        let typ = match wire_format {
+            DpopWireFormat::Cwt => DPOP_TYP,
+            DpopWireFormat::Jwt => DPOP_TYP_JWT,
+        };
         Self {
             alg,
-            typ: DPOP_TYP.to_string(),
-            jwk,
-        }
-    }
-
-    /// Header constructor for JWT-format proofs. Sets `typ` to
-    /// [`DPOP_TYP_JWT`] so [`DpopHeader::is_valid`] accepts it.
-    pub fn new_jwt(alg: i64, jwk: Jwk) -> Self {
-        Self {
-            alg,
-            typ: DPOP_TYP_JWT.to_string(),
+            typ: typ.to_string(),
             jwk,
         }
     }
@@ -507,7 +506,7 @@ impl DpopProof {
         alg: i64,
         jwk: Jwk,
     ) -> Self {
-        let header = DpopHeader::new(alg, jwk);
+        let header = DpopHeader::new(DpopWireFormat::Cwt, alg, jwk);
         let actx = AuthorizationContext::new_moqt(action, namespace, track);
         let payload = DpopPayload::new(actx);
         Self {
@@ -519,16 +518,12 @@ impl DpopProof {
         }
     }
 
-    pub fn with_cti(mut self, cti: impl Into<Vec<u8>>) -> Self {
-        self.payload.cti = Some(cti.into());
-        self.signed_bytes = SignedInput::default();
-        self
-    }
-
-    /// Kept for compatibility with callers that supply a `jti` as a text
-    /// string; stored as UTF-8 bytes in `cti`.
-    pub fn with_jti(mut self, jti: String) -> Self {
-        self.payload.cti = Some(jti.into_bytes());
+    /// Set the proof's replay identifier — encoded as bytes on the wire
+    /// (`cti`) so a caller supplying a UUID as `String` and a caller supplying
+    /// raw bytes reach the same field. Any `impl Into<Vec<u8>>` is accepted:
+    /// `String`, `&str`, `Vec<u8>`, and `&[u8]` all work.
+    pub fn with_replay_id(mut self, id: impl Into<Vec<u8>>) -> Self {
+        self.payload.cti = Some(id.into());
         self.signed_bytes = SignedInput::default();
         self
     }
@@ -539,11 +534,23 @@ impl DpopProof {
         self
     }
 
-    /// Set the access-token hash (`ath`) as raw SHA-256 bytes. Accepts either
-    /// bytes or a base64url-encoded string; the string form is decoded so
-    /// callers can pass the output of [`compute_access_token_hash_b64`].
-    pub fn with_access_token_hash(mut self, ath: impl Into<AthInput>) -> Self {
-        self.payload.ath = Some(ath.into().into_bytes());
+    /// Set the access-token hash (`ath`) as raw digest bytes (typically the
+    /// SHA-256 of the base64url-encoded token, per RFC 9449 §4.1).
+    pub fn with_access_token_hash(mut self, ath: impl Into<Vec<u8>>) -> Self {
+        self.payload.ath = Some(ath.into());
+        self.signed_bytes = SignedInput::default();
+        self
+    }
+
+    /// Set the access-token hash (`ath`) from the base64url form emitted by
+    /// [`compute_access_token_hash_b64`]. Falls back to storing the raw
+    /// string bytes if decoding fails, matching the prior lenient behavior.
+    pub fn with_access_token_hash_b64(mut self, ath_b64: impl Into<String>) -> Self {
+        let s = ath_b64.into();
+        let bytes = URL_SAFE_NO_PAD
+            .decode(&s)
+            .unwrap_or_else(|_| s.into_bytes());
+        self.payload.ath = Some(bytes);
         self.signed_bytes = SignedInput::default();
         self
     }
@@ -651,54 +658,6 @@ impl DpopProof {
             ));
         }
         Ok(())
-    }
-}
-
-/// Input flavor for [`DpopProof::with_access_token_hash`]. Callers can pass
-/// raw bytes or the base64url form produced by [`compute_access_token_hash_b64`].
-#[cfg(feature = "moqt")]
-pub enum AthInput {
-    Bytes(Vec<u8>),
-    Base64(String),
-}
-
-#[cfg(feature = "moqt")]
-impl AthInput {
-    fn into_bytes(self) -> Vec<u8> {
-        match self {
-            AthInput::Bytes(b) => b,
-            AthInput::Base64(s) => URL_SAFE_NO_PAD
-                .decode(&s)
-                .unwrap_or_else(|_| s.into_bytes()),
-        }
-    }
-}
-
-#[cfg(feature = "moqt")]
-impl From<Vec<u8>> for AthInput {
-    fn from(v: Vec<u8>) -> Self {
-        AthInput::Bytes(v)
-    }
-}
-
-#[cfg(feature = "moqt")]
-impl From<&[u8]> for AthInput {
-    fn from(v: &[u8]) -> Self {
-        AthInput::Bytes(v.to_vec())
-    }
-}
-
-#[cfg(feature = "moqt")]
-impl From<String> for AthInput {
-    fn from(s: String) -> Self {
-        AthInput::Base64(s)
-    }
-}
-
-#[cfg(feature = "moqt")]
-impl From<&str> for AthInput {
-    fn from(s: &str) -> Self {
-        AthInput::Base64(s.to_string())
     }
 }
 
@@ -2368,25 +2327,12 @@ impl DpopValidator {
         &self.jti_store
     }
 
+    /// Validate a DPoP proof and commit its JTI. Pass
+    /// `access_token_hash = None` when no `ath` binding is required
+    /// (transport-only PoP); pass `Some(hash)` to require that the proof's
+    /// `ath` field cover the specified access-token digest. On success the
+    /// proof's replay identifier is inserted into the JTI store.
     pub fn validate(
-        &self,
-        proof: &DpopProof,
-        expected_action: MoqtAction,
-        expected_thumbprint: &[u8],
-        issuer: Option<&str>,
-    ) -> Result<(), CatError> {
-        self.validate_without_jti_commit(
-            proof,
-            expected_action,
-            expected_thumbprint,
-            issuer,
-            None,
-        )?;
-        self.insert_jti(proof, expected_thumbprint, issuer)?;
-        Ok(())
-    }
-
-    pub fn validate_with_ath(
         &self,
         proof: &DpopProof,
         expected_action: MoqtAction,
@@ -2394,23 +2340,13 @@ impl DpopValidator {
         access_token_hash: Option<&[u8]>,
         issuer: Option<&str>,
     ) -> Result<(), CatError> {
-        self.validate_claims_pre_sig(
+        self.validate_without_jti_commit(
             proof,
             expected_action,
             expected_thumbprint,
+            issuer,
             access_token_hash,
         )?;
-        if !proof.header.is_supported_algorithm() {
-            return Err(CatError::DpopAlgorithmNotSupported(format!(
-                "{}",
-                proof.header.alg
-            )));
-        }
-        let computed_thumbprint = proof.header.jwk.thumbprint()?;
-        if !crate::crypto::constant_time_eq(&computed_thumbprint, expected_thumbprint) {
-            return Err(CatError::DpopKeyMismatch);
-        }
-        self.verify_with_embedded_key(proof)?;
         self.insert_jti(proof, expected_thumbprint, issuer)?;
         Ok(())
     }
@@ -2508,7 +2444,7 @@ mod tests {
             crate::crypto::ALG_ES256,
             jwk,
         )
-        .with_jti(generate_jti());
+        .with_replay_id(generate_jti());
         proof.sign(&alg).unwrap();
 
         let encoded = proof.encode().unwrap();
@@ -2538,7 +2474,7 @@ mod tests {
             crate::crypto::ALG_ES256,
             jwk,
         )
-        .with_jti(generate_jti());
+        .with_replay_id(generate_jti());
         proof.sign(&alg).unwrap();
 
         let mut encoded = proof.encode().unwrap();
@@ -2719,7 +2655,7 @@ mod tests {
             jwk,
         )
         .with_wire_format(DpopWireFormat::Jwt)
-        .with_jti(generate_jti());
+        .with_replay_id(generate_jti());
         proof.sign(&alg).unwrap();
 
         let encoded = proof.encode().unwrap();
@@ -2751,7 +2687,7 @@ mod tests {
             jwk,
         )
         .with_wire_format(DpopWireFormat::Jwt)
-        .with_jti(generate_jti());
+        .with_replay_id(generate_jti());
         proof.sign(&alg).unwrap();
 
         let encoded = proof.encode().unwrap();
@@ -2760,7 +2696,7 @@ mod tests {
         let settings = CatDpopSettings::new().with_window(300).unwrap();
         let validator = DpopValidator::new(settings);
         validator
-            .validate(&decoded, MoqtAction::Subscribe, &thumbprint, None)
+            .validate(&decoded, MoqtAction::Subscribe, &thumbprint, None, None)
             .expect("decoded JWT proof must verify");
     }
 
@@ -2778,7 +2714,7 @@ mod tests {
             crate::crypto::ALG_ES256,
             jwk.clone(),
         )
-        .with_jti(generate_jti());
+        .with_replay_id(generate_jti());
         cwt_proof.sign(&alg).unwrap();
         let mut jwt_proof = DpopProof::create_for_moqt(
             MoqtAction::Subscribe,
@@ -2788,7 +2724,7 @@ mod tests {
             jwk,
         )
         .with_wire_format(DpopWireFormat::Jwt)
-        .with_jti(generate_jti());
+        .with_replay_id(generate_jti());
         jwt_proof.sign(&alg).unwrap();
 
         let cwt_bytes = cwt_proof.encode().unwrap();
@@ -2826,7 +2762,7 @@ mod tests {
             jwk,
         )
         .with_wire_format(DpopWireFormat::Jwt)
-        .with_jti("550e8400-e29b-41d4-a716-446655440000".to_string())
+        .with_replay_id("550e8400-e29b-41d4-a716-446655440000".to_string())
         .with_access_token_hash(ath.clone());
         proof.sign(&alg).unwrap();
 
@@ -2889,7 +2825,7 @@ mod tests {
             jwk,
         )
         .with_wire_format(DpopWireFormat::Jwt)
-        .with_jti(generate_jti());
+        .with_replay_id(generate_jti());
         proof.sign(&alg).unwrap();
 
         let encoded = proof.encode().unwrap();
@@ -2926,7 +2862,7 @@ mod tests {
             jwk,
         )
         .with_wire_format(DpopWireFormat::Jwt)
-        .with_jti(generate_jti());
+        .with_replay_id(generate_jti());
         proof.sign(&alg).unwrap();
 
         let encoded = proof.encode().unwrap();
@@ -2966,7 +2902,7 @@ mod tests {
             jwk,
         )
         .with_wire_format(DpopWireFormat::Jwt)
-        .with_jti(generate_jti());
+        .with_replay_id(generate_jti());
         proof.sign(&alg).unwrap();
 
         // Take the real signed proof, splice a hostile JSON payload into
@@ -3014,7 +2950,7 @@ mod tests {
             crate::crypto::ALG_ES256,
             jwk,
         )
-        .with_jti(generate_jti());
+        .with_replay_id(generate_jti());
         proof.sign(&alg).unwrap();
 
         let encoded = proof.encode().unwrap();
@@ -3023,7 +2959,7 @@ mod tests {
         let settings = CatDpopSettings::new().with_window(300).unwrap();
         let validator = DpopValidator::new(settings);
         validator
-            .validate(&decoded, MoqtAction::Subscribe, &thumbprint, None)
+            .validate(&decoded, MoqtAction::Subscribe, &thumbprint, None, None)
             .expect("decoded proof must verify");
     }
 

@@ -12,7 +12,8 @@ fn test_single_zone_roundtrip() {
         .with_geo_coordinate(37.7749, -122.4194, 500);
 
     let encoded = encode_token(&token, &algorithm).unwrap();
-    let decoded = decode_token(&encoded, &algorithm)
+    let decoded = Decoder::with_algorithm(&algorithm)
+        .decode(&encoded)
         .unwrap()
         .into_unvalidated_token();
 
@@ -34,7 +35,8 @@ fn test_multiple_zones() {
         .with_geo_coordinate(40.7128, -74.0060, 2000);
 
     let encoded = encode_token(&token, &algorithm).unwrap();
-    let decoded = decode_token(&encoded, &algorithm)
+    let decoded = Decoder::with_algorithm(&algorithm)
+        .decode(&encoded)
         .unwrap()
         .into_unvalidated_token();
 
@@ -47,21 +49,9 @@ fn test_multiple_zones() {
 #[test]
 fn test_with_geo_coordinates_bulk() {
     let coords = vec![
-        GeoCoordinate {
-            lat: 35.6762,
-            lon: 139.6503,
-            radius: 500,
-        },
-        GeoCoordinate {
-            lat: 48.8566,
-            lon: 2.3522,
-            radius: 1000,
-        },
-        GeoCoordinate {
-            lat: -33.8688,
-            lon: 151.2093,
-            radius: 0,
-        },
+        GeoCoordinate::new(35.6762, 139.6503, 500),
+        GeoCoordinate::new(48.8566, 2.3522, 1000),
+        GeoCoordinate::new(-33.8688, 151.2093, 0),
     ];
 
     let token = CatTokenBuilder::new()
@@ -83,7 +73,8 @@ fn test_radius_is_unsigned_integer() {
         .with_geo_coordinate(0.0, 0.0, u32::MAX);
 
     let encoded = encode_token(&token, &algorithm).unwrap();
-    let decoded = decode_token(&encoded, &algorithm)
+    let decoded = Decoder::with_algorithm(&algorithm)
+        .decode(&encoded)
         .unwrap()
         .into_unvalidated_token();
 
@@ -93,14 +84,10 @@ fn test_radius_is_unsigned_integer() {
 
 #[test]
 fn test_validator_rejects_invalid_coordinates() {
-    let validator = CatTokenValidator::new().allow_unencrypted_privacy_claims();
+    let validator = CatTokenValidator::new().dangerously_allow_unencrypted_privacy_claims();
 
     let mut token = CatToken::new();
-    token.cat.catgeocoord = Some(vec![GeoCoordinate {
-        lat: 91.0,
-        lon: 0.0,
-        radius: 0,
-    }]);
+    token.cat.catgeocoord = Some(vec![GeoCoordinate::new(91.0, 0.0, 0)]);
 
     assert!(matches!(
         validator.validate(&token),
@@ -110,20 +97,12 @@ fn test_validator_rejects_invalid_coordinates() {
 
 #[test]
 fn test_validator_rejects_invalid_in_any_zone() {
-    let validator = CatTokenValidator::new().allow_unencrypted_privacy_claims();
+    let validator = CatTokenValidator::new().dangerously_allow_unencrypted_privacy_claims();
 
     let mut token = CatToken::new();
     token.cat.catgeocoord = Some(vec![
-        GeoCoordinate {
-            lat: 37.0,
-            lon: -122.0,
-            radius: 0,
-        },
-        GeoCoordinate {
-            lat: 0.0,
-            lon: 200.0,
-            radius: 0,
-        },
+        GeoCoordinate::new(37.0, -122.0, 0),
+        GeoCoordinate::new(0.0, 200.0, 0),
     ]);
 
     assert!(matches!(

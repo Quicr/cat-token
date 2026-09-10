@@ -28,7 +28,7 @@ fn main() {
         .with_expected_audiences(vec!["moqt-relay.example.com".to_string()])
         .with_clock_skew_tolerance(60)
         .unwrap()
-        .allow_unencrypted_privacy_claims();
+        .dangerously_allow_unencrypted_privacy_claims();
 
     let moqt_validator = MoqtValidator::new().with_min_revalidation_interval(60.0);
 
@@ -123,7 +123,9 @@ fn validate_and_authorize(
     track: &[u8],
 ) -> Result<AuthorizedRequest, String> {
     // Step 1: Decode and verify COSE signature
-    let verified = decode_token(token_bytes, key).map_err(|e| e.to_string())?;
+    let verified = Decoder::with_algorithm(key)
+        .decode(token_bytes)
+        .map_err(|e| e.to_string())?;
 
     // Step 2: Validate claims (produces ValidatedToken)
     let validated = verified

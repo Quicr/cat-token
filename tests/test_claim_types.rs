@@ -70,11 +70,8 @@ fn test_catreplay_try_from_invalid() {
 
 #[test]
 fn test_catpor_structured_type() {
-    let por = ProbabilityOfRejection {
-        probability: 0.01,
-        id: b"block-id-123".to_vec(),
-        expiration: Some(1700000000),
-    };
+    let por =
+        ProbabilityOfRejection::new(0.01, b"block-id-123".to_vec()).with_expiration(1700000000);
 
     let token = CatToken::new().with_probability_of_rejection(
         por.probability,
@@ -131,10 +128,7 @@ fn test_catm_is_vec_string() {
 #[test]
 fn test_catgeoalt_is_altitude_deviation_pair() {
     let mut token = CatToken::new();
-    token.cat.catgeoalt = Some(GeoAltitude {
-        altitude: 150.5,
-        deviation: 10.0,
-    });
+    token.cat.catgeoalt = Some(GeoAltitude::new(150.5, 10.0));
 
     let cwt = Cwt::new(ALG_ES256, token);
     let payload = cwt.encode_payload().unwrap();
@@ -148,10 +142,7 @@ fn test_catgeoalt_is_altitude_deviation_pair() {
 #[test]
 fn test_catgeoalt_cbor_is_array() {
     let mut token = CatToken::new();
-    token.cat.catgeoalt = Some(GeoAltitude {
-        altitude: 100.0,
-        deviation: 5.0,
-    });
+    token.cat.catgeoalt = Some(GeoAltitude::new(100.0, 5.0));
 
     let cwt = Cwt::new(ALG_ES256, token);
     let payload = cwt.encode_payload().unwrap();
@@ -233,7 +224,8 @@ fn test_full_roundtrip_with_all_fixed_claim_types() {
         .unwrap();
 
     let encoded = encode_token(&token, &alg).unwrap();
-    let decoded = decode_token(&encoded, &alg)
+    let decoded = Decoder::with_algorithm(&alg)
+        .decode(&encoded)
         .unwrap()
         .into_unvalidated_token();
 

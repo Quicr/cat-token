@@ -15,7 +15,8 @@ fn test_default_validator_has_zero_tolerance() {
         .unwrap();
 
     let encoded = encode_token(&token, &key).unwrap();
-    let decoded = decode_token(&encoded, &key)
+    let decoded = Decoder::with_algorithm(&key)
+        .decode(&encoded)
         .unwrap()
         .into_unvalidated_token();
 
@@ -40,7 +41,8 @@ fn test_default_validator_rejects_nbf_in_future() {
         .unwrap();
 
     let encoded = encode_token(&token, &key).unwrap();
-    let decoded = decode_token(&encoded, &key)
+    let decoded = Decoder::with_algorithm(&key)
+        .decode(&encoded)
         .unwrap()
         .into_unvalidated_token();
 
@@ -65,7 +67,8 @@ fn test_explicit_tolerance_allows_skew() {
         .unwrap();
 
     let encoded = encode_token(&token, &key).unwrap();
-    let decoded = decode_token(&encoded, &key)
+    let decoded = Decoder::with_algorithm(&key)
+        .decode(&encoded)
         .unwrap()
         .into_unvalidated_token();
 
@@ -87,7 +90,8 @@ fn test_separate_tolerances() {
         .unwrap();
 
     let encoded = encode_token(&token, &key).unwrap();
-    let decoded = decode_token(&encoded, &key)
+    let decoded = Decoder::with_algorithm(&key)
+        .decode(&encoded)
         .unwrap()
         .into_unvalidated_token();
 
@@ -137,7 +141,8 @@ fn test_exp_overflow_rejected() {
     token.core.exp = Some(i64::MAX);
 
     let encoded = encode_token(&token, &key).unwrap();
-    let decoded = decode_token(&encoded, &key)
+    let decoded = Decoder::with_algorithm(&key)
+        .decode(&encoded)
         .unwrap()
         .into_unvalidated_token();
 
@@ -164,7 +169,8 @@ fn test_nbf_underflow_rejected() {
     token.core.nbf = Some(i64::MIN);
 
     let encoded = encode_token(&token, &key).unwrap();
-    let decoded = decode_token(&encoded, &key)
+    let decoded = Decoder::with_algorithm(&key)
+        .decode(&encoded)
         .unwrap()
         .into_unvalidated_token();
 

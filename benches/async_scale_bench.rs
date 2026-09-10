@@ -99,8 +99,9 @@ fn make_bench_context() -> (ValidatedToken, Es256Algorithm, Jwk) {
 
     let key = HmacSha256Algorithm::new(b"bench-key-for-async-scale-0000000");
     let encoded = encode_token(&token, &key).unwrap();
-    let cat_validator = CatTokenValidator::new().allow_unencrypted_privacy_claims();
-    let validated = decode_token(&encoded, &key)
+    let cat_validator = CatTokenValidator::new().dangerously_allow_unencrypted_privacy_claims();
+    let validated = Decoder::with_algorithm(&key)
+        .decode(&encoded)
         .unwrap()
         .validate(&cat_validator)
         .unwrap();
@@ -121,7 +122,7 @@ fn build_proof(
         ALG_ES256,
         jwk,
     )
-    .with_jti(generate_jti())
+    .with_replay_id(generate_jti())
     .with_access_token_hash(compute_access_token_hash(validated.serialized()));
     proof.sign(alg).unwrap();
     proof

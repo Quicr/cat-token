@@ -21,10 +21,26 @@ use crate::pipeline::TokenHeader;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct KeyHint {
     pub algorithm_id: i64,
     pub kid: Option<Vec<u8>>,
     pub issuer: Option<String>,
+}
+
+impl KeyHint {
+    pub fn new(algorithm_id: i64) -> Self {
+        Self {
+            algorithm_id,
+            kid: None,
+            issuer: None,
+        }
+    }
+
+    pub fn with_kid(mut self, kid: Vec<u8>) -> Self {
+        self.kid = Some(kid);
+        self
+    }
 }
 
 impl From<&TokenHeader> for KeyHint {

@@ -20,11 +20,7 @@ fn test_negative_zero_geo_lat_rejected_on_encode() {
     let algorithm = HmacSha256Algorithm::from_secret_key(&alg);
 
     let mut token = CatToken::new().with_issuer("test");
-    token.cat.catgeocoord = Some(vec![GeoCoordinate {
-        lat: -0.0_f64,
-        lon: 10.0,
-        radius: 0,
-    }]);
+    token.cat.catgeocoord = Some(vec![GeoCoordinate::new(-0.0_f64, 10.0, 0)]);
 
     assert!(encode_token(&token, &algorithm).is_err());
 }
@@ -35,11 +31,7 @@ fn test_negative_zero_geo_lon_rejected_on_encode() {
     let algorithm = HmacSha256Algorithm::from_secret_key(&alg);
 
     let mut token = CatToken::new().with_issuer("test");
-    token.cat.catgeocoord = Some(vec![GeoCoordinate {
-        lat: 10.0,
-        lon: -0.0_f64,
-        radius: 0,
-    }]);
+    token.cat.catgeocoord = Some(vec![GeoCoordinate::new(10.0, -0.0_f64, 0)]);
 
     assert!(encode_token(&token, &algorithm).is_err());
 }
@@ -50,10 +42,7 @@ fn test_nan_altitude_rejected_on_encode() {
     let algorithm = HmacSha256Algorithm::from_secret_key(&alg);
 
     let mut token = CatToken::new().with_issuer("test");
-    token.cat.catgeoalt = Some(GeoAltitude {
-        altitude: f64::NAN,
-        deviation: 10.0,
-    });
+    token.cat.catgeoalt = Some(GeoAltitude::new(f64::NAN, 10.0));
 
     assert!(encode_token(&token, &algorithm).is_err());
 }
@@ -64,10 +53,7 @@ fn test_negative_zero_deviation_rejected_on_encode() {
     let algorithm = HmacSha256Algorithm::from_secret_key(&alg);
 
     let mut token = CatToken::new().with_issuer("test");
-    token.cat.catgeoalt = Some(GeoAltitude {
-        altitude: 100.0,
-        deviation: -0.0_f64,
-    });
+    token.cat.catgeoalt = Some(GeoAltitude::new(100.0, -0.0_f64));
 
     assert!(encode_token(&token, &algorithm).is_err());
 }

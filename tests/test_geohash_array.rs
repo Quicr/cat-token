@@ -10,7 +10,8 @@ fn test_single_geohash_roundtrip() {
     let token = CatToken::new().with_issuer("test").with_geohash("9q8yyk");
 
     let encoded = encode_token(&token, &algorithm).unwrap();
-    let decoded = decode_token(&encoded, &algorithm)
+    let decoded = Decoder::with_algorithm(&algorithm)
+        .decode(&encoded)
         .unwrap()
         .into_unvalidated_token();
 
@@ -29,7 +30,8 @@ fn test_multiple_geohashes_roundtrip() {
         .with_geohash("u4pruydqqv");
 
     let encoded = encode_token(&token, &algorithm).unwrap();
-    let decoded = decode_token(&encoded, &algorithm)
+    let decoded = Decoder::with_algorithm(&algorithm)
+        .decode(&encoded)
         .unwrap()
         .into_unvalidated_token();
 
@@ -59,7 +61,7 @@ fn test_geohash_builder_accumulates() {
 
 #[test]
 fn test_validator_rejects_invalid_in_array() {
-    let validator = CatTokenValidator::new().allow_unencrypted_privacy_claims();
+    let validator = CatTokenValidator::new().dangerously_allow_unencrypted_privacy_claims();
 
     let mut token = CatToken::new();
     token.cat.geohash = Some(vec![
@@ -75,7 +77,7 @@ fn test_validator_rejects_invalid_in_array() {
 
 #[test]
 fn test_validator_accepts_valid_array() {
-    let validator = CatTokenValidator::new().allow_unencrypted_privacy_claims();
+    let validator = CatTokenValidator::new().dangerously_allow_unencrypted_privacy_claims();
 
     let mut token = CatToken::new();
     token.cat.geohash = Some(vec!["9q8yyk".to_string(), "dr5regw".to_string()]);

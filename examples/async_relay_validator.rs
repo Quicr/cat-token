@@ -106,7 +106,7 @@ async fn main() {
         .with_expected_audiences(vec!["moqt-relay.example.com".to_string()])
         .with_clock_skew_tolerance(60)
         .unwrap()
-        .allow_unencrypted_privacy_claims();
+        .dangerously_allow_unencrypted_privacy_claims();
 
     // DPoP validation enabled so the async pipeline exercises its JTI
     // commit branch. `with_jti_processing(true)` tells the validator to
@@ -181,7 +181,9 @@ async fn validate_and_authorize_async(
     holder_alg: &Es256Algorithm,
     holder_jwk: Jwk,
 ) -> Result<AuthorizedRequest, String> {
-    let verified = decode_token(token_bytes, signing_key).map_err(|e| e.to_string())?;
+    let verified = Decoder::with_algorithm(signing_key)
+        .decode(token_bytes)
+        .map_err(|e| e.to_string())?;
     let validated = verified
         .validate(token_validator)
         .map_err(|e| e.to_string())?;
@@ -214,7 +216,9 @@ async fn replay_same_proof_async(
     // Reuse Scenario 1's flow: signing a fresh proof would land a fresh
     // JTI in the store and succeed. To demonstrate the replay defense
     // we sign a proof with a *fixed* JTI that collides with Scenario 1's.
-    let verified = decode_token(token_bytes, signing_key).map_err(|e| e.to_string())?;
+    let verified = Decoder::with_algorithm(signing_key)
+        .decode(token_bytes)
+        .map_err(|e| e.to_string())?;
     let validated = verified
         .validate(token_validator)
         .map_err(|e| e.to_string())?;
@@ -226,7 +230,7 @@ async fn replay_same_proof_async(
         ALG_ES256,
         holder_jwk,
     )
-    .with_jti("replay-me".to_string())
+    .with_replay_id("replay-me".to_string())
     .with_access_token_hash(compute_access_token_hash(validated.serialized()));
     proof.sign(holder_alg).unwrap();
 
@@ -261,7 +265,7 @@ fn build_dpop_proof(
         ALG_ES256,
         holder_jwk,
     )
-    .with_jti(generate_jti())
+    .with_replay_id(generate_jti())
     .with_access_token_hash(compute_access_token_hash(validated.serialized()));
     proof.sign(holder_alg).unwrap();
     proof

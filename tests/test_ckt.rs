@@ -42,7 +42,8 @@ fn test_ckt_roundtrip() {
         .with_cose_key_thumbprint(b"ckt-data".to_vec());
 
     let encoded = encode_token(&token, &algorithm).unwrap();
-    let decoded = decode_token(&encoded, &algorithm)
+    let decoded = Decoder::with_algorithm(&algorithm)
+        .decode(&encoded)
         .unwrap()
         .into_unvalidated_token();
 
@@ -61,7 +62,8 @@ fn test_ckt_only_roundtrip() {
         .with_cose_key_thumbprint(b"ckt-only".to_vec());
 
     let encoded = encode_token(&token, &algorithm).unwrap();
-    let decoded = decode_token(&encoded, &algorithm)
+    let decoded = Decoder::with_algorithm(&algorithm)
+        .decode(&encoded)
         .unwrap()
         .into_unvalidated_token();
 
@@ -80,7 +82,8 @@ fn test_jkt_without_ckt_roundtrip() {
         .with_confirmation(b"jkt-only".to_vec());
 
     let encoded = encode_token(&token, &algorithm).unwrap();
-    let decoded = decode_token(&encoded, &algorithm)
+    let decoded = Decoder::with_algorithm(&algorithm)
+        .decode(&encoded)
         .unwrap()
         .into_unvalidated_token();
 

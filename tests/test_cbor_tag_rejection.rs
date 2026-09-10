@@ -52,7 +52,7 @@ fn test_tagged_iss_rejected() {
     ciborium::ser::into_writer(&ciborium::Value::Map(cbor_map), &mut payload_buf).unwrap();
 
     let cose_bytes = build_cose_mac0_with_payload(&payload_buf, &alg);
-    let result = decode_token(&cose_bytes, &alg);
+    let result = Decoder::with_algorithm(&alg).decode(&cose_bytes);
     assert!(result.is_err());
 }
 
@@ -75,7 +75,7 @@ fn test_tagged_exp_rejected() {
     ciborium::ser::into_writer(&ciborium::Value::Map(cbor_map), &mut payload_buf).unwrap();
 
     let cose_bytes = build_cose_mac0_with_payload(&payload_buf, &alg);
-    assert!(decode_token(&cose_bytes, &alg).is_err());
+    assert!(Decoder::with_algorithm(&alg).decode(&cose_bytes).is_err());
 }
 
 #[test]
@@ -90,7 +90,8 @@ fn test_catnip_with_proper_tags_still_works() {
         .unwrap();
 
     let encoded = encode_token(&token, &alg).unwrap();
-    let decoded = decode_token(&encoded, &alg)
+    let decoded = Decoder::with_algorithm(&alg)
+        .decode(&encoded)
         .unwrap()
         .into_unvalidated_token();
     assert!(decoded.cat.catnip.is_some());
@@ -107,7 +108,8 @@ fn test_catgeocoord_with_crs_wrapper_still_works() {
         .unwrap();
 
     let encoded = encode_token(&token, &alg).unwrap();
-    let decoded = decode_token(&encoded, &alg)
+    let decoded = Decoder::with_algorithm(&alg)
+        .decode(&encoded)
         .unwrap()
         .into_unvalidated_token();
     assert!(decoded.cat.catgeocoord.is_some());
