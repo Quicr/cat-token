@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2022 Quicr
 // SPDX-License-Identifier: BSD-2-Clause
 
-//! Scale bench for `AsyncMoqtValidator::authorize_async`.
+//! Scale bench for `AsyncMoqtValidator::authorize`.
 //!
 //! The realistic CDN failure mode is not sync-path CPU — the P0-1 audit
 //! path already benches that. It's async-path tail latency when the
@@ -165,10 +165,10 @@ fn bench_async_authorize_scale(c: &mut Criterion) {
                     rt.block_on(async {
                         let store = Arc::new(LatencyStore::new(latency));
                         let store_dyn: Arc<dyn AsyncJtiStore> = store.clone();
-                        let validator = AsyncMoqtValidator::try_from_sync_strict(
+                        let validator = AsyncMoqtValidator::strict(
                             MoqtValidator::new()
                                 .allow_missing_audience()
-                                .with_dpop_validation(dpop_settings.clone()),
+                                .dpop_best_effort(dpop_settings.clone()),
                             store_dyn,
                         )
                         .expect("strict store construction");
@@ -186,10 +186,7 @@ fn bench_async_authorize_scale(c: &mut Criterion) {
                                     format!("/stream/{i}").into_bytes(),
                                 )
                                 .with_dpop_proof(proof);
-                                validator
-                                    .authorize_async(&validated, &request, None, None)
-                                    .await
-                                    .is_ok()
+                                validator.authorize(&validated, &request).await.is_ok()
                             }));
                         }
                         let mut ok = 0usize;
@@ -204,7 +201,7 @@ fn bench_async_authorize_scale(c: &mut Criterion) {
                         assert_eq!(
                             store.calls(),
                             CONCURRENCY as u64,
-                            "LatencyStore must be invoked once per authorize_async"
+                            "LatencyStore must be invoked once per authorize call"
                         );
                         assert_eq!(ok, CONCURRENCY, "every DPoP-bound request should authorize");
                         black_box(ok)

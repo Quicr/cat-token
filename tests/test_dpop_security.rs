@@ -108,7 +108,7 @@ fn test_dpop_namespace_mismatch_rejected() {
         .unwrap();
 
     let settings = CatDpopSettings::new().with_window(300).unwrap();
-    let validator = cat_token::moqt::MoqtValidator::new().with_dpop_validation(settings);
+    let validator = cat_token::moqt::MoqtValidator::new().dpop_best_effort(settings);
 
     // Request for namespace_b — proof is bound to namespace_a
     let request = cat_token::moqt::RelayRequestContext::new(
@@ -119,8 +119,7 @@ fn test_dpop_namespace_mismatch_rejected() {
     )
     .with_dpop_proof(proof);
 
-    let result =
-        validator.authorize::<dyn ReplayGuard>(&make_validated(&token), &request, None, None);
+    let result = validator.authorize(&make_validated(&token), &request);
     assert!(result.is_err(), "Should reject namespace mismatch");
     assert!(matches!(result, Err(CatError::DpopValidationFailed(_))));
 }
@@ -156,7 +155,7 @@ fn test_dpop_track_mismatch_rejected() {
         .unwrap();
 
     let settings = CatDpopSettings::new().with_window(300).unwrap();
-    let validator = cat_token::moqt::MoqtValidator::new().with_dpop_validation(settings);
+    let validator = cat_token::moqt::MoqtValidator::new().dpop_best_effort(settings);
 
     // Request for track_b — proof is bound to track_a
     let request = cat_token::moqt::RelayRequestContext::new(
@@ -167,8 +166,7 @@ fn test_dpop_track_mismatch_rejected() {
     )
     .with_dpop_proof(proof);
 
-    let result =
-        validator.authorize::<dyn ReplayGuard>(&make_validated(&token), &request, None, None);
+    let result = validator.authorize(&make_validated(&token), &request);
     assert!(result.is_err(), "Should reject track mismatch");
     assert!(matches!(result, Err(CatError::DpopValidationFailed(_))));
 }
@@ -208,13 +206,13 @@ fn test_dpop_matching_target_succeeds() {
     proof.sign(&alg).unwrap();
 
     let settings = CatDpopSettings::new().with_window(300).unwrap();
-    let validator = cat_token::moqt::MoqtValidator::new().with_dpop_validation(settings);
+    let validator = cat_token::moqt::MoqtValidator::new().dpop_best_effort(settings);
 
     let request =
         cat_token::moqt::RelayRequestContext::new("relay", MoqtAction::Publish, ns, track.to_vec())
             .with_dpop_proof(proof);
 
-    let result = validator.authorize::<dyn ReplayGuard>(&validated, &request, None, None);
+    let result = validator.authorize(&validated, &request);
     assert!(
         result.is_ok(),
         "authorize should succeed with valid ath: {result:?}"
@@ -355,9 +353,9 @@ fn test_authorize_rejects_missing_ath() {
     proof.sign(&alg).unwrap();
 
     let settings = CatDpopSettings::new().with_window(300).unwrap();
-    let v = cat_token::moqt::MoqtValidator::new().with_dpop_validation(settings);
+    let v = cat_token::moqt::MoqtValidator::new().dpop_best_effort(settings);
 
-    let result = v.authorize::<dyn ReplayGuard>(&validated, &dpop_request(proof), None, None);
+    let result = v.authorize(&validated, &dpop_request(proof));
     assert!(
         matches!(result, Err(CatError::DpopValidationFailed(_))),
         "authorize must fail closed when proof omits ath: {result:?}"
@@ -398,9 +396,9 @@ fn test_authorize_rejects_ath_bound_to_different_token() {
     proof.sign(&alg).unwrap();
 
     let settings = CatDpopSettings::new().with_window(300).unwrap();
-    let v = cat_token::moqt::MoqtValidator::new().with_dpop_validation(settings);
+    let v = cat_token::moqt::MoqtValidator::new().dpop_best_effort(settings);
 
-    let result = v.authorize::<dyn ReplayGuard>(&validated_b, &dpop_request(proof), None, None);
+    let result = v.authorize(&validated_b, &dpop_request(proof));
     assert!(
         matches!(result, Err(CatError::DpopValidationFailed(_))),
         "cross-token proof reuse must be rejected: {result:?}"
@@ -443,7 +441,7 @@ fn test_authorize_rejects_resource_endpoint_mismatch() {
     proof.sign(&alg).unwrap();
 
     let settings = CatDpopSettings::new().with_window(300).unwrap();
-    let v = cat_token::moqt::MoqtValidator::new().with_dpop_validation(settings);
+    let v = cat_token::moqt::MoqtValidator::new().dpop_best_effort(settings);
 
     let request = cat_token::moqt::RelayRequestContext::new(
         "relay-b",
@@ -453,7 +451,7 @@ fn test_authorize_rejects_resource_endpoint_mismatch() {
     )
     .with_dpop_proof(proof);
 
-    let result = v.authorize::<dyn ReplayGuard>(&validated, &request, None, None);
+    let result = v.authorize(&validated, &request);
     assert!(
         matches!(result, Err(CatError::DpopValidationFailed(_))),
         "proof bound to relay-a must not authorize relay-b: {result:?}"
@@ -490,7 +488,7 @@ fn test_dpop_setup_authorizes_with_empty_namespace_and_track() {
     proof.sign(&alg).unwrap();
 
     let settings = CatDpopSettings::new().with_window(300).unwrap();
-    let validator = cat_token::moqt::MoqtValidator::new().with_dpop_validation(settings);
+    let validator = cat_token::moqt::MoqtValidator::new().dpop_best_effort(settings);
 
     let request = cat_token::moqt::RelayRequestContext::new(
         "relay",
@@ -501,7 +499,7 @@ fn test_dpop_setup_authorizes_with_empty_namespace_and_track() {
     .with_dpop_proof(proof);
 
     validator
-        .authorize::<dyn ReplayGuard>(&validated, &request, None, None)
+        .authorize(&validated, &request)
         .expect("DPoP-protected setup must authorize with empty ns/track");
 }
 
@@ -541,7 +539,7 @@ fn test_dpop_nonce_mismatch_rejected() {
     proof.sign(&alg).unwrap();
 
     let settings = CatDpopSettings::new().with_window(300).unwrap();
-    let validator = cat_token::moqt::MoqtValidator::new().with_dpop_validation(settings);
+    let validator = cat_token::moqt::MoqtValidator::new().dpop_best_effort(settings);
 
     let request = cat_token::moqt::RelayRequestContext::new(
         "relay",
@@ -552,7 +550,7 @@ fn test_dpop_nonce_mismatch_rejected() {
     .with_dpop_proof(proof)
     .with_expected_dpop_nonce("server-nonce-b");
 
-    let result = validator.authorize::<dyn ReplayGuard>(&validated, &request, None, None);
+    let result = validator.authorize(&validated, &request);
     assert!(
         matches!(result, Err(CatError::DpopValidationFailed(_))),
         "nonce mismatch must be rejected: {result:?}"
@@ -590,7 +588,7 @@ fn test_dpop_missing_nonce_rejected_when_expected() {
     proof.sign(&alg).unwrap();
 
     let settings = CatDpopSettings::new().with_window(300).unwrap();
-    let validator = cat_token::moqt::MoqtValidator::new().with_dpop_validation(settings);
+    let validator = cat_token::moqt::MoqtValidator::new().dpop_best_effort(settings);
 
     let request = cat_token::moqt::RelayRequestContext::new(
         "relay",
@@ -601,7 +599,7 @@ fn test_dpop_missing_nonce_rejected_when_expected() {
     .with_dpop_proof(proof)
     .with_expected_dpop_nonce("server-nonce");
 
-    let result = validator.authorize::<dyn ReplayGuard>(&validated, &request, None, None);
+    let result = validator.authorize(&validated, &request);
     assert!(
         matches!(result, Err(CatError::DpopValidationFailed(_))),
         "missing nonce must be rejected when server pinned one: {result:?}"
@@ -640,7 +638,7 @@ fn test_dpop_matching_nonce_accepted() {
     proof.sign(&alg).unwrap();
 
     let settings = CatDpopSettings::new().with_window(300).unwrap();
-    let validator = cat_token::moqt::MoqtValidator::new().with_dpop_validation(settings);
+    let validator = cat_token::moqt::MoqtValidator::new().dpop_best_effort(settings);
 
     let request = cat_token::moqt::RelayRequestContext::new(
         "relay",
@@ -652,7 +650,7 @@ fn test_dpop_matching_nonce_accepted() {
     .with_expected_dpop_nonce("server-nonce");
 
     validator
-        .authorize::<dyn ReplayGuard>(&validated, &request, None, None)
+        .authorize(&validated, &request)
         .expect("matching nonce must authorize");
 }
 
@@ -687,7 +685,7 @@ fn test_dpop_setup_rejects_populated_namespace() {
     proof.sign(&alg).unwrap();
 
     let settings = CatDpopSettings::new().with_window(300).unwrap();
-    let validator = cat_token::moqt::MoqtValidator::new().with_dpop_validation(settings);
+    let validator = cat_token::moqt::MoqtValidator::new().dpop_best_effort(settings);
 
     let request = cat_token::moqt::RelayRequestContext::new(
         "relay",
@@ -697,7 +695,7 @@ fn test_dpop_setup_rejects_populated_namespace() {
     )
     .with_dpop_proof(proof);
 
-    let result = validator.authorize::<dyn ReplayGuard>(&validated, &request, None, None);
+    let result = validator.authorize(&validated, &request);
     assert!(
         matches!(result, Err(CatError::DpopValidationFailed(_))),
         "setup with populated tns must be rejected: {result:?}"

@@ -1,5 +1,94 @@
 # Changelog
 
+## 0.5.0 — 2026-09-09
+
+API cleanup release. Every change here is a rename or a visibility
+tightening — the underlying policy engine, DPoP verification, MOQT
+scope matching, and replay-store contracts are unchanged. The point is
+teachability: an integrator should be able to read `MoqtValidator`,
+`Decoder`, `RelayRequestContext`, and `AuthorizedRequest` and see one
+obvious way to compose a fail-closed pipeline. Every prior alternative
+that made the surface look wider than it actually was has been removed.
+
+### Changed (breaking)
+
+- **`Decoder<'a>` replaces the seven free `decode_token_*` functions.**
+  Callers pick a verifying key with `Decoder::with_algorithm(&alg)` or
+  `Decoder::with_resolver(&resolver)`, layer on optional
+  `.admission(&policy)`, `.encryption_key(&key)`, and `.limits(cwt)`,
+  then call `.decode(&bytes)` or `.decode_base64(&str)`. The old
+  `decode_token` and `decode_encrypted_token` free functions are kept
+  as thin convenience shortcuts; the `_with_admission`,
+  `_with_resolver`, `_with_limits`, `_with_admission_and_limits`, and
+  `_base64` variants are removed. The builder is `Copy`-cheap so a
+  single decoder can be reused across requests.
+- **`RelayRequestContext` fields grouped into `transport` and `http`
+  sub-structs.** `TransportInfo { peer_tls_alpn, peer_ip, peer_asn }`
+  and `HttpRequest { uri, method, headers }` are constructible
+  independently and swap-assignable via `.transport(t)` / `.http(h)`.
+  The flat per-field builder setters (`with_peer_ip`, `with_request_uri`,
+  etc.) still exist and write through the sub-structs; direct field
+  access now goes through `ctx.transport.peer_ip` / `ctx.http.uri`.
+- **`AuthorizedRequest` fields are private, getters replace them.** Use
+  `matched_scope_index()`, `requires_revalidation()`,
+  `revalidation_interval()`, `renewal()`, and `reuse_detected()`. The
+  struct is an authorization decision, not a config bag — its fields
+  should never be mutated after `authorize` returns.
+- **`MoqtValidator::authorize` split into two entry points.**
+  `authorize(&token, &ctx)` is the guard-free path; a token that
+  demands a replay guard is rejected as
+  `InvalidClaimValue("token asserts catreplay but no replay guard
+  configured")`. `authorize_with_replay(&token, &ctx, &guard,
+  block_list)` is the full path. Removes the turbofish papercut where
+  the old generic `authorize::<G>(..., None, None)` needed a phantom
+  type annotation. `AsyncMoqtValidator` uses the same names —
+  `authorize` and `authorize_with_replay` — so the sync and async
+  surfaces are learnable as one concept.
+- **`MoqtValidator::with_dpop_validation` renamed to
+  `dpop_best_effort`; `try_with_strict_dpop_validation` renamed to
+  `dpop_strict`.** The old names implied "strict is optional"; the new
+  names make the deployment posture the choice — best-effort for local
+  development, strict (rejects non-strict stores at construction) for
+  CDN. `AsyncMoqtValidator::try_from_sync_strict` and
+  `from_sync_best_effort` renamed to `strict` and `best_effort`
+  respectively for the same reason.
+- **Internal claim-enforcement helpers restricted to `pub(crate)`.**
+  `enforce_catu`, `enforce_catnip`, `enforce_catpor`, `validate_method`,
+  `apply_match_value`, `validate_all_headers`, `unfold_header_value`,
+  and `strip_token_from_uri` are no longer public. Integrators drive
+  the whole authorization pipeline through `MoqtValidator::authorize` /
+  `authorize_with_replay`; the individual helpers were never part of a
+  stable surface. `enforce_catreplay` is removed entirely — the commit
+  logic is inlined into `commit` and `commit_async`.
+
+### Migration
+
+- `decode_token_with_admission(bytes, &resolver, &policy)` →
+  `Decoder::with_resolver(&resolver).admission(&policy).decode(bytes)`.
+- `decode_token_with_resolver(bytes, &resolver)` →
+  `Decoder::with_resolver(&resolver).decode(bytes)`.
+- `decode_token_base64(str, &alg)` →
+  `Decoder::with_algorithm(&alg).decode_base64(str)`.
+- `ctx.peer_ip = Some(ip)` → `ctx.transport.peer_ip = Some(ip)` (or
+  keep using `.with_peer_ip(ip)`).
+- `result.matched_scope_index` → `result.matched_scope_index()`.
+- `validator.authorize::<dyn ReplayGuard>(&t, &c, None, None)` →
+  `validator.authorize(&t, &c)`.
+- `validator.authorize::<G>(&t, &c, Some(&guard), Some(&blocklist))` →
+  `validator.authorize_with_replay(&t, &c, &guard, Some(&blocklist))`.
+- `MoqtValidator::new().with_dpop_validation(settings)` →
+  `MoqtValidator::new().dpop_best_effort(settings)`.
+- `MoqtValidator::new().try_with_strict_dpop_validation(settings,
+  store)` → `MoqtValidator::new().dpop_strict(settings, store)`.
+- `AsyncMoqtValidator::try_from_sync_strict(sync, store)` →
+  `AsyncMoqtValidator::strict(sync, store)`.
+- `AsyncMoqtValidator::from_sync_best_effort(sync, store)` →
+  `AsyncMoqtValidator::best_effort(sync, store)`.
+- `async_validator.authorize_async(&t, &c, None, None).await` →
+  `async_validator.authorize(&t, &c).await`.
+- `async_validator.authorize_async(&t, &c, Some(&g), list).await` →
+  `async_validator.authorize_with_replay(&t, &c, &g, list).await`.
+
 ## 0.4.3 — 2026-09-08
 
 Fixes the test-vector pipeline into `draft-ietf-moq-c4m`. Hand-copying

@@ -35,7 +35,7 @@ fn authorize(
     token: &ValidatedToken,
     req: &RelayRequestContext,
 ) -> Result<cat_token::moqt::AuthorizedRequest, CatError> {
-    v.authorize::<dyn ReplayGuard>(token, req, None, None)
+    v.authorize(token, req)
 }
 
 #[test]
@@ -178,7 +178,7 @@ fn test_moqt_validator_multiple_scopes() {
         b"/live/stream1".to_vec(),
     );
     let result = authorize(&v, &make_validated(&token), &request).unwrap();
-    assert_eq!(result.matched_scope_index, 0);
+    assert_eq!(result.matched_scope_index(), 0);
 
     // Publisher cannot publish to /vod/
     let request = ctx(
@@ -195,7 +195,7 @@ fn test_moqt_validator_multiple_scopes() {
         b"/vod/movie1".to_vec(),
     );
     let result = authorize(&v, &make_validated(&token), &request).unwrap();
-    assert_eq!(result.matched_scope_index, 1);
+    assert_eq!(result.matched_scope_index(), 1);
 
     // Subscriber cannot fetch from /live/
     let request = ctx(
@@ -229,8 +229,8 @@ fn test_moqt_validator_revalidation_required() {
     );
     let result = authorize(&v, &make_validated(&token), &request).unwrap();
 
-    assert!(result.requires_revalidation);
-    assert_eq!(result.revalidation_interval, Some(300.0));
+    assert!(result.requires_revalidation());
+    assert_eq!(result.revalidation_interval(), Some(300.0));
 }
 
 #[test]
@@ -259,8 +259,8 @@ fn test_moqt_validator_revalidation_zero() {
 
     // moqt-reval == 0 means no revalidation required; the AuthorizedRequest
     // returns no interval rather than Some(0.0).
-    assert!(!result.requires_revalidation);
-    assert!(result.revalidation_interval.is_none());
+    assert!(!result.requires_revalidation());
+    assert!(result.revalidation_interval().is_none());
 }
 
 #[test]
@@ -434,8 +434,7 @@ fn test_moqt_validator_concurrent_access() {
                     track.as_bytes().to_vec(),
                 );
                 assert!(
-                    v.authorize::<dyn ReplayGuard>(&make_validated(&token), &request, None, None)
-                        .is_ok(),
+                    v.authorize(&make_validated(&token), &request).is_ok(),
                     "Thread {} iter {} should be authorized",
                     i,
                     j

@@ -84,13 +84,17 @@ pub const C4M_TOKEN_TYPE: u64 = 0x01;
 /// and whether the token's `catreplay` mode observed a duplicate cti
 /// (`Prohibited` fails hard; `ReuseDetection` sets this flag for the caller
 /// to log/audit).
+///
+/// Accessors are getters rather than `pub` fields so the struct can grow
+/// without breaking downstream matches; construction happens exclusively
+/// through the authorization pipeline.
 #[derive(Debug, Clone)]
 pub struct AuthorizedRequest {
-    pub matched_scope_index: usize,
-    pub requires_revalidation: bool,
-    pub revalidation_interval: Option<f64>,
-    pub renewal: Option<CatRenewal>,
-    pub reuse_detected: bool,
+    matched_scope_index: usize,
+    requires_revalidation: bool,
+    revalidation_interval: Option<f64>,
+    renewal: Option<CatRenewal>,
+    reuse_detected: bool,
 }
 
 impl AuthorizedRequest {
@@ -103,15 +107,138 @@ impl AuthorizedRequest {
             reuse_detected: false,
         }
     }
+
+    /// Zero-based index of the MOQT scope on the token that authorized this
+    /// request. Callers use this to attribute observed traffic back to a
+    /// specific scope (audit / metrics).
+    pub fn matched_scope_index(&self) -> usize {
+        self.matched_scope_index
+    }
+
+    /// Whether the token carries a positive `moqt-reval` interval — i.e.,
+    /// the relay must re-check the token before
+    /// [`revalidation_interval`](AuthorizedRequest::revalidation_interval)
+    /// seconds elapse.
+    pub fn requires_revalidation(&self) -> bool {
+        self.requires_revalidation
+    }
+
+    /// Seconds until revalidation is due, when
+    /// [`requires_revalidation`](AuthorizedRequest::requires_revalidation)
+    /// is `true`. `None` when the token has no `moqt-reval` claim.
+    pub fn revalidation_interval(&self) -> Option<f64> {
+        self.revalidation_interval
+    }
+
+    /// Renewal directive the response builder must honour (cookie/header/
+    /// redirect/automatic) when the token carries `catr`. `None` when the
+    /// token asks for no renewal signalling.
+    pub fn renewal(&self) -> Option<&CatRenewal> {
+        self.renewal.as_ref()
+    }
+
+    /// `true` when `catreplay == ReuseDetection` observed a duplicate cti
+    /// on this request. The request is still authorized; the flag is for
+    /// audit/logging only. `catreplay == Prohibited` fails the request
+    /// before this outcome is produced.
+    pub fn reuse_detected(&self) -> bool {
+        self.reuse_detected
+    }
+}
+
+/// Transport-layer identity of the peer, used to enforce token claims that
+/// bind the token to a specific client fingerprint (`catalpn`, `catnip`).
+/// Every field is optional; a missing value is a hard failure only when
+/// the token claim requires it — otherwise it is ignored.
+#[derive(Debug, Clone, Default)]
+pub struct TransportInfo {
+    /// TLS ALPN identifier negotiated with the peer.
+    pub peer_tls_alpn: Option<Vec<u8>>,
+    /// Peer IP address.
+    pub peer_ip: Option<std::net::IpAddr>,
+    /// Peer autonomous system number.
+    pub peer_asn: Option<u32>,
+}
+
+impl TransportInfo {
+    pub fn new() -> Self {
+        Self::default()
+    }
+    pub fn with_alpn(mut self, alpn: Vec<u8>) -> Self {
+        self.peer_tls_alpn = Some(alpn);
+        self
+    }
+    pub fn with_ip(mut self, ip: std::net::IpAddr) -> Self {
+        self.peer_ip = Some(ip);
+        self
+    }
+    pub fn with_asn(mut self, asn: u32) -> Self {
+        self.peer_asn = Some(asn);
+        self
+    }
+}
+
+/// HTTP-shape fields of the peer request, used to enforce `catu` (URI),
+/// `catm` (method), and `cath` (headers). Every field is optional; a
+/// missing value is a hard failure only when the token claim requires it.
+#[derive(Debug, Clone, Default)]
+pub struct HttpRequest {
+    /// Fully-qualified request URI (required for `catu`).
+    pub uri: Option<String>,
+    /// HTTP method or equivalent transport verb (required for `catm`).
+    pub method: Option<String>,
+    /// Complete request header set. Every rule in `cath` must be satisfied
+    /// by at least one header here; case-insensitive per RFC 9110 §5.1.
+    pub headers: Vec<(String, String)>,
+}
+
+impl HttpRequest {
+    pub fn new() -> Self {
+        Self::default()
+    }
+    pub fn with_uri(mut self, uri: impl Into<String>) -> Self {
+        self.uri = Some(uri.into());
+        self
+    }
+    pub fn with_method(mut self, method: impl Into<String>) -> Self {
+        self.method = Some(method.into());
+        self
+    }
+    pub fn with_headers(mut self, headers: Vec<(String, String)>) -> Self {
+        self.headers = headers;
+        self
+    }
 }
 
 /// Context for a relay authorization request, used with
-/// [`MoqtValidator::authorize`].
+/// [`MoqtValidator::authorize`] and
+/// [`MoqtValidator::authorize_with_replay`].
 ///
 /// This is the only supported entry point for authorization. Fields describe the
 /// full request context — a missing field represents an unknown value, not a
 /// wildcard, and will cause authorization to fail closed when a token claim
-/// requires that context (e.g. `catalpn` requires `peer_tls_alpn`).
+/// requires that context (e.g. `catalpn` requires
+/// [`TransportInfo::peer_tls_alpn`]).
+///
+/// The struct groups related inputs into [`TransportInfo`] (TLS/network
+/// identity) and [`HttpRequest`] (URI/method/headers). Chain the grouped
+/// builders for readability:
+///
+/// ```ignore
+/// RelayRequestContext::new("relay.example.com", MoqtAction::Publish, ns, track)
+///     .transport(
+///         TransportInfo::new()
+///             .with_ip(peer_ip)
+///             .with_asn(peer_asn)
+///             .with_alpn(alpn),
+///     )
+///     .http(
+///         HttpRequest::new()
+///             .with_uri(req.uri.to_string())
+///             .with_method(req.method.as_str())
+///             .with_headers(header_pairs),
+///     );
+/// ```
 #[derive(Debug, Clone)]
 pub struct RelayRequestContext {
     /// Canonical relay endpoint the client connected to. Matched against the
@@ -123,30 +250,16 @@ pub struct RelayRequestContext {
     pub namespace: Vec<Vec<u8>>,
     /// The track name.
     pub track: Vec<u8>,
-    /// TLS ALPN identifier negotiated with the peer. Required if the token has
-    /// a `catalpn` claim.
-    pub peer_tls_alpn: Option<Vec<u8>>,
+    /// TLS/network identity for `catalpn` and `catnip` enforcement.
+    pub transport: TransportInfo,
+    /// HTTP-shape fields for `catu`, `catm`, and `cath` enforcement.
+    pub http: HttpRequest,
     /// Optional tenant/connection identity carried from a trusted upstream.
     /// Not enforced by the library — passed through to metrics/audit hooks by
     /// the caller. Present for callers that partition replay state by tenant.
     pub tenant_id: Option<String>,
     /// DPoP proof of possession. Required if the token has a `cnf` claim.
     pub dpop_proof: Option<DpopProof>,
-    /// Fully-qualified request URI. Required if the token has a `catu` claim.
-    pub request_uri: Option<String>,
-    /// HTTP method (or equivalent transport verb). Required if the token has
-    /// a `catm` claim.
-    pub request_method: Option<String>,
-    /// Complete request header set (name, value pairs). Every rule in the
-    /// token's `cath` claim must be satisfied by some header in this list.
-    /// Case-insensitive on name per RFC 9110 §5.1.
-    pub request_headers: Vec<(String, String)>,
-    /// Peer IP address. Required if the token's `catnip` claim contains any
-    /// IP-typed identifier.
-    pub peer_ip: Option<std::net::IpAddr>,
-    /// Peer autonomous system number. Required if the token's `catnip`
-    /// contains any ASN-typed identifier.
-    pub peer_asn: Option<u32>,
     /// Server-issued DPoP nonce challenge for this request (RFC 9449 §8).
     /// When set, the DPoP proof MUST carry a matching `nonce` claim;
     /// otherwise authorization fails closed with
@@ -167,20 +280,28 @@ impl RelayRequestContext {
             action,
             namespace,
             track,
-            peer_tls_alpn: None,
+            transport: TransportInfo::default(),
+            http: HttpRequest::default(),
             tenant_id: None,
             dpop_proof: None,
-            request_uri: None,
-            request_method: None,
-            request_headers: Vec::new(),
-            peer_ip: None,
-            peer_asn: None,
             expected_dpop_nonce: None,
         }
     }
 
+    /// Replace the transport-layer identity block wholesale.
+    pub fn transport(mut self, transport: TransportInfo) -> Self {
+        self.transport = transport;
+        self
+    }
+
+    /// Replace the HTTP-shape block wholesale.
+    pub fn http(mut self, http: HttpRequest) -> Self {
+        self.http = http;
+        self
+    }
+
     pub fn with_peer_tls_alpn(mut self, alpn: Vec<u8>) -> Self {
-        self.peer_tls_alpn = Some(alpn);
+        self.transport.peer_tls_alpn = Some(alpn);
         self
     }
 
@@ -195,27 +316,27 @@ impl RelayRequestContext {
     }
 
     pub fn with_request_uri(mut self, uri: impl Into<String>) -> Self {
-        self.request_uri = Some(uri.into());
+        self.http.uri = Some(uri.into());
         self
     }
 
     pub fn with_request_method(mut self, method: impl Into<String>) -> Self {
-        self.request_method = Some(method.into());
+        self.http.method = Some(method.into());
         self
     }
 
     pub fn with_request_headers(mut self, headers: Vec<(String, String)>) -> Self {
-        self.request_headers = headers;
+        self.http.headers = headers;
         self
     }
 
     pub fn with_peer_ip(mut self, ip: std::net::IpAddr) -> Self {
-        self.peer_ip = Some(ip);
+        self.transport.peer_ip = Some(ip);
         self
     }
 
     pub fn with_peer_asn(mut self, asn: u32) -> Self {
-        self.peer_asn = Some(asn);
+        self.transport.peer_asn = Some(asn);
         self
     }
 
@@ -276,25 +397,25 @@ impl MoqtValidator {
         self
     }
 
-    /// Enable DPoP validation backed by the in-process eviction-based
-    /// [`crate::LruJtiStore`].
+    /// Enable DPoP validation with a **best-effort** LRU-backed JTI store.
     ///
     /// **Not strict.** RFC 9449 §11.1 requires every accepted JTI be
-    /// retained for at least the freshness window; the LRU-backed default
+    /// retained for at least the freshness window; the LRU-backed store
     /// evicts under pressure. CDN-scale deployments MUST call
-    /// [`MoqtValidator::try_with_strict_dpop_validation`] instead, passing
-    /// a store that returns `true` from [`crate::JtiStore::is_strict`].
-    /// Use this constructor only for local development, single-tenant
-    /// tests, or intentionally best-effort replay defense.
-    pub fn with_dpop_validation(mut self, settings: CatDpopSettings) -> Self {
+    /// [`MoqtValidator::dpop_strict`] instead, passing a store that
+    /// returns `true` from [`crate::JtiStore::is_strict`]. Use this
+    /// constructor only for local development, single-tenant tests, or
+    /// intentionally best-effort replay defense.
+    pub fn dpop_best_effort(mut self, settings: CatDpopSettings) -> Self {
         self.dpop_validator = Some(DpopValidator::new(settings));
         self
     }
 
-    /// Enable DPoP validation with a caller-supplied strict [`JtiStore`].
-    /// The store MUST return `true` from [`crate::JtiStore::is_strict`];
-    /// otherwise this returns [`CatError::CryptoError`] rather than
-    /// silently accept a store that could shed retained JTIs.
+    /// Enable DPoP validation with a caller-supplied **strict**
+    /// [`JtiStore`]. The store MUST return `true` from
+    /// [`crate::JtiStore::is_strict`]; otherwise this returns
+    /// [`CatError::CryptoError`] rather than silently accept a store that
+    /// could shed retained JTIs.
     ///
     /// Use this constructor for any deployment that shares replay state
     /// across relays or that must survive a single-relay restart without
@@ -321,7 +442,7 @@ impl MoqtValidator {
     /// satisfies all four for a single-relay deployment; distributed
     /// backends (Redis, DynamoDB with strong consistency, etc.) must be
     /// audited against this list before deployment.
-    pub fn try_with_strict_dpop_validation(
+    pub fn dpop_strict(
         mut self,
         settings: CatDpopSettings,
         store: std::sync::Arc<dyn crate::JtiStore>,
@@ -419,16 +540,32 @@ impl MoqtValidator {
     /// backend (or bind `ReplayGuard::check_and_record` to a store that
     /// records both keys inside a single transaction). This crate does
     /// not distribute a transaction across two independent stores.
-    pub fn authorize<G: ReplayGuard + ?Sized>(
+    pub fn authorize(
         &self,
         token: &ValidatedToken,
         ctx: &RelayRequestContext,
-        replay_guard: Option<&G>,
+    ) -> Result<AuthorizedRequest, CatError> {
+        let pre = self.authorize_precommit(token, ctx, false, None)?;
+        self.commit(token.claims(), pre, None::<&dyn ReplayGuard>)
+    }
+
+    /// Full fail-closed authorization with a caller-supplied replay guard
+    /// and optional `catpor` block list. Use this when the token may carry
+    /// `catreplay` (Prohibited / ReuseDetection) — a token that demands a
+    /// guard reaches this crate through [`Self::authorize`] and is
+    /// rejected because no guard is supplied.
+    ///
+    /// See [`Self::authorize`] rustdoc for the atomicity contract between
+    /// the two replay commits.
+    pub fn authorize_with_replay<G: ReplayGuard + ?Sized>(
+        &self,
+        token: &ValidatedToken,
+        ctx: &RelayRequestContext,
+        replay_guard: &G,
         catpor_block_list: Option<&CatPorBlockList>,
     ) -> Result<AuthorizedRequest, CatError> {
-        let pre =
-            self.authorize_precommit(token, ctx, replay_guard.is_some(), catpor_block_list)?;
-        self.commit(token.claims(), pre, replay_guard)
+        let pre = self.authorize_precommit(token, ctx, true, catpor_block_list)?;
+        self.commit(token.claims(), pre, Some(replay_guard))
     }
 
     /// Run every non-storage authorization check and return the commit
@@ -479,7 +616,7 @@ impl MoqtValidator {
 
         // 4. ALPN.
         if let Some(ref token_alpns) = claims.cat.catalpn {
-            let peer_alpn = ctx.peer_tls_alpn.as_ref().ok_or_else(|| {
+            let peer_alpn = ctx.transport.peer_tls_alpn.as_ref().ok_or_else(|| {
                 CatError::InvalidClaimValue(
                     "token requires ALPN binding but no peer ALPN provided".to_string(),
                 )
@@ -493,7 +630,7 @@ impl MoqtValidator {
 
         // 5. catu — URI-component restrictions.
         if claims.cat.catu.is_some() {
-            let uri = ctx.request_uri.as_deref().ok_or_else(|| {
+            let uri = ctx.http.uri.as_deref().ok_or_else(|| {
                 CatError::InvalidClaimValue(
                     "token asserts catu but request context has no request_uri".to_string(),
                 )
@@ -503,7 +640,7 @@ impl MoqtValidator {
 
         // 6. catm — HTTP method restrictions.
         if claims.cat.catm.is_some() {
-            let method = ctx.request_method.as_deref().ok_or_else(|| {
+            let method = ctx.http.method.as_deref().ok_or_else(|| {
                 CatError::InvalidClaimValue(
                     "token asserts catm but request context has no request_method".to_string(),
                 )
@@ -514,7 +651,8 @@ impl MoqtValidator {
         // 7. cath — header restrictions.
         if claims.cat.cath.is_some() {
             let headers: Vec<(&str, &str)> = ctx
-                .request_headers
+                .http
+                .headers
                 .iter()
                 .map(|(k, v)| (k.as_str(), v.as_str()))
                 .collect();
@@ -522,7 +660,7 @@ impl MoqtValidator {
         }
 
         // 8. catnip — peer network identity restrictions.
-        enforce_catnip(claims, ctx.peer_ip, ctx.peer_asn)?;
+        enforce_catnip(claims, ctx.transport.peer_ip, ctx.transport.peer_asn)?;
 
         // 9. catpor — probability of rejection. Fail-closed: if the token
         //    carries catpor and no block list is provided, the caller has
@@ -1221,12 +1359,7 @@ mod tests {
         token: &CatToken,
         request: &RelayRequestContext,
     ) -> Result<AuthorizedRequest, CatError> {
-        validator.authorize::<dyn ReplayGuard>(
-            &ValidatedToken::from_unchecked(token.clone()),
-            request,
-            None,
-            None,
-        )
+        validator.authorize(&ValidatedToken::from_unchecked(token.clone()), request)
     }
 
     #[test]
@@ -1308,8 +1441,8 @@ mod tests {
         );
         let result = authorize_no_guard(&validator, &token, &request).unwrap();
 
-        assert!(result.requires_revalidation);
-        assert_eq!(result.revalidation_interval, Some(300.0));
+        assert!(result.requires_revalidation());
+        assert_eq!(result.revalidation_interval(), Some(300.0));
     }
 
     #[test]
@@ -1428,7 +1561,7 @@ mod tests {
             b"/stream/1".to_vec(),
         );
         let result = authorize_no_guard(&validator, &token, &request).unwrap();
-        assert_eq!(result.matched_scope_index, 0);
+        assert_eq!(result.matched_scope_index(), 0);
 
         let request = ctx(
             MoqtAction::Fetch,
@@ -1436,6 +1569,6 @@ mod tests {
             b"/stream/1".to_vec(),
         );
         let result = authorize_no_guard(&validator, &token, &request).unwrap();
-        assert_eq!(result.matched_scope_index, 1);
+        assert_eq!(result.matched_scope_index(), 1);
     }
 }

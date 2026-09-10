@@ -168,7 +168,7 @@ fn bench_moqt_authorization(c: &mut Criterion) {
         b.iter(|| {
             black_box(
                 validator
-                    .authorize::<dyn ReplayGuard>(&single_validated, &matching_request, None, None)
+                    .authorize(&single_validated, &matching_request)
                     .unwrap(),
             )
         })
@@ -186,12 +186,7 @@ fn bench_moqt_authorization(c: &mut Criterion) {
         b.iter(|| {
             black_box(
                 validator
-                    .authorize::<dyn ReplayGuard>(
-                        &single_validated,
-                        &non_matching_request,
-                        None,
-                        None,
-                    )
+                    .authorize(&single_validated, &non_matching_request)
                     .is_err(),
             )
         })
@@ -209,12 +204,7 @@ fn bench_moqt_authorization(c: &mut Criterion) {
         b.iter(|| {
             black_box(
                 validator
-                    .authorize::<dyn ReplayGuard>(
-                        &multi_validated,
-                        &first_match_request,
-                        None,
-                        None,
-                    )
+                    .authorize(&multi_validated, &first_match_request)
                     .unwrap(),
             )
         })
@@ -232,7 +222,7 @@ fn bench_moqt_authorization(c: &mut Criterion) {
         b.iter(|| {
             black_box(
                 validator
-                    .authorize::<dyn ReplayGuard>(&multi_validated, &last_match_request, None, None)
+                    .authorize(&multi_validated, &last_match_request)
                     .unwrap(),
             )
         })
@@ -250,7 +240,7 @@ fn bench_moqt_authorization(c: &mut Criterion) {
         b.iter(|| {
             black_box(
                 validator
-                    .authorize::<dyn ReplayGuard>(&multi_validated, &no_match_request, None, None)
+                    .authorize(&multi_validated, &no_match_request)
                     .is_err(),
             )
         })
@@ -296,10 +286,7 @@ fn bench_moqt_throughput(c: &mut Criterion) {
                 b.iter(|| {
                     let mut authorized = 0;
                     for req in &requests {
-                        if validator
-                            .authorize::<dyn ReplayGuard>(&validated, req, None, None)
-                            .is_ok()
-                        {
+                        if validator.authorize(&validated, req).is_ok() {
                             authorized += 1;
                         }
                     }
@@ -373,10 +360,7 @@ fn bench_moqt_concurrent_authorize(c: &mut Criterion) {
                             thread::spawn(move || {
                                 let mut authorized = 0usize;
                                 for req in requests.iter() {
-                                    if validator
-                                        .authorize::<dyn ReplayGuard>(&validated, req, None, None)
-                                        .is_ok()
-                                    {
+                                    if validator.authorize(&validated, req).is_ok() {
                                         authorized += 1;
                                     }
                                 }

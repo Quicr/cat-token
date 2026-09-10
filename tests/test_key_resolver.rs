@@ -44,7 +44,7 @@ fn test_single_resolver_accepts_matching_alg() {
     let encoded = encode_token(&token, &key).unwrap();
 
     let resolver = SingleKeyResolver::new(Es256Algorithm::new_verifier(*key.verifying_key()));
-    let verified = decode_token_with_resolver(&encoded, &resolver).unwrap();
+    let verified = Decoder::with_resolver(&resolver).decode(&encoded).unwrap();
     assert_eq!(
         verified.into_unvalidated_token().core.iss,
         Some(ISS.to_string())
@@ -71,7 +71,7 @@ fn test_single_resolver_rejects_alg_mismatch() {
     assert!(matches!(err, CatError::AlgorithmMismatch { .. }));
 
     // And end-to-end decode fails, too.
-    let result = decode_token_with_resolver(&encoded, &resolver);
+    let result = Decoder::with_resolver(&resolver).decode(&encoded);
     assert!(result.is_err());
 }
 
@@ -83,7 +83,7 @@ fn test_single_resolver_require_issuer_matches() {
 
     let resolver = SingleKeyResolver::new(Es256Algorithm::new_verifier(*key.verifying_key()))
         .require_issuer(ISS);
-    assert!(decode_token_with_resolver(&encoded, &resolver).is_ok());
+    assert!(Decoder::with_resolver(&resolver).decode(&encoded).is_ok());
 }
 
 #[test]
@@ -95,7 +95,9 @@ fn test_single_resolver_require_issuer_mismatch_rejected() {
 
     let resolver = SingleKeyResolver::new(Es256Algorithm::new_verifier(*key.verifying_key()))
         .require_issuer(ISS);
-    let err = decode_token_with_resolver(&encoded, &resolver).unwrap_err();
+    let err = Decoder::with_resolver(&resolver)
+        .decode(&encoded)
+        .unwrap_err();
     assert!(
         matches!(err, CatError::CryptoError(_)),
         "expected issuer-mismatch CryptoError, got {err:?}"
@@ -114,7 +116,9 @@ fn test_single_resolver_require_issuer_missing_rejected() {
 
     let resolver = SingleKeyResolver::new(Es256Algorithm::new_verifier(*key.verifying_key()))
         .require_issuer(ISS);
-    let err = decode_token_with_resolver(&encoded, &resolver).unwrap_err();
+    let err = Decoder::with_resolver(&resolver)
+        .decode(&encoded)
+        .unwrap_err();
     assert!(matches!(err, CatError::MissingRequiredClaim(_)));
 }
 
@@ -128,7 +132,9 @@ fn test_single_resolver_require_kid_missing_rejected() {
 
     let resolver = SingleKeyResolver::new(Es256Algorithm::new_verifier(*key.verifying_key()))
         .require_kid(KID.to_vec());
-    let err = decode_token_with_resolver(&encoded, &resolver).unwrap_err();
+    let err = Decoder::with_resolver(&resolver)
+        .decode(&encoded)
+        .unwrap_err();
     assert!(matches!(err, CatError::CryptoError(_)));
 }
 
@@ -290,7 +296,7 @@ fn test_full_pipeline_with_keyring_and_peeked_iss() {
     let resolver = SingleKeyResolver::new(Es256Algorithm::new_verifier(*key.verifying_key()))
         .require_issuer(ISS);
 
-    let verified = decode_token_with_resolver(&encoded, &resolver).unwrap();
+    let verified = Decoder::with_resolver(&resolver).decode(&encoded).unwrap();
     let validator = CatTokenValidator::new()
         .with_expected_issuers(vec![ISS.to_string()])
         .with_expected_audiences(vec!["relay.example.com".to_string()]);
@@ -307,5 +313,5 @@ fn test_single_resolver_wrong_key_fails() {
     let encoded = encode_token(&token, &signing_key).unwrap();
 
     let resolver = SingleKeyResolver::new(wrong_key);
-    assert!(decode_token_with_resolver(&encoded, &resolver).is_err());
+    assert!(Decoder::with_resolver(&resolver).decode(&encoded).is_err());
 }

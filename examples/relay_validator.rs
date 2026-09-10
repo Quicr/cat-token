@@ -45,7 +45,7 @@ fn main() {
         b"live.sports.example.com",
         b"/football/match123",
     ) {
-        Ok(result) => println!("ALLOWED (scope {})", result.matched_scope_index),
+        Ok(result) => println!("ALLOWED (scope {})", result.matched_scope_index()),
         Err(e) => println!("DENIED - {}", e),
     }
 
@@ -140,7 +140,7 @@ fn validate_and_authorize(
         track.to_vec(),
     );
     moqt_validator
-        .authorize::<dyn ReplayGuard>(&validated, &request, None, None)
+        .authorize(&validated, &request)
         .map_err(|e| e.to_string())
 }
 

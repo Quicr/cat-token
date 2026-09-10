@@ -74,7 +74,7 @@ fn baseline_ctx() -> RelayRequestContext {
 }
 
 fn ok(token: &CatToken, ctx: &RelayRequestContext) -> Result<AuthorizedRequest, CatError> {
-    MoqtValidator::new().authorize::<MemReplayGuard>(&make_validated(token), ctx, None, None)
+    MoqtValidator::new().authorize(&make_validated(token), ctx)
 }
 
 #[test]
@@ -82,9 +82,9 @@ fn test_baseline_authorizes() {
     let token = baseline_token();
     let ctx = baseline_ctx();
     let result = ok(&token, &ctx).expect("baseline must authorize");
-    assert_eq!(result.matched_scope_index, 0);
-    assert!(!result.reuse_detected);
-    assert!(!result.requires_revalidation);
+    assert_eq!(result.matched_scope_index(), 0);
+    assert!(!result.reuse_detected());
+    assert!(!result.requires_revalidation());
 }
 
 // --- catv ---
@@ -276,10 +276,16 @@ fn test_authorize_catpor_with_block_list_zero_probability() {
     });
 
     let list = CatPorBlockList::new();
+    let guard = MemReplayGuard::new();
     let result = MoqtValidator::new()
-        .authorize::<MemReplayGuard>(&make_validated(&token), &baseline_ctx(), None, Some(&list))
+        .authorize_with_replay(
+            &make_validated(&token),
+            &baseline_ctx(),
+            &guard,
+            Some(&list),
+        )
         .expect("catpor with zero probability must not reject");
-    assert_eq!(result.matched_scope_index, 0);
+    assert_eq!(result.matched_scope_index(), 0);
 }
 
 // --- catreplay ---
@@ -292,11 +298,11 @@ fn test_authorize_catreplay_prohibited_first_call_allowed() {
 
     let guard = MemReplayGuard::new();
     MoqtValidator::new()
-        .authorize(&make_validated(&token), &baseline_ctx(), Some(&guard), None)
+        .authorize_with_replay(&make_validated(&token), &baseline_ctx(), &guard, None)
         .expect("first call must succeed");
 
     let err = MoqtValidator::new()
-        .authorize(&make_validated(&token), &baseline_ctx(), Some(&guard), None)
+        .authorize_with_replay(&make_validated(&token), &baseline_ctx(), &guard, None)
         .unwrap_err();
     assert!(matches!(err, CatError::ReplayAttackDetected));
 }
@@ -309,14 +315,14 @@ fn test_authorize_catreplay_reuse_detection_flags_but_allows() {
 
     let guard = MemReplayGuard::new();
     let first = MoqtValidator::new()
-        .authorize(&make_validated(&token), &baseline_ctx(), Some(&guard), None)
+        .authorize_with_replay(&make_validated(&token), &baseline_ctx(), &guard, None)
         .expect("first call must succeed");
-    assert!(!first.reuse_detected);
+    assert!(!first.reuse_detected());
 
     let second = MoqtValidator::new()
-        .authorize(&make_validated(&token), &baseline_ctx(), Some(&guard), None)
+        .authorize_with_replay(&make_validated(&token), &baseline_ctx(), &guard, None)
         .expect("reuse detection still authorizes");
-    assert!(second.reuse_detected);
+    assert!(second.reuse_detected());
 }
 
 #[test]
@@ -337,7 +343,7 @@ fn test_authorize_catreplay_missing_cti_rejects() {
 
     let guard = MemReplayGuard::new();
     let err = MoqtValidator::new()
-        .authorize(&make_validated(&token), &baseline_ctx(), Some(&guard), None)
+        .authorize_with_replay(&make_validated(&token), &baseline_ctx(), &guard, None)
         .unwrap_err();
     assert!(matches!(err, CatError::MissingRequiredClaim(_)));
 }
@@ -355,8 +361,8 @@ fn test_authorize_returns_catr_renewal() {
         .unwrap();
 
     let result = ok(&token, &baseline_ctx()).expect("baseline authorizes");
-    assert!(result.renewal.is_some());
-    assert_eq!(result.renewal.unwrap().expadd(), Some(600.0));
+    assert!(result.renewal().is_some());
+    assert_eq!(result.renewal().unwrap().expadd(), Some(600.0));
 }
 
 // --- catif lookup helper ---
@@ -455,7 +461,7 @@ fn test_replay_not_committed_when_scope_fails() {
 
     let bad_ctx = baseline_ctx();
     let err = MoqtValidator::new()
-        .authorize(&make_validated(&token), &bad_ctx, Some(&guard), None)
+        .authorize_with_replay(&make_validated(&token), &bad_ctx, &guard, None)
         .unwrap_err();
     assert!(matches!(err, CatError::MoqtActionNotAuthorized(_)));
 
@@ -472,12 +478,7 @@ fn test_replay_not_committed_when_scope_fails() {
     good_token.cat.catreplay = Some(ReplayProtection::Prohibited);
 
     MoqtValidator::new()
-        .authorize(
-            &make_validated(&good_token),
-            &baseline_ctx(),
-            Some(&guard),
-            None,
-        )
+        .authorize_with_replay(&make_validated(&good_token), &baseline_ctx(), &guard, None)
         .expect("legitimate follow-up must not be flagged as replay");
 }
 
@@ -496,12 +497,7 @@ fn test_replay_not_committed_when_audience_fails() {
 
     let guard = MemReplayGuard::new();
     let err = MoqtValidator::new()
-        .authorize(
-            &make_validated(&wrong_aud),
-            &baseline_ctx(),
-            Some(&guard),
-            None,
-        )
+        .authorize_with_replay(&make_validated(&wrong_aud), &baseline_ctx(), &guard, None)
         .unwrap_err();
     assert!(matches!(err, CatError::InvalidAudience));
 
@@ -515,12 +511,7 @@ fn test_replay_not_committed_when_audience_fails() {
     right_aud.cat.catreplay = Some(ReplayProtection::Prohibited);
 
     MoqtValidator::new()
-        .authorize(
-            &make_validated(&right_aud),
-            &baseline_ctx(),
-            Some(&guard),
-            None,
-        )
+        .authorize_with_replay(&make_validated(&right_aud), &baseline_ctx(), &guard, None)
         .expect("legitimate follow-up must not be flagged as replay");
 }
 
@@ -581,12 +572,12 @@ fn test_transient_cti_commit_failure_leaves_no_state_for_retry() {
     let validated = make_validated(&token);
     let validator = MoqtValidator::new();
 
-    let first = validator.authorize(&validated, &baseline_ctx(), Some(&guard), None);
+    let first = validator.authorize_with_replay(&validated, &baseline_ctx(), &guard, None);
     assert!(
         matches!(first, Err(CatError::CryptoError(_))),
         "first attempt should surface the backend error, got: {first:?}"
     );
 
-    let second = validator.authorize(&validated, &baseline_ctx(), Some(&guard), None);
+    let second = validator.authorize_with_replay(&validated, &baseline_ctx(), &guard, None);
     second.expect("retry after transient failure must not be flagged as replay");
 }
