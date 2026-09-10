@@ -1,11 +1,13 @@
 // SPDX-FileCopyrightText: Copyright (c) 2022 Quicr
 // SPDX-License-Identifier: BSD-2-Clause
 
+use crate::claims::{CatIfAction, CatRenewal};
+use crate::token::{
+    enforce_catnip, enforce_catpor, enforce_catu, validate_all_headers, validate_method,
+};
 use crate::{
-    BinaryMatch, CatDpopSettings, CatError, CatIfAction, CatPorBlockList, CatRenewal, CatToken,
-    DpopProof, DpopValidator, MoqtAction, MoqtScope, NamespaceMatch, ReplayGuard, ValidatedToken,
-    confirmation_matches_jwk, enforce_catnip, enforce_catpor, enforce_catu, validate_all_headers,
-    validate_method,
+    BinaryMatch, CatDpopSettings, CatError, CatPorBlockList, CatToken, DpopProof, DpopValidator,
+    MoqtAction, MoqtScope, NamespaceMatch, ReplayGuard, ValidatedToken, confirmation_matches_jwk,
 };
 
 /// Replay-commit obligation carried out of the sync pre-commit pipeline. Two
@@ -15,6 +17,12 @@ use crate::{
 ///
 /// Consumed by [`MoqtValidator::commit`] and the async equivalent so both
 /// paths honour the same JTI-then-`cti` ordering (see [`MoqtValidator::authorize`]).
+///
+/// This type is part of the precommit/commit split used by async
+/// integrations. Ordinary sync callers of
+/// [`MoqtValidator::authorize`] / [`MoqtValidator::authorize_with_replay`]
+/// never observe it and should not use it directly.
+#[doc(hidden)]
 #[derive(Debug, Clone)]
 pub enum CatReplayObligation {
     /// Duplicate `cti` MUST fail the request with
@@ -32,6 +40,10 @@ pub enum CatReplayObligation {
 /// [`crate::r#async::AsyncMoqtValidator::commit_async`] (async). Splitting
 /// the pipeline this way lets async integrations reuse every non-storage
 /// check without duplicating ~250 lines of policy logic.
+///
+/// Ordinary sync callers of [`MoqtValidator::authorize`] never observe
+/// this type; it is only public for the async integration path.
+#[doc(hidden)]
 #[derive(Debug, Clone)]
 pub struct PreCommit {
     scope_index: usize,
@@ -146,126 +158,47 @@ impl AuthorizedRequest {
     }
 }
 
-/// Transport-layer identity of the peer, used to enforce token claims that
-/// bind the token to a specific client fingerprint (`catalpn`, `catnip`).
-/// Every field is optional; a missing value is a hard failure only when
-/// the token claim requires it — otherwise it is ignored.
-#[derive(Debug, Clone, Default)]
-pub struct TransportInfo {
-    /// TLS ALPN identifier negotiated with the peer.
-    pub peer_tls_alpn: Option<Vec<u8>>,
-    /// Peer IP address.
-    pub peer_ip: Option<std::net::IpAddr>,
-    /// Peer autonomous system number.
-    pub peer_asn: Option<u32>,
-}
-
-impl TransportInfo {
-    pub fn new() -> Self {
-        Self::default()
-    }
-    pub fn with_alpn(mut self, alpn: Vec<u8>) -> Self {
-        self.peer_tls_alpn = Some(alpn);
-        self
-    }
-    pub fn with_ip(mut self, ip: std::net::IpAddr) -> Self {
-        self.peer_ip = Some(ip);
-        self
-    }
-    pub fn with_asn(mut self, asn: u32) -> Self {
-        self.peer_asn = Some(asn);
-        self
-    }
-}
-
-/// HTTP-shape fields of the peer request, used to enforce `catu` (URI),
-/// `catm` (method), and `cath` (headers). Every field is optional; a
-/// missing value is a hard failure only when the token claim requires it.
-#[derive(Debug, Clone, Default)]
-pub struct HttpRequest {
-    /// Fully-qualified request URI (required for `catu`).
-    pub uri: Option<String>,
-    /// HTTP method or equivalent transport verb (required for `catm`).
-    pub method: Option<String>,
-    /// Complete request header set. Every rule in `cath` must be satisfied
-    /// by at least one header here; case-insensitive per RFC 9110 §5.1.
-    pub headers: Vec<(String, String)>,
-}
-
-impl HttpRequest {
-    pub fn new() -> Self {
-        Self::default()
-    }
-    pub fn with_uri(mut self, uri: impl Into<String>) -> Self {
-        self.uri = Some(uri.into());
-        self
-    }
-    pub fn with_method(mut self, method: impl Into<String>) -> Self {
-        self.method = Some(method.into());
-        self
-    }
-    pub fn with_headers(mut self, headers: Vec<(String, String)>) -> Self {
-        self.headers = headers;
-        self
-    }
-}
-
 /// Context for a relay authorization request, used with
 /// [`MoqtValidator::authorize`] and
 /// [`MoqtValidator::authorize_with_replay`].
 ///
-/// This is the only supported entry point for authorization. Fields describe the
-/// full request context — a missing field represents an unknown value, not a
-/// wildcard, and will cause authorization to fail closed when a token claim
-/// requires that context (e.g. `catalpn` requires
-/// [`TransportInfo::peer_tls_alpn`]).
+/// This is the only supported entry point for authorization. All fields
+/// describe the full request context — a missing field represents an
+/// unknown value, not a wildcard, and will cause authorization to fail
+/// closed when a token claim requires that context (e.g. `catalpn`
+/// requires a peer TLS ALPN).
 ///
-/// The struct groups related inputs into [`TransportInfo`] (TLS/network
-/// identity) and [`HttpRequest`] (URI/method/headers). Chain the grouped
-/// builders for readability:
+/// Construction is fluent: pass the mandatory fields to [`Self::new`],
+/// then chain the `with_*` setters for whatever the request carries.
 ///
 /// ```ignore
-/// RelayRequestContext::new("relay.example.com", MoqtAction::Publish, ns, track)
-///     .transport(
-///         TransportInfo::new()
-///             .with_ip(peer_ip)
-///             .with_asn(peer_asn)
-///             .with_alpn(alpn),
-///     )
-///     .http(
-///         HttpRequest::new()
-///             .with_uri(req.uri.to_string())
-///             .with_method(req.method.as_str())
-///             .with_headers(header_pairs),
-///     );
+/// let ctx = RelayRequestContext::new("relay.example.com", MoqtAction::Publish, ns, track)
+///     .with_peer_ip(peer_ip)
+///     .with_peer_asn(peer_asn)
+///     .with_peer_tls_alpn(alpn)
+///     .with_request_uri(req.uri.to_string())
+///     .with_request_method(req.method.as_str())
+///     .with_request_headers(header_pairs)
+///     .with_dpop_proof(proof);
 /// ```
+///
+/// Fields are private; access them through the getter methods. This keeps
+/// the struct growable without breaking downstream matches.
 #[derive(Debug, Clone)]
 pub struct RelayRequestContext {
-    /// Canonical relay endpoint the client connected to. Matched against the
-    /// token's `aud` claim (if present).
-    pub relay_endpoint: String,
-    /// The MOQT action being requested.
-    pub action: MoqtAction,
-    /// The full track name namespace tuple.
-    pub namespace: Vec<Vec<u8>>,
-    /// The track name.
-    pub track: Vec<u8>,
-    /// TLS/network identity for `catalpn` and `catnip` enforcement.
-    pub transport: TransportInfo,
-    /// HTTP-shape fields for `catu`, `catm`, and `cath` enforcement.
-    pub http: HttpRequest,
-    /// Optional tenant/connection identity carried from a trusted upstream.
-    /// Not enforced by the library — passed through to metrics/audit hooks by
-    /// the caller. Present for callers that partition replay state by tenant.
-    pub tenant_id: Option<String>,
-    /// DPoP proof of possession. Required if the token has a `cnf` claim.
-    pub dpop_proof: Option<DpopProof>,
-    /// Server-issued DPoP nonce challenge for this request (RFC 9449 §8).
-    /// When set, the DPoP proof MUST carry a matching `nonce` claim;
-    /// otherwise authorization fails closed with
-    /// [`CatError::DpopValidationFailed`]. `None` disables the check —
-    /// callers that don't rotate nonces per-request leave this unset.
-    pub expected_dpop_nonce: Option<String>,
+    pub(crate) relay_endpoint: String,
+    pub(crate) action: MoqtAction,
+    pub(crate) namespace: Vec<Vec<u8>>,
+    pub(crate) track: Vec<u8>,
+    pub(crate) peer_tls_alpn: Option<Vec<u8>>,
+    pub(crate) peer_ip: Option<std::net::IpAddr>,
+    pub(crate) peer_asn: Option<u32>,
+    pub(crate) request_uri: Option<String>,
+    pub(crate) request_method: Option<String>,
+    pub(crate) request_headers: Vec<(String, String)>,
+    pub(crate) tenant_id: Option<String>,
+    pub(crate) dpop_proof: Option<DpopProof>,
+    pub(crate) expected_dpop_nonce: Option<String>,
 }
 
 impl RelayRequestContext {
@@ -280,28 +213,45 @@ impl RelayRequestContext {
             action,
             namespace,
             track,
-            transport: TransportInfo::default(),
-            http: HttpRequest::default(),
+            peer_tls_alpn: None,
+            peer_ip: None,
+            peer_asn: None,
+            request_uri: None,
+            request_method: None,
+            request_headers: Vec::new(),
             tenant_id: None,
             dpop_proof: None,
             expected_dpop_nonce: None,
         }
     }
 
-    /// Replace the transport-layer identity block wholesale.
-    pub fn transport(mut self, transport: TransportInfo) -> Self {
-        self.transport = transport;
-        self
-    }
-
-    /// Replace the HTTP-shape block wholesale.
-    pub fn http(mut self, http: HttpRequest) -> Self {
-        self.http = http;
-        self
-    }
-
     pub fn with_peer_tls_alpn(mut self, alpn: Vec<u8>) -> Self {
-        self.transport.peer_tls_alpn = Some(alpn);
+        self.peer_tls_alpn = Some(alpn);
+        self
+    }
+
+    pub fn with_peer_ip(mut self, ip: std::net::IpAddr) -> Self {
+        self.peer_ip = Some(ip);
+        self
+    }
+
+    pub fn with_peer_asn(mut self, asn: u32) -> Self {
+        self.peer_asn = Some(asn);
+        self
+    }
+
+    pub fn with_request_uri(mut self, uri: impl Into<String>) -> Self {
+        self.request_uri = Some(uri.into());
+        self
+    }
+
+    pub fn with_request_method(mut self, method: impl Into<String>) -> Self {
+        self.request_method = Some(method.into());
+        self
+    }
+
+    pub fn with_request_headers(mut self, headers: Vec<(String, String)>) -> Self {
+        self.request_headers = headers;
         self
     }
 
@@ -315,31 +265,6 @@ impl RelayRequestContext {
         self
     }
 
-    pub fn with_request_uri(mut self, uri: impl Into<String>) -> Self {
-        self.http.uri = Some(uri.into());
-        self
-    }
-
-    pub fn with_request_method(mut self, method: impl Into<String>) -> Self {
-        self.http.method = Some(method.into());
-        self
-    }
-
-    pub fn with_request_headers(mut self, headers: Vec<(String, String)>) -> Self {
-        self.http.headers = headers;
-        self
-    }
-
-    pub fn with_peer_ip(mut self, ip: std::net::IpAddr) -> Self {
-        self.transport.peer_ip = Some(ip);
-        self
-    }
-
-    pub fn with_peer_asn(mut self, asn: u32) -> Self {
-        self.transport.peer_asn = Some(asn);
-        self
-    }
-
     /// Require the DPoP proof to echo the supplied server nonce (RFC 9449
     /// §8). Call this after the relay has generated (or rotated) a per-
     /// request challenge and included it in the `DPoP-Nonce` response
@@ -349,6 +274,67 @@ impl RelayRequestContext {
     pub fn with_expected_dpop_nonce(mut self, nonce: impl Into<String>) -> Self {
         self.expected_dpop_nonce = Some(nonce.into());
         self
+    }
+
+    /// Canonical relay endpoint the client connected to. Matched against
+    /// the token's `aud` claim (if present).
+    pub fn relay_endpoint(&self) -> &str {
+        &self.relay_endpoint
+    }
+
+    /// The MOQT action being requested.
+    pub fn action(&self) -> MoqtAction {
+        self.action
+    }
+
+    /// The full track-namespace tuple (segments in order).
+    pub fn namespace(&self) -> &[Vec<u8>] {
+        &self.namespace
+    }
+
+    /// The track name.
+    pub fn track(&self) -> &[u8] {
+        &self.track
+    }
+
+    pub fn peer_tls_alpn(&self) -> Option<&[u8]> {
+        self.peer_tls_alpn.as_deref()
+    }
+
+    pub fn peer_ip(&self) -> Option<std::net::IpAddr> {
+        self.peer_ip
+    }
+
+    pub fn peer_asn(&self) -> Option<u32> {
+        self.peer_asn
+    }
+
+    pub fn request_uri(&self) -> Option<&str> {
+        self.request_uri.as_deref()
+    }
+
+    pub fn request_method(&self) -> Option<&str> {
+        self.request_method.as_deref()
+    }
+
+    pub fn request_headers(&self) -> &[(String, String)] {
+        &self.request_headers
+    }
+
+    /// Optional tenant/connection identity carried from a trusted upstream.
+    /// Not enforced by the library — passed through to metrics/audit hooks
+    /// by the caller. Present for callers that partition replay state by
+    /// tenant.
+    pub fn tenant_id(&self) -> Option<&str> {
+        self.tenant_id.as_deref()
+    }
+
+    pub fn dpop_proof(&self) -> Option<&DpopProof> {
+        self.dpop_proof.as_ref()
+    }
+
+    pub fn expected_dpop_nonce(&self) -> Option<&str> {
+        self.expected_dpop_nonce.as_deref()
     }
 }
 
@@ -414,8 +400,16 @@ impl MoqtValidator {
     /// Enable DPoP validation with a caller-supplied **strict**
     /// [`JtiStore`]. The store MUST return `true` from
     /// [`crate::JtiStore::is_strict`]; otherwise this returns
-    /// [`CatError::CryptoError`] rather than silently accept a store that
-    /// could shed retained JTIs.
+    /// [`CatError::ConfigurationRefused`] rather than silently accept a
+    /// store that could shed retained JTIs.
+    ///
+    /// Async counterpart: [`crate::AsyncMoqtValidator::strict`] applies
+    /// the same is_strict() gate to an [`crate::AsyncJtiStore`]. The two
+    /// share the same contract; a deployment mixing sync and async
+    /// authorize paths MUST share the same underlying store instance
+    /// (typically by implementing both traits on one type and passing
+    /// the same `Arc`), otherwise a JTI accepted on one path can be
+    /// replayed on the other.
     ///
     /// Use this constructor for any deployment that shares replay state
     /// across relays or that must survive a single-relay restart without
@@ -432,7 +426,7 @@ impl MoqtValidator {
     ///
     /// - Atomic insert-if-absent across all relay nodes that share the
     ///   store (a `SETNX`-equivalent with TTL, not `GET` then `SET`).
-    /// - `check_and_insert` returns [`CatError::CryptoError`] on backend
+    /// - `check_and_insert` returns [`CatError::BackendUnavailable`] on backend
     ///   unavailability so authorization fails closed (see
     ///   [`crate::dpop::JtiStore::check_and_insert`]).
     /// - Store TTL ≥ DPoP acceptance window + tolerated clock skew.
@@ -457,15 +451,30 @@ impl MoqtValidator {
         self
     }
 
-    /// Allow tokens without an `aud` claim. Tokens that DO carry `aud` are still
-    /// checked against the relay endpoint. Use only if the deployment intentionally
-    /// issues audience-less tokens; the default (audience required) is fail-closed.
-    pub fn allow_missing_audience(mut self) -> Self {
+    /// Accept tokens that omit the `aud` claim. Tokens that DO carry
+    /// `aud` are still checked against the relay endpoint. Use only if
+    /// the deployment intentionally issues audience-less tokens; the
+    /// default (audience required) is the fail-closed posture.
+    ///
+    /// # Danger
+    ///
+    /// Audience binding is the primary defense against a token stolen
+    /// from one relay being replayed against another. Turning it off
+    /// makes any accepted token valid at every relay that shares an
+    /// issuer, which is almost never what a CDN deployment wants.
+    /// The name deliberately shouts so that grep, code review, and IDE
+    /// autocomplete all flag the call.
+    pub fn dangerously_allow_missing_audience(mut self) -> Self {
         self.require_audience_binding = false;
         self
     }
 
-    /// Validate MOQT-specific claims in the token
+    /// Validate MOQT-specific claims in the token. Exposed for
+    /// integration tests that exercise the `moqt-reval` policy gates
+    /// in isolation. Production code should call
+    /// [`MoqtValidator::authorize`] instead — this entry point does not
+    /// commit replay state or evaluate transport-scoped claims.
+    #[doc(hidden)]
     pub fn validate_moqt_claims(&self, token: &CatToken) -> Result<(), CatError> {
         // Check moqt-reval claim constraints per spec
         if let Some(reval) = token.moqt.moqt_reval {
@@ -616,7 +625,7 @@ impl MoqtValidator {
 
         // 4. ALPN.
         if let Some(ref token_alpns) = claims.cat.catalpn {
-            let peer_alpn = ctx.transport.peer_tls_alpn.as_ref().ok_or_else(|| {
+            let peer_alpn = ctx.peer_tls_alpn.as_ref().ok_or_else(|| {
                 CatError::InvalidClaimValue(
                     "token requires ALPN binding but no peer ALPN provided".to_string(),
                 )
@@ -630,7 +639,7 @@ impl MoqtValidator {
 
         // 5. catu — URI-component restrictions.
         if claims.cat.catu.is_some() {
-            let uri = ctx.http.uri.as_deref().ok_or_else(|| {
+            let uri = ctx.request_uri.as_deref().ok_or_else(|| {
                 CatError::InvalidClaimValue(
                     "token asserts catu but request context has no request_uri".to_string(),
                 )
@@ -640,7 +649,7 @@ impl MoqtValidator {
 
         // 6. catm — HTTP method restrictions.
         if claims.cat.catm.is_some() {
-            let method = ctx.http.method.as_deref().ok_or_else(|| {
+            let method = ctx.request_method.as_deref().ok_or_else(|| {
                 CatError::InvalidClaimValue(
                     "token asserts catm but request context has no request_method".to_string(),
                 )
@@ -651,8 +660,7 @@ impl MoqtValidator {
         // 7. cath — header restrictions.
         if claims.cat.cath.is_some() {
             let headers: Vec<(&str, &str)> = ctx
-                .http
-                .headers
+                .request_headers
                 .iter()
                 .map(|(k, v)| (k.as_str(), v.as_str()))
                 .collect();
@@ -660,7 +668,7 @@ impl MoqtValidator {
         }
 
         // 8. catnip — peer network identity restrictions.
-        enforce_catnip(claims, ctx.transport.peer_ip, ctx.transport.peer_asn)?;
+        enforce_catnip(claims, ctx.peer_ip, ctx.peer_asn)?;
 
         // 9. catpor — probability of rejection. Fail-closed: if the token
         //    carries catpor and no block list is provided, the caller has
@@ -758,7 +766,7 @@ impl MoqtValidator {
             // below). Skipping the equality checks here lets a well-formed
             // setup proof authorize without a fake matching namespace.
             match ctx.action.resource_shape() {
-                crate::MoqtResourceShape::Endpoint => {}
+                crate::claims::MoqtResourceShape::Endpoint => {}
                 _ => {
                     if proof.payload.actx.tns != ctx.namespace {
                         return Err(CatError::DpopValidationFailed(
@@ -1248,7 +1256,7 @@ fn parse_moqt_resource_uri(uri: &str) -> Result<MoqtResourceUri, CatError> {
 /// Setup actions must not name a namespace or track; namespace actions must
 /// name a namespace but no track; track actions must name both.
 fn enforce_resource_shape(action: MoqtAction, parsed: &MoqtResourceUri) -> Result<(), CatError> {
-    use crate::MoqtResourceShape::*;
+    use crate::claims::MoqtResourceShape::*;
     match action.resource_shape() {
         Endpoint => {
             if parsed.namespace.is_some() || parsed.track.is_some() {
@@ -1291,7 +1299,7 @@ fn enforce_actx_shape(
     action: MoqtAction,
     actx: &crate::dpop::AuthorizationContext,
 ) -> Result<(), CatError> {
-    use crate::MoqtResourceShape::*;
+    use crate::claims::MoqtResourceShape::*;
     match action.resource_shape() {
         Endpoint => {
             if !actx.tns.is_empty() {

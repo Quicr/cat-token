@@ -38,12 +38,12 @@ impl std::fmt::Debug for Jwk {
 impl Jwk {
     pub fn from_es256_verifying_key(key: &VerifyingKey) -> Result<Self, CatError> {
         let point: EncodedPoint = key.into();
-        let x_bytes = point
-            .x()
-            .ok_or_else(|| CatError::CryptoError("Missing x coordinate in EC point".to_string()))?;
-        let y_bytes = point
-            .y()
-            .ok_or_else(|| CatError::CryptoError("Missing y coordinate in EC point".to_string()))?;
+        let x_bytes = point.x().ok_or_else(|| {
+            CatError::KeyOperationFailed("Missing x coordinate in EC point".to_string())
+        })?;
+        let y_bytes = point.y().ok_or_else(|| {
+            CatError::KeyOperationFailed("Missing y coordinate in EC point".to_string())
+        })?;
 
         Ok(Self {
             kty: "EC".to_string(),
@@ -174,7 +174,7 @@ impl Jwk {
         let e_uint = rsa::BigUint::from_bytes_be(&e_bytes);
 
         RsaPublicKey::new(n_uint, e_uint)
-            .map_err(|e| CatError::CryptoError(format!("Invalid RSA public key: {}", e)))
+            .map_err(|e| CatError::KeyOperationFailed(format!("Invalid RSA public key: {}", e)))
     }
 
     pub fn to_verifying_key(&self) -> Result<VerifyingKey, CatError> {
@@ -206,7 +206,7 @@ impl Jwk {
         uncompressed.extend_from_slice(&y_bytes);
 
         VerifyingKey::from_sec1_bytes(&uncompressed)
-            .map_err(|e| CatError::CryptoError(e.to_string()))
+            .map_err(|e| CatError::KeyOperationFailed(e.to_string()))
     }
 }
 

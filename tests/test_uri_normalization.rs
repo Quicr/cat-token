@@ -1,5 +1,6 @@
 // Tests for URI normalization per RFC 3986 §6.2.2-6.2.3 and RFC 9110 §4.2.3.
 
+use cat_token::uri::{decompose_uri, normalize_uri};
 use cat_token::*;
 
 #[test]

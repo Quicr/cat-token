@@ -9,7 +9,7 @@
 //! network-backed replay stores — see `examples/async_relay_validator.rs`
 //! (enabled by `--features async`).
 
-use cat_token::prelude::*;
+use cat_token::*;
 use chrono::{Duration, Utc};
 
 fn main() {

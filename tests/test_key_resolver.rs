@@ -7,7 +7,7 @@
 //! omits `iss`, reuses another tenant's `kid`, or carries an unrelated `alg`
 //! must not land on any registered key.
 
-use cat_token::prelude::*;
+use cat_token::*;
 use chrono::{Duration, Utc};
 
 const ISS: &str = "https://test.com";
@@ -99,8 +99,8 @@ fn test_single_resolver_require_issuer_mismatch_rejected() {
         .decode(&encoded)
         .unwrap_err();
     assert!(
-        matches!(err, CatError::CryptoError(_)),
-        "expected issuer-mismatch CryptoError, got {err:?}"
+        matches!(err, CatError::ConfigurationRefused(_)),
+        "expected issuer-mismatch ConfigurationRefused, got {err:?}"
     );
 }
 
@@ -135,7 +135,7 @@ fn test_single_resolver_require_kid_missing_rejected() {
     let err = Decoder::with_resolver(&resolver)
         .decode(&encoded)
         .unwrap_err();
-    assert!(matches!(err, CatError::CryptoError(_)));
+    assert!(matches!(err, CatError::ConfigurationRefused(_)));
 }
 
 #[test]
@@ -188,7 +188,7 @@ fn test_keyring_cross_issuer_confusion_rejected() {
         issuer: Some("issuer-b".to_string()),
     };
     let err = resolve_err(&resolver, &hint);
-    assert!(matches!(err, CatError::CryptoError(_)));
+    assert!(matches!(err, CatError::ConfigurationRefused(_)));
 }
 
 #[test]
@@ -208,7 +208,7 @@ fn test_keyring_algorithm_mismatch_rejected() {
         issuer: Some("issuer-a".to_string()),
     };
     let err = resolve_err(&resolver, &hint);
-    assert!(matches!(err, CatError::CryptoError(_)));
+    assert!(matches!(err, CatError::ConfigurationRefused(_)));
 }
 
 #[test]
@@ -226,7 +226,7 @@ fn test_keyring_no_kid_rejected() {
         issuer: Some("issuer-a".to_string()),
     };
     let err = resolve_err(&resolver, &hint);
-    assert!(matches!(err, CatError::CryptoError(_)));
+    assert!(matches!(err, CatError::ConfigurationRefused(_)));
 }
 
 #[test]

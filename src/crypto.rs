@@ -93,8 +93,9 @@ impl HmacSha256Algorithm {
     pub fn generate_key() -> Result<SecretKey, CatError> {
         let rng = rand::SystemRandom::new();
         let mut key = vec![0u8; 32];
-        rng.fill(&mut key)
-            .map_err(|_| CatError::CryptoError("Failed to generate random key".to_string()))?;
+        rng.fill(&mut key).map_err(|_| {
+            CatError::KeyOperationFailed("Failed to generate random key".to_string())
+        })?;
         Ok(SecretKey(key))
     }
 }
@@ -102,14 +103,14 @@ impl HmacSha256Algorithm {
 impl CryptographicAlgorithm for HmacSha256Algorithm {
     fn sign(&self, data: &[u8]) -> Result<Vec<u8>, CatError> {
         let mut mac = HmacSha256::new_from_slice(&self.key)
-            .map_err(|e| CatError::CryptoError(e.to_string()))?;
+            .map_err(|e| CatError::KeyOperationFailed(e.to_string()))?;
         mac.update(data);
         Ok(mac.finalize().into_bytes().to_vec())
     }
 
     fn verify(&self, data: &[u8], signature: &[u8]) -> Result<(), CatError> {
         let mut mac = HmacSha256::new_from_slice(&self.key)
-            .map_err(|e| CatError::CryptoError(e.to_string()))?;
+            .map_err(|e| CatError::KeyOperationFailed(e.to_string()))?;
         mac.update(data);
 
         mac.verify_slice(signature)
@@ -153,13 +154,13 @@ impl Es256Algorithm {
 
     pub fn from_public_key_pem(pem: &str) -> Result<Self, CatError> {
         let verifying_key = VerifyingKey::from_public_key_pem(pem)
-            .map_err(|e| CatError::CryptoError(format!("invalid PEM: {e}")))?;
+            .map_err(|e| CatError::KeyOperationFailed(format!("invalid PEM: {e}")))?;
         Ok(Self::new_verifier(verifying_key))
     }
 
     pub fn from_public_key_der(der: &[u8]) -> Result<Self, CatError> {
         let verifying_key = VerifyingKey::from_public_key_der(der)
-            .map_err(|e| CatError::CryptoError(format!("invalid DER: {e}")))?;
+            .map_err(|e| CatError::KeyOperationFailed(format!("invalid DER: {e}")))?;
         Ok(Self::new_verifier(verifying_key))
     }
 
@@ -173,15 +174,15 @@ impl CryptographicAlgorithm for Es256Algorithm {
         let signing_key = self
             .signing_key
             .as_ref()
-            .ok_or_else(|| CatError::CryptoError("No signing key available".to_string()))?;
+            .ok_or_else(|| CatError::KeyOperationFailed("No signing key available".to_string()))?;
 
         let signature: Signature = signing_key.sign(data);
         Ok(signature.to_bytes().to_vec())
     }
 
     fn verify(&self, data: &[u8], signature: &[u8]) -> Result<(), CatError> {
-        let signature =
-            Signature::try_from(signature).map_err(|e| CatError::CryptoError(e.to_string()))?;
+        let signature = Signature::try_from(signature)
+            .map_err(|e| CatError::KeyOperationFailed(e.to_string()))?;
 
         self.verifying_key
             .verify(data, &signature)
@@ -203,7 +204,7 @@ impl Ps256Algorithm {
     pub fn new_with_key_pair() -> Result<Self, CatError> {
         let bits = 2048;
         let private_key = RsaPrivateKey::new(&mut OsRng, bits)
-            .map_err(|e| CatError::CryptoError(e.to_string()))?;
+            .map_err(|e| CatError::KeyOperationFailed(e.to_string()))?;
         let public_key = RsaPublicKey::from(&private_key);
         let signing_key = RsaSigningKey::<Sha256>::new(private_key);
 
@@ -218,7 +219,7 @@ impl Ps256Algorithm {
     pub fn new_verifier(public_key: RsaPublicKey) -> Result<Self, CatError> {
         // Validate minimum RSA key size (2048 bits = 256 bytes)
         if public_key.size() < MIN_RSA_KEY_SIZE {
-            return Err(CatError::CryptoError(format!(
+            return Err(CatError::KeyOperationFailed(format!(
                 "RSA key too small: {} bytes (minimum {} bytes / 2048 bits required)",
                 public_key.size(),
                 MIN_RSA_KEY_SIZE
@@ -242,7 +243,7 @@ impl CryptographicAlgorithm for Ps256Algorithm {
         let signing_key = self
             .signing_key
             .as_ref()
-            .ok_or_else(|| CatError::CryptoError("No signing key available".to_string()))?;
+            .ok_or_else(|| CatError::KeyOperationFailed("No signing key available".to_string()))?;
 
         let signature = signing_key.sign_with_rng(&mut OsRng, data);
 
@@ -251,7 +252,7 @@ impl CryptographicAlgorithm for Ps256Algorithm {
 
     fn verify(&self, data: &[u8], signature: &[u8]) -> Result<(), CatError> {
         let signature = rsa::pss::Signature::try_from(signature)
-            .map_err(|e| CatError::CryptoError(e.to_string()))?;
+            .map_err(|e| CatError::KeyOperationFailed(e.to_string()))?;
 
         self.verifying_key
             .verify(data, &signature)

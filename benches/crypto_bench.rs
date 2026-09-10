@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2022 Quicr
 // SPDX-License-Identifier: BSD-2-Clause
 
+use cat_token::crypto::{create_signing_input, hash_sha256};
 use cat_token::*;
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 

@@ -151,7 +151,7 @@ fn bench_moqt_authorization(c: &mut Criterion) {
         .build()
         .unwrap();
 
-    let validator = MoqtValidator::new().allow_missing_audience();
+    let validator = MoqtValidator::new().dangerously_allow_missing_audience();
 
     let single_validated = make_validated(&single_scope_token);
     let multi_validated = make_validated(&multi_scope_token);
@@ -263,7 +263,7 @@ fn bench_moqt_throughput(c: &mut Criterion) {
         .build()
         .unwrap();
 
-    let validator = MoqtValidator::new().allow_missing_audience();
+    let validator = MoqtValidator::new().dangerously_allow_missing_audience();
     let validated = make_validated(&token);
 
     // Simulate batch authorization (100K ops target)
@@ -321,7 +321,7 @@ fn bench_moqt_concurrent_authorize(c: &mut Criterion) {
         .moqt_scope(scope)
         .build()
         .unwrap();
-    let validator = Arc::new(MoqtValidator::new().allow_missing_audience());
+    let validator = Arc::new(MoqtValidator::new().dangerously_allow_missing_audience());
     let validated = Arc::new(make_validated(&token));
 
     // Fixed per-thread batch. Total ops = threads * batch, so throughput

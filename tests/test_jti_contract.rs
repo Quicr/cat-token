@@ -33,7 +33,7 @@ fn strict_in_memory_store_meets_contract() {
 struct OutageStore;
 impl JtiStore for OutageStore {
     fn check_and_insert(&self, _key: String, _iat: i64) -> Result<(), CatError> {
-        Err(CatError::CryptoError("simulated outage".to_string()))
+        Err(CatError::BackendUnavailable("simulated outage".to_string()))
     }
     fn len(&self) -> usize {
         0
@@ -69,7 +69,7 @@ mod async_contract {
     #[async_trait]
     impl AsyncJtiStore for AsyncOutageStore {
         async fn check_and_insert(&self, _key: String, _iat: i64) -> Result<(), CatError> {
-            Err(CatError::CryptoError("simulated outage".to_string()))
+            Err(CatError::BackendUnavailable("simulated outage".to_string()))
         }
         fn is_strict(&self) -> bool {
             true

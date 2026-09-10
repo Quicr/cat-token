@@ -540,7 +540,7 @@ impl ReplayGuard for FlakyReplayGuard {
         let mut calls = self.calls.lock().unwrap();
         *calls += 1;
         if self.fail_first && *calls == 1 {
-            return Err(CatError::CryptoError(
+            return Err(CatError::BackendUnavailable(
                 "transient backend failure".to_string(),
             ));
         }
@@ -574,7 +574,7 @@ fn test_transient_cti_commit_failure_leaves_no_state_for_retry() {
 
     let first = validator.authorize_with_replay(&validated, &baseline_ctx(), &guard, None);
     assert!(
-        matches!(first, Err(CatError::CryptoError(_))),
+        matches!(first, Err(CatError::BackendUnavailable(_))),
         "first attempt should surface the backend error, got: {first:?}"
     );
 

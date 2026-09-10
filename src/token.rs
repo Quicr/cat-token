@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2022 Quicr
 // SPDX-License-Identifier: BSD-2-Clause
 
-use crate::cwt::CwtLimits;
+use crate::cwt::{Cwt, CwtHeader, CwtLimits};
 use crate::pipeline::{TokenHeader, TokenProvenance, VerifiedToken};
-use crate::{CatError, CatToken, CryptographicAlgorithm, Cwt, CwtHeader, NetworkIdentifier};
+use crate::{CatError, CatToken, CryptographicAlgorithm, NetworkIdentifier};
 use base64::{
     Engine as _,
     engine::general_purpose::{URL_SAFE, URL_SAFE_NO_PAD},
@@ -593,7 +593,7 @@ pub(crate) fn enforce_catpor(
             let rng = SystemRandom::new();
             let mut buf = [0u8; 8];
             rng.fill(&mut buf)
-                .map_err(|_| CatError::CryptoError("RNG failed".to_string()))?;
+                .map_err(|_| CatError::KeyOperationFailed("RNG failed".to_string()))?;
             let val = u64::from_le_bytes(buf);
             (val as f64) / (u64::MAX as f64)
         };
@@ -1042,8 +1042,10 @@ enum DecoderKey<'a> {
 /// let verified = Decoder::with_algorithm(&key).decode_base64(token_b64)?;
 /// ```
 ///
-/// The builder is `Copy`-cheap (all references and one small enum), so build
-/// it once per configuration and reuse.
+/// The builder is cheap to construct (all references and one small
+/// enum, no heap allocation) but does not implement `Copy` — each
+/// method takes `self` by value and returns a new builder. Build once
+/// per configuration and call `.decode()` for every request.
 pub struct Decoder<'a> {
     key: DecoderKey<'a>,
     admission: Option<&'a crate::pipeline::AdmissionPolicy>,

@@ -24,7 +24,7 @@
 use async_trait::async_trait;
 use cat_token::ALG_ES256;
 use cat_token::r#async::{AsyncJtiStore, AsyncMoqtValidator, AsyncReplayGuard};
-use cat_token::prelude::*;
+use cat_token::*;
 use chrono::{Duration, Utc};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
