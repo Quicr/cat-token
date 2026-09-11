@@ -988,7 +988,7 @@ pub fn validate_posix_ere(pattern: &str) -> Option<String> {
                 b'd' | b'D' | b'w' | b'W' | b's' | b'S' | b'b' | b'B' => {
                     return Some(format!(
                         "\\{} is a Perl extension, not valid POSIX ERE",
-                        next as char
+                        char::from(next)
                     ));
                 }
                 _ => {}

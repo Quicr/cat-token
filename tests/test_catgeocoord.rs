@@ -84,7 +84,7 @@ fn test_radius_is_unsigned_integer() {
 
 #[test]
 fn test_validator_rejects_invalid_coordinates() {
-    let validator = CatTokenValidator::new().dangerously_allow_unencrypted_privacy_claims();
+    let validator = CatTokenValidator::dangerously_any_issuer().dangerously_allow_unencrypted_privacy_claims();
 
     let mut token = CatToken::new();
     token.cat.catgeocoord = Some(vec![GeoCoordinate::new(91.0, 0.0, 0)]);
@@ -97,7 +97,7 @@ fn test_validator_rejects_invalid_coordinates() {
 
 #[test]
 fn test_validator_rejects_invalid_in_any_zone() {
-    let validator = CatTokenValidator::new().dangerously_allow_unencrypted_privacy_claims();
+    let validator = CatTokenValidator::dangerously_any_issuer().dangerously_allow_unencrypted_privacy_claims();
 
     let mut token = CatToken::new();
     token.cat.catgeocoord = Some(vec![

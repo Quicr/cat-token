@@ -61,7 +61,7 @@ fn test_validator_rejects_non_ere_regex_in_catu() {
         matches: vec![MatchValue::Regex("\\d+".to_string())],
     }]);
 
-    let validator = CatTokenValidator::new();
+    let validator = CatTokenValidator::dangerously_any_issuer();
     let result = validator.validate(&token);
     assert!(result.is_err());
     match result {
@@ -79,7 +79,7 @@ fn test_validator_rejects_non_ere_regex_in_cath() {
         matches: vec![MatchValue::Regex("\\w+/\\w+".to_string())],
     }]);
 
-    let validator = CatTokenValidator::new();
+    let validator = CatTokenValidator::dangerously_any_issuer();
     let result = validator.validate(&token);
     assert!(result.is_err());
     match result {
@@ -97,6 +97,6 @@ fn test_validator_accepts_ere_regex() {
         matches: vec![MatchValue::Regex("^/v[0-9]+/.*$".to_string())],
     }]);
 
-    let validator = CatTokenValidator::new();
+    let validator = CatTokenValidator::dangerously_any_issuer();
     assert!(validator.validate(&token).is_ok());
 }

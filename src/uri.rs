@@ -70,15 +70,30 @@ impl UriComponents {
 }
 
 /// Parse and normalize a URI into components. Fail-closed per the strict
-/// CAT profile: userinfo and fragments are rejected because either form
-/// enables a divergence between the token's authorization surface and the
-/// URI a relay actually applies rules to.
+/// CAT profile: userinfo, fragments, and raw non-ASCII bytes are rejected.
+/// Each form either enables a divergence between the token's authorization
+/// surface and the URI a relay actually applies rules to, or (in the
+/// non-ASCII case) drives the `as char` byte-to-codepoint reinterpretation
+/// path that would otherwise re-encode multi-byte UTF-8 bytes as Latin-1
+/// codepoints and desynchronize the normalized string from the input.
 pub fn decompose_uri(uri: &str) -> Result<UriComponents, CatError> {
     let normalized = normalize_uri(uri)?;
     parse_uri(&normalized)
 }
 
+fn ensure_ascii(uri: &str) -> Result<(), CatError> {
+    if !uri.is_ascii() {
+        return Err(CatError::InvalidClaimValue(
+            "URI contains raw non-ASCII bytes; per RFC 3986 non-ASCII must be \
+             percent-encoded"
+                .to_string(),
+        ));
+    }
+    Ok(())
+}
+
 fn parse_uri(uri: &str) -> Result<UriComponents, CatError> {
+    ensure_ascii(uri)?;
     let mut components = UriComponents::default();
 
     if uri.contains('#') {
@@ -146,6 +161,7 @@ fn parse_uri(uri: &str) -> Result<UriComponents, CatError> {
 /// Normalize a URI per RFC 3986 §6.2.2-6.2.3. Rejects userinfo and fragments
 /// per the strict CAT profile — see [`decompose_uri`].
 pub fn normalize_uri(uri: &str) -> Result<String, CatError> {
+    ensure_ascii(uri)?;
     if uri.contains('#') {
         return Err(CatError::InvalidClaimValue(
             "URI fragments are not permitted in this profile".to_string(),
@@ -252,6 +268,11 @@ fn remove_dot_segments(path: &str) -> String {
     result
 }
 
+// Caller must have already run [`ensure_ascii`] on `s`. Every byte the
+// loop pushes is therefore ASCII: pass-through bytes come from an ASCII
+// `&str`, decoded percent-escapes are gated by [`is_unreserved`] (ASCII
+// alphanumerics and `-._~`), and hex nibbles produced by
+// [`to_upper_hex`] are `0-9A-F`.
 fn normalize_percent_encoding(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
     let bytes = s.as_bytes();
@@ -264,7 +285,7 @@ fn normalize_percent_encoding(s: &str) -> String {
             {
                 let decoded = (hi << 4) | lo;
                 if is_unreserved(decoded) {
-                    result.push(decoded as char);
+                    result.push(char::from(decoded));
                 } else {
                     result.push('%');
                     result.push(to_upper_hex(hi));
@@ -277,7 +298,7 @@ fn normalize_percent_encoding(s: &str) -> String {
             }
             continue;
         }
-        result.push(bytes[i] as char);
+        result.push(char::from(bytes[i]));
         i += 1;
     }
 
@@ -295,9 +316,9 @@ fn hex_val(b: u8) -> Option<u8> {
 
 fn to_upper_hex(nibble: u8) -> char {
     if nibble < 10 {
-        (b'0' + nibble) as char
+        char::from(b'0' + nibble)
     } else {
-        (b'A' + nibble - 10) as char
+        char::from(b'A' + nibble - 10)
     }
 }
 

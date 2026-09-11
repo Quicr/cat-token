@@ -4,7 +4,7 @@ use cat_token::*;
 
 #[test]
 fn test_default_validator_has_zero_tolerance() {
-    let validator = CatTokenValidator::new();
+    let validator = CatTokenValidator::dangerously_any_issuer();
     let key = Es256Algorithm::new_with_key_pair().unwrap();
 
     let token = CatTokenBuilder::new()
@@ -28,7 +28,7 @@ fn test_default_validator_has_zero_tolerance() {
 
 #[test]
 fn test_default_validator_rejects_nbf_in_future() {
-    let validator = CatTokenValidator::new();
+    let validator = CatTokenValidator::dangerously_any_issuer();
     let key = Es256Algorithm::new_with_key_pair().unwrap();
 
     let nbf = chrono::Utc::now() + chrono::Duration::seconds(5);
@@ -54,7 +54,7 @@ fn test_default_validator_rejects_nbf_in_future() {
 
 #[test]
 fn test_explicit_tolerance_allows_skew() {
-    let validator = CatTokenValidator::new()
+    let validator = CatTokenValidator::dangerously_any_issuer()
         .with_clock_skew_tolerance(60)
         .unwrap();
     let key = Es256Algorithm::new_with_key_pair().unwrap();
@@ -77,7 +77,7 @@ fn test_explicit_tolerance_allows_skew() {
 
 #[test]
 fn test_separate_tolerances() {
-    let validator = CatTokenValidator::new()
+    let validator = CatTokenValidator::dangerously_any_issuer()
         .with_separate_tolerances(10, 0)
         .unwrap();
     let key = Es256Algorithm::new_with_key_pair().unwrap();
@@ -102,21 +102,21 @@ fn test_separate_tolerances() {
 fn test_tolerance_above_cap_rejected() {
     // Above the 1 hour cap: reject.
     assert!(matches!(
-        CatTokenValidator::new().with_clock_skew_tolerance(MAX_CLOCK_SKEW_TOLERANCE_SECS + 1),
+        CatTokenValidator::dangerously_any_issuer().with_clock_skew_tolerance(MAX_CLOCK_SKEW_TOLERANCE_SECS + 1),
         Err(CatError::InvalidClaimValue(_))
     ));
     assert!(matches!(
-        CatTokenValidator::new().with_separate_tolerances(MAX_CLOCK_SKEW_TOLERANCE_SECS + 1, 0),
+        CatTokenValidator::dangerously_any_issuer().with_separate_tolerances(MAX_CLOCK_SKEW_TOLERANCE_SECS + 1, 0),
         Err(CatError::InvalidClaimValue(_))
     ));
     assert!(matches!(
-        CatTokenValidator::new().with_separate_tolerances(0, MAX_CLOCK_SKEW_TOLERANCE_SECS + 1),
+        CatTokenValidator::dangerously_any_issuer().with_separate_tolerances(0, MAX_CLOCK_SKEW_TOLERANCE_SECS + 1),
         Err(CatError::InvalidClaimValue(_))
     ));
 
     // At the cap: accept.
     assert!(
-        CatTokenValidator::new()
+        CatTokenValidator::dangerously_any_issuer()
             .with_clock_skew_tolerance(MAX_CLOCK_SKEW_TOLERANCE_SECS)
             .is_ok()
     );
@@ -126,7 +126,7 @@ fn test_tolerance_above_cap_rejected() {
 fn test_exp_overflow_rejected() {
     // An attacker-supplied exp near i64::MAX combined with a positive tolerance
     // must not silently saturate into an unbounded acceptance window.
-    let validator = CatTokenValidator::new()
+    let validator = CatTokenValidator::dangerously_any_issuer()
         .with_clock_skew_tolerance(600)
         .unwrap();
     let key = Es256Algorithm::new_with_key_pair().unwrap();
@@ -154,7 +154,7 @@ fn test_exp_overflow_rejected() {
 
 #[test]
 fn test_nbf_underflow_rejected() {
-    let validator = CatTokenValidator::new()
+    let validator = CatTokenValidator::dangerously_any_issuer()
         .with_clock_skew_tolerance(600)
         .unwrap();
     let key = Es256Algorithm::new_with_key_pair().unwrap();

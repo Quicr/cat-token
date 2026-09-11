@@ -33,29 +33,6 @@ survive that audit; that is why they are here.
   support entirely. ES256 covers every deployment we currently know
   about; PS256 exists for parity with JWT-native peers.
 
-## RUSTSEC-2021-0127 — `serde_cbor 0.11` unmaintained
-
-- **Advisory:** <https://rustsec.org/advisories/RUSTSEC-2021-0127>
-- **Class:** unmaintained (repo archived 2021; no known
-  vulnerability)
-- **cat-token exposure surface:** every CBOR encode/decode path. The
-  strict-profile parser is built on `serde_cbor`; changing crates
-  means re-testing every claim's round-trip against the same fixture
-  set that `tests/test_vectors_from_appendix_a.rs` currently covers.
-- **Fix path:** migrate to `ciborium` (the advisory's recommended
-  successor, and already a direct dep of this crate). Rough plan:
-  1. Land a parallel `ciborium`-backed decoder behind a `cfg(test)`
-     alias so both parsers cover every fixture.
-  2. Diff the two decoders on the whole `tests/test_data/` corpus and
-     the fuzz corpus. Every discrepancy is a bug in the migration,
-     not a fixture problem.
-  3. Delete the `serde_cbor` code path and this ignore entry in the
-     same commit.
-- **Blocked on:** dedicated review capacity. The strict-profile
-  guarantees (single canonical form, no duplicate keys, no trailing
-  bytes) all live in the parser layer, so this needs careful review
-  and should not be bundled with unrelated changes.
-
 ## Adding a new entry
 
 An `[advisories.ignore]` entry requires all of:

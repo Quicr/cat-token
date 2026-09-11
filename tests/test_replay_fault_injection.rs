@@ -111,7 +111,7 @@ fn build_token_and_proof(dpop_alg: &Es256Algorithm) -> (ValidatedToken, DpopProo
         .unwrap();
     let key = HmacSha256Algorithm::new(b"test-key-for-roundtrip-000000000");
     let encoded = encode_token(&token, &key).unwrap();
-    let cat_validator = CatTokenValidator::new().dangerously_allow_unencrypted_privacy_claims();
+    let cat_validator = CatTokenValidator::dangerously_any_issuer().dangerously_allow_unencrypted_privacy_claims();
     let validated = Decoder::with_algorithm(&key)
         .decode(&encoded)
         .unwrap()
@@ -149,7 +149,7 @@ fn test_dpop_jti_burned_on_first_success() {
     let dpop_alg = Es256Algorithm::new_with_key_pair().unwrap();
     let (validated, proof, _tp) = build_token_and_proof(&dpop_alg);
 
-    let store: Arc<dyn JtiStore> = Arc::new(InMemoryStrictJtiStore::new(300));
+    let store: Arc<dyn JtiStore> = Arc::new(InMemoryStrictJtiStore::new(300, 1024));
     let settings = CatDpopSettings::new()
         .with_window(300)
         .unwrap()
@@ -180,7 +180,7 @@ fn test_transient_backend_failure_does_not_burn_jti() {
     let dpop_alg = Es256Algorithm::new_with_key_pair().unwrap();
     let dpop_jwk = Jwk::from_es256_verifying_key(dpop_alg.verifying_key()).unwrap();
 
-    let inner: Arc<dyn JtiStore> = Arc::new(InMemoryStrictJtiStore::new(300));
+    let inner: Arc<dyn JtiStore> = Arc::new(InMemoryStrictJtiStore::new(300, 1024));
     let injector = Arc::new(FaultInjector::new(inner));
     let injector_dyn: Arc<dyn JtiStore> = injector.clone();
     let settings = CatDpopSettings::new()
@@ -214,7 +214,7 @@ fn test_transient_backend_failure_does_not_burn_jti() {
     let validated = Decoder::with_algorithm(&key)
         .decode(&encoded)
         .unwrap()
-        .validate(&CatTokenValidator::new().dangerously_allow_unencrypted_privacy_claims())
+        .validate(&CatTokenValidator::dangerously_any_issuer().dangerously_allow_unencrypted_privacy_claims())
         .unwrap();
     let ath = compute_access_token_hash(validated.serialized());
 
@@ -269,7 +269,7 @@ fn test_relay_restart_loses_in_memory_replay_state() {
     let (validated, proof, _tp) = build_token_and_proof(&dpop_alg);
 
     {
-        let store: Arc<dyn JtiStore> = Arc::new(InMemoryStrictJtiStore::new(300));
+        let store: Arc<dyn JtiStore> = Arc::new(InMemoryStrictJtiStore::new(300, 1024));
         let settings = CatDpopSettings::new().with_window(300).unwrap();
         let validator = MoqtValidator::new()
             .dpop_strict(settings, store)
@@ -280,7 +280,7 @@ fn test_relay_restart_loses_in_memory_replay_state() {
             .expect("pre-restart authorize");
     }
     // Relay restart: brand-new store instance.
-    let store: Arc<dyn JtiStore> = Arc::new(InMemoryStrictJtiStore::new(300));
+    let store: Arc<dyn JtiStore> = Arc::new(InMemoryStrictJtiStore::new(300, 1024));
     let settings = CatDpopSettings::new()
         .with_window(300)
         .unwrap()
@@ -299,7 +299,7 @@ fn test_relay_restart_loses_in_memory_replay_state() {
 /// weaken replay defense.
 #[test]
 fn test_strict_store_refuses_at_capacity_cap() {
-    let store = InMemoryStrictJtiStore::new(300).with_max_entries(1);
+    let store = InMemoryStrictJtiStore::new(300, 1);
     store.check_and_insert("a".into(), 0).unwrap();
     let err = store.check_and_insert("b".into(), 0).unwrap_err();
     assert!(matches!(err, CatError::DpopValidationFailed(_)));

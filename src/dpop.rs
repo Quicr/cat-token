@@ -403,6 +403,14 @@ pub fn confirmation_matches_jwk(cnf: &ConfirmationClaim, jwk: &Jwk) -> Result<bo
     Ok(crate::crypto::constant_time_eq(&cnf.jkt, &thumbprint))
 }
 
+/// Constant-time compare a cached thumbprint against a confirmation claim.
+/// Faster than [`confirmation_matches_jwk`] on the hot path because the
+/// thumbprint is precomputed once at proof construction time.
+#[cfg(feature = "moqt")]
+pub(crate) fn confirmation_matches_thumbprint(cnf: &ConfirmationClaim, jkt: &[u8]) -> bool {
+    crate::crypto::constant_time_eq(&cnf.jkt, jkt)
+}
+
 // --- Proof --------------------------------------------------------------
 
 /// In-memory DPoP proof. Format-neutral: `encode()`/`decode()` route through
@@ -427,6 +435,11 @@ pub struct DpopProof {
     /// [`DpopWireFormat::Cwt`]; changing this is the only knob the
     /// authorizer sees — everything else is format-neutral.
     pub(crate) wire_format: DpopWireFormat,
+    /// Cached RFC 7638 JWK thumbprint of `header.jwk`. Computed lazily on
+    /// first access (either at decode or the first `authorize` call) and
+    /// reused for every subsequent thumbprint check and JTI commit-key
+    /// build. Avoids the SHA-256 recompute on the hot authorize path.
+    pub(crate) jkt_cache: std::sync::OnceLock<Vec<u8>>,
 }
 
 #[cfg(feature = "moqt")]
@@ -463,7 +476,23 @@ impl DpopProof {
             signature,
             signed_bytes: SignedInput::default(),
             wire_format: DpopWireFormat::Cwt,
+            jkt_cache: std::sync::OnceLock::new(),
         }
+    }
+
+    /// Compute (once) and return the RFC 7638 JWK thumbprint of the
+    /// proof's holder key. Cached across every subsequent call so the
+    /// hot authorize path pays SHA-256 only for the first request.
+    pub fn jwk_thumbprint(&self) -> Result<&[u8], CatError> {
+        if let Some(v) = self.jkt_cache.get() {
+            return Ok(v.as_slice());
+        }
+        let computed = self.header.jwk.thumbprint()?;
+        // First writer wins; second-to-set discards its computation but
+        // both computations produce the same bytes so there is no
+        // observable divergence.
+        let _ = self.jkt_cache.set(computed);
+        Ok(self.jkt_cache.get().expect("jkt_cache populated").as_slice())
     }
 
     pub fn header(&self) -> &DpopHeader {
@@ -515,6 +544,7 @@ impl DpopProof {
             signature: Vec::new(),
             signed_bytes: SignedInput::default(),
             wire_format: DpopWireFormat::Cwt,
+            jkt_cache: std::sync::OnceLock::new(),
         }
     }
 
@@ -806,6 +836,7 @@ pub mod cwt {
                 payload_cbor: payload_bytes,
             },
             wire_format: DpopWireFormat::Cwt,
+            jkt_cache: std::sync::OnceLock::new(),
         })
     }
 
@@ -1136,7 +1167,10 @@ pub mod cwt {
         let mut out = String::with_capacity(bytes.len());
         for &b in bytes {
             if is_safe(b) {
-                out.push(b as char);
+                // `is_safe` guarantees `b` is ASCII (alphanumeric or `_`),
+                // so the char cast is a well-defined codepoint reinterpret
+                // (not a Latin-1 mangling of a UTF-8 continuation byte).
+                out.push(char::from(b));
             } else {
                 out.push('.');
                 out.push_str(&format!("{b:02x}"));
@@ -1459,6 +1493,7 @@ pub mod jwt {
                 payload_cbor: payload_bytes,
             },
             wire_format: DpopWireFormat::Jwt,
+            jkt_cache: std::sync::OnceLock::new(),
         })
     }
 
@@ -1942,47 +1977,105 @@ pub struct JtiCacheStats {
     pub premature_evictions: u64,
 }
 
-/// Strict, in-memory, TTL-backed JtiStore for tests and single-node
+/// Strict, in-memory, sharded, TTL-backed JtiStore for tests and single-node
 /// deployments that need [`JtiStore::is_strict`] to return `true`.
 ///
 /// Unlike [`LruJtiStore`], this store retains every accepted JTI for its
 /// full freshness window: entries are never evicted for capacity, only
 /// removed by an explicit [`InMemoryStrictJtiStore::cleanup`] call after
 /// their TTL has elapsed. This meets the RFC 9449 §11.1 retention
-/// requirement, at the cost of unbounded memory growth if `cleanup` is
-/// never invoked — the store is a placeholder for a real distributed
-/// backend (Redis with per-JTI TTL, DynamoDB with TTL, etc.). Wire that up
-/// in production; keep this store for tests, local dev, and single-relay
-/// deployments where memory is bounded operationally.
+/// requirement.
+///
+/// # Capacity is mandatory
+///
+/// The constructor requires a `max_entries` bound. A store that grows
+/// without bound is a memory-DoS primitive at CDN scale — a hostile
+/// stream of unique JTIs pins entire request memory into the map, and a
+/// missed `cleanup` cadence turns the process into a runaway allocator.
+/// Insertion above the cap fails with `DpopValidationFailed`, not
+/// silent eviction. Callers who genuinely accept the risk (fuzzing,
+/// single-run diagnostics) may opt in via
+/// [`InMemoryStrictJtiStore::dangerously_unbounded`].
+///
+/// # Sharding
+///
+/// The store is sharded across [`DEFAULT_JTI_SHARDS`] independent
+/// `Mutex`-protected `HashMap`s (fixed at 16). Under concurrent load
+/// two inserts with distinct JTIs contend on the same lock only when
+/// their JTI hashes collide modulo the shard count, so throughput
+/// scales linearly with core count up to that limit.
+#[cfg(feature = "moqt")]
+struct StrictShard {
+    entries: Mutex<std::collections::HashMap<String, i64>>,
+}
+
+#[cfg(feature = "moqt")]
+impl StrictShard {
+    fn new() -> Self {
+        Self {
+            entries: Mutex::new(std::collections::HashMap::new()),
+        }
+    }
+}
+
 #[cfg(feature = "moqt")]
 pub struct InMemoryStrictJtiStore {
-    entries: Mutex<std::collections::HashMap<String, i64>>,
+    shards: Vec<StrictShard>,
+    hasher_state: std::collections::hash_map::RandomState,
     freshness_window_seconds: i64,
+    /// Absolute cap across all shards. `None` only for the
+    /// `dangerously_unbounded` construction path.
     max_entries: Option<usize>,
+    /// Approximate current entry count, updated under each shard lock. A
+    /// single atomic avoids the O(shards) sum on the hot insert path.
+    total_entries: std::sync::atomic::AtomicUsize,
     rejected_over_capacity: std::sync::atomic::AtomicU64,
 }
 
 #[cfg(feature = "moqt")]
 impl InMemoryStrictJtiStore {
-    /// Create a store with a freshness window in seconds. `cleanup` must be
-    /// called periodically (typically by a background timer) to drop entries
-    /// older than the window; without it the store grows unbounded.
-    pub fn new(freshness_window_seconds: i64) -> Self {
+    /// Create a strict store with a freshness window and mandatory
+    /// entry cap. Both parameters are load-bearing — the window drives
+    /// `cleanup` cadence expectations, the cap prevents unbounded
+    /// growth if that cadence slips. `cleanup` (or
+    /// [`Self::cleanup_expired`]) must still be called periodically
+    /// (typically by a background timer) to drop entries older than the
+    /// window; without it the store fills to `max_entries` and then
+    /// refuses inserts.
+    pub fn new(freshness_window_seconds: i64, max_entries: usize) -> Self {
+        Self::build(freshness_window_seconds, Some(max_entries))
+    }
+
+    /// Create a strict store with a freshness window and NO entry cap.
+    /// Only appropriate for fuzzing, single-run diagnostics, or
+    /// deployments where memory is bounded by other means. Production
+    /// relays must use [`Self::new`] with an explicit cap.
+    pub fn dangerously_unbounded(freshness_window_seconds: i64) -> Self {
+        Self::build(freshness_window_seconds, None)
+    }
+
+    fn build(freshness_window_seconds: i64, max_entries: Option<usize>) -> Self {
+        let shards = (0..DEFAULT_JTI_SHARDS).map(|_| StrictShard::new()).collect();
         Self {
-            entries: Mutex::new(std::collections::HashMap::new()),
+            shards,
+            hasher_state: std::collections::hash_map::RandomState::new(),
             freshness_window_seconds,
-            max_entries: None,
+            max_entries,
+            total_entries: std::sync::atomic::AtomicUsize::new(0),
             rejected_over_capacity: std::sync::atomic::AtomicU64::new(0),
         }
     }
 
-    /// Set an upper bound on entry count. Inserts beyond the bound return
-    /// [`CatError::DpopValidationFailed`] rather than silently dropping the
-    /// oldest entry — a strict store never sheds under pressure. A relay
-    /// hitting this bound has a `cleanup` cadence problem or an ingress
-    /// abuse problem; either way, failing loudly is the right answer.
+    /// Reduce the absolute cap after construction. Cannot lift a
+    /// `dangerously_unbounded` store back into bounded mode — that
+    /// would be silent policy narrowing across shards under load; if a
+    /// cap is desired, rebuild the store from scratch.
     pub fn with_max_entries(mut self, max: usize) -> Self {
-        self.max_entries = Some(max);
+        if let Some(current) = self.max_entries {
+            self.max_entries = Some(current.min(max));
+        } else {
+            self.max_entries = Some(max);
+        }
         self
     }
 
@@ -1999,6 +2092,14 @@ impl InMemoryStrictJtiStore {
     pub fn cleanup_expired(&self) {
         self.cleanup(self.freshness_window_seconds);
     }
+
+    fn shard_for(&self, key: &str) -> &StrictShard {
+        use std::hash::{BuildHasher, Hasher};
+        let mut hasher = self.hasher_state.build_hasher();
+        hasher.write(key.as_bytes());
+        let idx = (hasher.finish() as usize) % self.shards.len();
+        &self.shards[idx]
+    }
 }
 
 #[cfg(feature = "moqt")]
@@ -2009,15 +2110,11 @@ impl JtiStore for InMemoryStrictJtiStore {
                 "JTI exceeds {MAX_JTI_LENGTH_BYTES} byte cap"
             )));
         }
-        let mut entries = self
-            .entries
-            .lock()
-            .map_err(|_| CatError::BackendUnavailable("Lock poisoned".to_string()))?;
-        if entries.contains_key(&key) {
-            return Err(CatError::ReplayAttackDetected);
-        }
+        // Global cap first, before taking a shard lock. An over-cap
+        // relay must refuse inserts on every shard uniformly; without
+        // this check a caller could see per-shard slop.
         if let Some(max) = self.max_entries
-            && entries.len() >= max
+            && self.total_entries.load(std::sync::atomic::Ordering::Relaxed) >= max
         {
             self.rejected_over_capacity
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -2025,12 +2122,24 @@ impl JtiStore for InMemoryStrictJtiStore {
                 "strict JTI store at max_entries={max}; increase capacity or cleanup cadence"
             )));
         }
+
+        let shard = self.shard_for(&key);
+        let mut entries = shard
+            .entries
+            .lock()
+            .map_err(|_| CatError::BackendUnavailable("Lock poisoned".to_string()))?;
+        if entries.contains_key(&key) {
+            return Err(CatError::ReplayAttackDetected);
+        }
         entries.insert(key, iat);
+        self.total_entries
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         Ok(())
     }
 
     fn len(&self) -> usize {
-        self.entries.lock().map(|e| e.len()).unwrap_or(0)
+        self.total_entries
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     fn cleanup(&self, max_age_seconds: i64) {
@@ -2038,10 +2147,18 @@ impl JtiStore for InMemoryStrictJtiStore {
             .duration_since(UNIX_EPOCH)
             .unwrap_or(Duration::ZERO)
             .as_secs() as i64;
-        if let Ok(mut entries) = self.entries.lock() {
-            entries.retain(|_, iat| now.saturating_sub(*iat) < max_age_seconds);
+        let mut removed = 0usize;
+        for shard in &self.shards {
+            if let Ok(mut entries) = shard.entries.lock() {
+                let before = entries.len();
+                entries.retain(|_, iat| now.saturating_sub(*iat) < max_age_seconds);
+                removed += before - entries.len();
+            }
         }
-        let _ = max_age_seconds;
+        if removed > 0 {
+            self.total_entries
+                .fetch_sub(removed, std::sync::atomic::Ordering::Relaxed);
+        }
     }
 
     fn premature_evictions(&self) -> u64 {
@@ -2208,8 +2325,8 @@ impl DpopValidator {
                 "Action mismatch: expected {expected_action:?}"
             )));
         }
-        let jwk_thumbprint = proof.header.jwk.thumbprint()?;
-        if !crate::crypto::constant_time_eq(&jwk_thumbprint, expected_thumbprint) {
+        let jwk_thumbprint = proof.jwk_thumbprint()?;
+        if !crate::crypto::constant_time_eq(jwk_thumbprint, expected_thumbprint) {
             return Err(CatError::InvalidDpopBinding);
         }
         if let Some(expected_ath) = access_token_hash {
@@ -2248,6 +2365,20 @@ impl DpopValidator {
         if !self.settings.should_honor_jti() {
             return None;
         }
+        self.dpop_commit_key_forced(proof, thumbprint, issuer)
+    }
+
+    /// Build the JTI commit key regardless of the token's `honor_jti`
+    /// setting. Used when the relay operator has escalated JTI tracking
+    /// to mandatory via [`crate::MoqtValidator::require_dpop_replay_tracking`]
+    /// — a hostile issuer cannot then downgrade replay defense by
+    /// clearing the `honor_jti` bit in the token.
+    pub fn dpop_commit_key_forced(
+        &self,
+        proof: &DpopProof,
+        thumbprint: &[u8],
+        issuer: Option<&str>,
+    ) -> Option<(String, i64)> {
         let cti = proof.payload.cti.as_ref()?;
         let iss = issuer.unwrap_or("_");
         // Composite key: (issuer, holder-key, cti bytes hex). Hex of cti
@@ -2311,8 +2442,8 @@ impl DpopValidator {
                 proof.header.alg
             )));
         }
-        let computed_thumbprint = proof.header.jwk.thumbprint()?;
-        if !crate::crypto::constant_time_eq(&computed_thumbprint, expected_thumbprint) {
+        let computed_thumbprint = proof.jwk_thumbprint()?;
+        if !crate::crypto::constant_time_eq(computed_thumbprint, expected_thumbprint) {
             return Err(CatError::DpopKeyMismatch);
         }
         self.verify_with_embedded_key(proof)?;
@@ -3084,7 +3215,7 @@ mod tests {
     #[cfg(feature = "moqt")]
     #[test]
     fn test_in_memory_strict_store_is_strict_and_replay_detects() {
-        let store = InMemoryStrictJtiStore::new(300);
+        let store = InMemoryStrictJtiStore::new(300, 1024);
         assert!(store.is_strict());
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -3098,7 +3229,7 @@ mod tests {
     #[cfg(feature = "moqt")]
     #[test]
     fn test_in_memory_strict_store_refuses_at_max_entries() {
-        let store = InMemoryStrictJtiStore::new(300).with_max_entries(2);
+        let store = InMemoryStrictJtiStore::new(300, 2);
         store.check_and_insert("a".into(), 0).unwrap();
         store.check_and_insert("b".into(), 0).unwrap();
         let err = store.check_and_insert("c".into(), 0).unwrap_err();

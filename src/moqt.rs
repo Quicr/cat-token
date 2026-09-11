@@ -7,7 +7,7 @@ use crate::token::{
 };
 use crate::{
     BinaryMatch, CatDpopSettings, CatError, CatPorBlockList, CatToken, DpopProof, DpopValidator,
-    MoqtAction, MoqtScope, NamespaceMatch, ReplayGuard, ValidatedToken, confirmation_matches_jwk,
+    MoqtAction, MoqtScope, NamespaceMatch, ReplayGuard, ValidatedToken,
 };
 
 /// Replay-commit obligation carried out of the sync pre-commit pipeline. Two
@@ -178,7 +178,7 @@ impl AuthorizedRequest {
 ///     .with_peer_tls_alpn(alpn)
 ///     .with_request_uri(req.uri.to_string())
 ///     .with_request_method(req.method.as_str())
-///     .with_request_headers(header_pairs)
+///     .add_request_header("x-forwarded-for", peer_ip.to_string())?
 ///     .with_dpop_proof(proof);
 /// ```
 ///
@@ -250,9 +250,46 @@ impl RelayRequestContext {
         self
     }
 
-    pub fn with_request_headers(mut self, headers: Vec<(String, String)>) -> Self {
+    /// Replace all request headers, validating each `(name, value)`
+    /// pair.
+    ///
+    /// A header name or value that carries CR (0x0D), LF (0x0A), or
+    /// NUL (0x00) is rejected outright: those bytes are how upstream
+    /// header parsers frame records, so smuggling one through would
+    /// let an attacker inject a synthetic header the authorization
+    /// stage would then honor. Names are additionally required to be
+    /// ASCII per RFC 9110 §5.1; values may carry any non-control ASCII
+    /// or valid UTF-8 for permissive HTTP/2/3 parsers, but never a
+    /// framing byte.
+    ///
+    /// Returns [`CatError::InvalidClaimValue`] on the first offending
+    /// pair; earlier pairs are still discarded (the mutation is
+    /// atomic on success only).
+    pub fn with_request_headers(
+        mut self,
+        headers: Vec<(String, String)>,
+    ) -> Result<Self, CatError> {
+        for (n, v) in &headers {
+            validate_header_pair(n, v)?;
+        }
         self.request_headers = headers;
-        self
+        Ok(self)
+    }
+
+    /// Append a single validated header. Same rules as
+    /// [`Self::with_request_headers`]; returns
+    /// [`CatError::InvalidClaimValue`] if the pair carries a framing
+    /// byte or non-ASCII name.
+    pub fn add_request_header(
+        mut self,
+        name: impl Into<String>,
+        value: impl Into<String>,
+    ) -> Result<Self, CatError> {
+        let name = name.into();
+        let value = value.into();
+        validate_header_pair(&name, &value)?;
+        self.request_headers.push((name, value));
+        Ok(self)
     }
 
     pub fn with_tenant_id(mut self, tenant: impl Into<String>) -> Self {
@@ -356,8 +393,42 @@ impl RelayRequestContext {
     }
 }
 
+fn validate_header_pair(name: &str, value: &str) -> Result<(), CatError> {
+    if name.is_empty() {
+        return Err(CatError::InvalidClaimValue(
+            "request header name must be non-empty".to_string(),
+        ));
+    }
+    if !name.is_ascii() {
+        return Err(CatError::InvalidClaimValue(format!(
+            "request header name {name:?} is not ASCII (RFC 9110 §5.1)"
+        )));
+    }
+    for &b in name.as_bytes() {
+        // Reject framing bytes (CR/LF/NUL) and non-tchar bytes: ASCII
+        // controls and separators forbidden by RFC 9110 §5.1 token
+        // grammar.
+        if matches!(b, 0x00 | b'\r' | b'\n' | b' ' | b'\t' | b':') {
+            return Err(CatError::InvalidClaimValue(format!(
+                "request header name {name:?} contains disallowed byte 0x{b:02x}"
+            )));
+        }
+    }
+    for &b in value.as_bytes() {
+        // Values may carry UTF-8 for permissive HTTP/2/3 parsers but
+        // never a framing byte.
+        if matches!(b, 0x00 | b'\r' | b'\n') {
+            return Err(CatError::InvalidClaimValue(format!(
+                "request header {name:?} value contains framing byte 0x{b:02x}"
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// MOQT-specific token validator
 #[derive(Clone)]
+#[must_use = "MoqtValidator holds no request state; discarding it means no request can be authorized"]
 pub struct MoqtValidator {
     /// Minimum revalidation interval this relay can support (in seconds)
     min_revalidation_interval: Option<f64>,
@@ -370,6 +441,19 @@ pub struct MoqtValidator {
     /// Whether to require the relay endpoint to appear in the token's `aud` claim.
     /// Defaults to true — the audit's fail-closed posture demands this.
     require_audience_binding: bool,
+    /// Refuse tokens whose `cnf` claim is absent — every request must carry a
+    /// verified DPoP proof of possession. Off by default; opting in
+    /// promotes the crate from "DPoP is honored when the token asks for it"
+    /// to "DPoP is mandatory for every request".
+    require_dpop: bool,
+    /// Refuse tokens whose `cattpk` (peer-certificate pinning) claim is absent.
+    /// Off by default; opting in makes X.509 pinning mandatory for every request.
+    require_cattpk: bool,
+    /// Commit DPoP JTIs even when the token clears `honor_jti`. A hostile
+    /// issuer can otherwise downgrade replay defense per-token by
+    /// omitting or clearing the bit; this flag turns that decision into
+    /// operator policy.
+    require_dpop_replay_tracking: bool,
 }
 
 impl Default for MoqtValidator {
@@ -386,6 +470,9 @@ impl MoqtValidator {
             dpop_validator: None,
             expected_resource: None,
             require_audience_binding: true,
+            require_dpop: false,
+            require_cattpk: false,
+            require_dpop_replay_tracking: false,
         }
     }
 
@@ -484,6 +571,48 @@ impl MoqtValidator {
     /// autocomplete all flag the call.
     pub fn dangerously_allow_missing_audience(mut self) -> Self {
         self.require_audience_binding = false;
+        self
+    }
+
+    /// Refuse to authorize any token that does not bind a DPoP holder key
+    /// via the `cnf` claim. Combined with a `dpop_strict` JTI store this
+    /// upgrades the deployment from "DPoP is honored when the issuer asks
+    /// for it" to "every request must carry a verified proof of
+    /// possession". A token without `cnf` is rejected with
+    /// [`CatError::MissingRequiredClaim`] before scope matching runs.
+    ///
+    /// Requires DPoP validation to be configured — call
+    /// [`dpop_strict`] (or [`dpop_best_effort`] for tests) as well;
+    /// authorization fails closed otherwise.
+    ///
+    /// [`dpop_strict`]: MoqtValidator::dpop_strict
+    /// [`dpop_best_effort`]: MoqtValidator::dpop_best_effort
+    pub fn require_dpop(mut self) -> Self {
+        self.require_dpop = true;
+        self
+    }
+
+    /// Refuse to authorize any token that does not pin a peer certificate
+    /// via the `cattpk` claim. The pin is still enforced when
+    /// `catcert` / peer-cert context is provided by the integrator; this
+    /// setter simply escalates a missing pin from "advisory" to
+    /// "required".
+    pub fn require_cattpk(mut self) -> Self {
+        self.require_cattpk = true;
+        self
+    }
+
+    /// Commit every DPoP JTI to the store, even when the token's
+    /// `catdpop.honor_jti` bit is `false`. Without this override a
+    /// hostile issuer can silently opt out of replay tracking on a
+    /// per-token basis. Requires DPoP validation to be configured; a
+    /// token without `cnf` still passes through the normal path (no
+    /// proof, no JTI to commit) — pair with [`require_dpop`] for full
+    /// coverage.
+    ///
+    /// [`require_dpop`]: MoqtValidator::require_dpop
+    pub fn require_dpop_replay_tracking(mut self) -> Self {
+        self.require_dpop_replay_tracking = true;
         self
     }
 
@@ -641,6 +770,17 @@ impl MoqtValidator {
             }
         }
 
+        // 3b. Fail-closed policy gates: escalate optional claims to
+        //     mandatory when the operator has opted in. These run before
+        //     the expensive DPoP / scope-match work so a token that lacks
+        //     the required binding is rejected as cheaply as possible.
+        if self.require_dpop && claims.dpop.cnf.is_none() {
+            return Err(CatError::MissingRequiredClaim("cnf".to_string()));
+        }
+        if self.require_cattpk && claims.cat.cattpk.is_none() {
+            return Err(CatError::MissingRequiredClaim("cattpk".to_string()));
+        }
+
         // 4. ALPN.
         if let Some(ref token_alpns) = claims.cat.catalpn {
             let peer_alpn = ctx
@@ -765,7 +905,11 @@ impl MoqtValidator {
                 CatError::DpopValidationFailed("DPoP validation not configured".to_string())
             })?;
 
-            if !confirmation_matches_jwk(cnf, &proof.header.jwk)? {
+            // Reuse the proof's cached JWK thumbprint on the hot path;
+            // the first-touch computes SHA-256 once, subsequent authorize
+            // calls skip the hash.
+            let proof_jkt = proof.jwk_thumbprint()?;
+            if !crate::dpop::confirmation_matches_thumbprint(cnf, proof_jkt) {
                 return Err(CatError::InvalidDpopBinding);
             }
 
@@ -885,7 +1029,11 @@ impl MoqtValidator {
                 }
             }
 
-            validator.dpop_commit_key(proof, &cnf.jkt, issuer)
+            if self.require_dpop_replay_tracking {
+                validator.dpop_commit_key_forced(proof, &cnf.jkt, issuer)
+            } else {
+                validator.dpop_commit_key(proof, &cnf.jkt, issuer)
+            }
         } else {
             None
         };

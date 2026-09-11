@@ -43,11 +43,11 @@ distributed strict `JtiStore` / `AsyncJtiStore` and prove:
   layer, not the crate.
 
 `catreplay`'s `AsyncReplayGuard` carries the same set of obligations
-for the `cti` state. As of 0.4.2 the trait exposes
-`AsyncReplayGuard::is_strict()` mirroring the JTI-store
-self-attestation, and `AsyncMoqtValidator::require_strict_replay_guard()`
-turns the check on so a non-strict guard cannot slip past into a CDN
-deployment for the second commit surface. TTL for the `cti` store must
+for the `cti` state. The trait exposes `AsyncReplayGuard::is_strict()`
+mirroring the JTI-store self-attestation, and
+`AsyncMoqtValidator::require_strict_replay_guard()` turns the check on
+so a non-strict guard cannot slip past into a CDN deployment for the
+second commit surface. TTL for the `cti` store must
 be sized to the maximum token lifetime (`exp - iat`), not the DPoP
 freshness window — a re-used token can arrive at any point inside its
 own validity, not just within the JTI window. The strict attestation

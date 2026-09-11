@@ -23,8 +23,7 @@ fn main() {
     let token_str = create_test_token(&key);
 
     // Setup validators
-    let token_validator = CatTokenValidator::new()
-        .with_expected_issuers(vec!["https://auth.example.com".to_string()])
+    let token_validator = CatTokenValidator::for_expected_issuers(["https://auth.example.com"])
         .with_expected_audiences(vec!["moqt-relay.example.com".to_string()])
         .with_clock_skew_tolerance(60)
         .unwrap()

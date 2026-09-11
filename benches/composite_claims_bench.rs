@@ -36,7 +36,7 @@ fn bench_or_composite_evaluation(c: &mut Criterion) {
             BenchmarkId::new("tokens", token_count),
             token_count,
             |b, &token_count| {
-                let validator = CatTokenValidator::new();
+                let validator = CatTokenValidator::dangerously_any_issuer();
                 let validator_fn = |token: &CatToken| -> Result<(), Box<dyn std::error::Error>> {
                     validator
                         .validate(token)
@@ -68,7 +68,7 @@ fn bench_and_composite_evaluation(c: &mut Criterion) {
             BenchmarkId::new("tokens", token_count),
             token_count,
             |b, &token_count| {
-                let validator = CatTokenValidator::new();
+                let validator = CatTokenValidator::dangerously_any_issuer();
                 let validator_fn = |token: &CatToken| -> Result<(), Box<dyn std::error::Error>> {
                     validator
                         .validate(token)
@@ -100,7 +100,7 @@ fn bench_nor_composite_evaluation(c: &mut Criterion) {
             BenchmarkId::new("tokens", token_count),
             token_count,
             |b, &token_count| {
-                let validator = CatTokenValidator::new();
+                let validator = CatTokenValidator::dangerously_any_issuer();
                 let validator_fn = |token: &CatToken| -> Result<(), Box<dyn std::error::Error>> {
                     validator
                         .validate(token)
@@ -130,7 +130,7 @@ fn bench_nested_composite_evaluation(c: &mut Criterion) {
 
     for depth in [1, 2, 3, 4, 5].iter() {
         group.bench_with_input(BenchmarkId::new("depth", depth), depth, |b, &depth| {
-            let validator = CatTokenValidator::new();
+            let validator = CatTokenValidator::dangerously_any_issuer();
             let validator_fn = |token: &CatToken| -> Result<(), Box<dyn std::error::Error>> {
                 validator
                     .validate(token)
@@ -190,7 +190,7 @@ fn bench_token_validation_with_composite(c: &mut Criterion) {
             BenchmarkId::new("composite_tokens", token_count),
             token_count,
             |b, &token_count| {
-                let validator = CatTokenValidator::new();
+                let validator = CatTokenValidator::dangerously_any_issuer();
 
                 let tokens: Vec<CatToken> = (0..token_count)
                     .map(|i| create_valid_token(&format!("issuer{}", i)))
@@ -213,7 +213,7 @@ fn bench_token_validation_with_composite(c: &mut Criterion) {
 
 fn bench_composite_claims_container(c: &mut Criterion) {
     c.bench_function("composite_claims_container", |b| {
-        let validator = CatTokenValidator::new();
+        let validator = CatTokenValidator::dangerously_any_issuer();
         let validator_fn = |token: &CatToken| -> Result<(), Box<dyn std::error::Error>> {
             validator
                 .validate(token)

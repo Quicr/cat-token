@@ -129,37 +129,69 @@ recognised vector categories.
 
 ## Quick Start
 
+Working end-to-end example ([`examples/quickstart.rs`](examples/quickstart.rs)):
+
 ```rust
 use cat_token::*;
-use cat_token::moqt::{MoqtValidator, MoqtAuthRequest, MoqtScopeBuilder, roles};
 use chrono::{Duration, Utc};
 
-// Create a publisher token for live streaming
-let scope = MoqtScopeBuilder::new()
-    .publisher()
-    .namespace_exact(b"cdn.example.com")
-    .track_prefix(b"/live/")
-    .build();
-
+// 1. Issuer builds and signs a CAT
+let key = Es256Algorithm::new_with_key_pair()?;
 let token = CatTokenBuilder::new()
     .issuer("https://auth.example.com")
     .audience(vec!["relay.example.com".to_string()])
     .expires_at(Utc::now() + Duration::hours(1))
-    .moqt_scope(scope)
-    .moqt_reval(300.0)  // 5-minute revalidation
-    .build();
+    .moqt_scope(
+        MoqtScopeBuilder::new()
+            .publisher()
+            .namespace_exact(b"live.example.com")
+            .track_prefix(b"/streams/")
+            .build(),
+    )
+    .build()?;
+let encoded = encode_token(&token, &key)?;
 
-// Validate authorization
-let validator = MoqtValidator::new();
-let request = MoqtAuthRequest::new(
+// 2. Relay decodes + verifies signature
+let verified = Decoder::with_algorithm(&key).decode(&encoded)?;
+
+// 3. Relay validates claims. `for_expected_issuers` is mandatory —
+//    to intentionally accept any issuer, call
+//    `CatTokenValidator::dangerously_any_issuer()` instead.
+let validator = CatTokenValidator::for_expected_issuers(["https://auth.example.com"])
+    .with_expected_audiences(vec!["relay.example.com".to_string()]);
+let validated = verified.validate(&validator)?;
+
+// 4. Relay authorizes a single request against the validated token.
+let moqt_validator = MoqtValidator::new();
+let request = RelayRequestContext::new(
+    "relay.example.com",
     MoqtAction::Publish,
-    vec![b"cdn.example.com".to_vec(), b"live-stream-42".to_vec()],
-    b"/video".to_vec(),
+    vec![b"live.example.com".to_vec(), b"streaming-123".to_vec()],
+    b"/streams/video".to_vec(),
 );
-
-let result = validator.authorize(&token, &request);
-assert!(result.authorized);
+let outcome = moqt_validator.authorize(&validated, &request)?;
+println!("Authorized under scope {}", outcome.matched_scope_index());
 ```
+
+### Strict CDN deployment shape
+
+For fleet-scale relay validators (multiple nodes sharing state), the
+constructors below refuse insecure defaults up front:
+
+- [`InMemoryStrictJtiStore::new(freshness_window_seconds, max_entries)`]
+  requires a mandatory entry cap; the reference in-memory store is
+  now sharded across 16 shards.
+- [`MoqtValidator::dpop_strict`] refuses a non-strict JTI store, and
+  [`AsyncMoqtValidator::strict`] does the same on the async path.
+- [`MoqtValidator::require_dpop`], `require_cattpk`, and
+  `require_dpop_replay_tracking` opt the validator into mandatory
+  DPoP `cnf`, mandatory X.509 pinning, and JTI commit even when the
+  token clears `honor_jti`.
+- With the `tokio` feature,
+  [`AsyncMoqtValidator::authorize_offloaded`] runs the sync
+  pre-commit half (ES256/PS256 verify) on
+  `tokio::task::spawn_blocking` so the reactor never blocks on
+  signature verification.
 
 ## Predefined Roles
 

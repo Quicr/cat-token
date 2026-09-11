@@ -53,7 +53,7 @@ fn test_four_chars_rejected() {
 fn test_validator_checks_iso3166() {
     let mut token = CatToken::new();
     token.cat.catgeoiso3166 = Some(vec!["US".to_string(), "GB".to_string()]);
-    let validator = CatTokenValidator::new();
+    let validator = CatTokenValidator::dangerously_any_issuer();
     assert!(validator.validate(&token).is_ok());
 }
 
@@ -61,6 +61,6 @@ fn test_validator_checks_iso3166() {
 fn test_validator_rejects_invalid_iso3166() {
     let mut token = CatToken::new();
     token.cat.catgeoiso3166 = Some(vec!["US".to_string(), "invalid".to_string()]);
-    let validator = CatTokenValidator::new();
+    let validator = CatTokenValidator::dangerously_any_issuer();
     assert!(validator.validate(&token).is_err());
 }

@@ -13,7 +13,6 @@ categories = ["authentication", "cryptography"]
 ciborium = "0.2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-serde_cbor = "0.11"
 base64 = "0.22"
 ring = "0.17"
 hmac = "0.12"
@@ -40,6 +39,11 @@ async-trait = { version = "0.1", optional = true }
 # `futures::future::join_all` used by `jti_contract::asynchronous` to
 # drive concurrent inserts without picking a runtime for the caller.
 futures = { version = "0.3", default-features = false, features = ["std", "async-await"], optional = true }
+
+# Optional tokio runtime hook for AsyncMoqtValidator::authorize_offloaded.
+# Only the `rt` feature is pulled — the crate never spawns tasks itself,
+# it only defers to `tokio::task::spawn_blocking` when the caller opts in.
+tokio = { version = "1", default-features = false, features = ["rt"], optional = true }
 
 [dependencies.regex]
 version = "1.10"
@@ -134,3 +138,7 @@ moqt = []
 # relays can integrate cat-token into an async event loop without wrapping
 # every call in spawn_blocking. Requires moqt.
 async = ["moqt", "dep:async-trait", "dep:futures"]
+# Adds AsyncMoqtValidator::authorize_offloaded, which wraps the sync
+# pre-commit half of the pipeline in tokio::task::spawn_blocking so
+# ES256/PS256 verify does not run on the reactor. Requires async.
+tokio = ["async", "dep:tokio"]

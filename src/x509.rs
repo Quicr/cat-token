@@ -30,10 +30,33 @@ use crate::CatError;
 use der::Decode;
 use x509_cert::Certificate;
 
+/// Upper bound on the DER-encoded certificate size accepted by
+/// [`extract_spki_from_cert`]. Well-formed leaf certificates issued by
+/// public CAs are ~1-4 KB even with SCTs and multiple SANs; the CA/B
+/// Baseline Requirements set no fixed cap, but 64 KB is a comfortable
+/// order-of-magnitude ceiling that a legitimate leaf will never
+/// approach. The cap defends the DER parser against pathological inputs
+/// (deeply nested structures, gigabytes of trailing garbage) supplied
+/// by an attacker who can reach the cert-decoding path — importantly
+/// via the `cattpk` pinning entry, which runs on hot-path
+/// authorization.
+pub const MAX_CERT_DER_BYTES: usize = 64 * 1024;
+
 /// Extract the SubjectPublicKeyInfo (SPKI) DER bytes from a DER-encoded X.509
 /// certificate. Useful for **issuers** computing the pin value to embed in a
 /// token; not a validation entry point.
+///
+/// Rejects inputs larger than [`MAX_CERT_DER_BYTES`] before invoking the
+/// DER parser so an oversized cert cannot expand the CPU cost of a
+/// single authorization request.
 pub fn extract_spki_from_cert(cert_der: &[u8]) -> Result<Vec<u8>, CatError> {
+    if cert_der.len() > MAX_CERT_DER_BYTES {
+        return Err(CatError::CertificateValidationFailed(format!(
+            "certificate DER {} bytes exceeds MAX_CERT_DER_BYTES={}",
+            cert_der.len(),
+            MAX_CERT_DER_BYTES
+        )));
+    }
     let cert = Certificate::from_der(cert_der).map_err(|e| {
         CatError::CertificateValidationFailed(format!("Failed to parse certificate: {e}"))
     })?;
@@ -222,6 +245,13 @@ mod tests {
     fn authenticate_and_pin_rejects_pin_mismatch_after_valid_chain() {
         let cert = generate_self_signed_cert();
         let err = authenticate_and_pin(&[0u8; 32], &[&cert], &AcceptingValidator, 0).unwrap_err();
+        assert!(matches!(err, CatError::CertificateValidationFailed(_)));
+    }
+
+    #[test]
+    fn extract_spki_rejects_oversize_input() {
+        let oversize = vec![0u8; MAX_CERT_DER_BYTES + 1];
+        let err = extract_spki_from_cert(&oversize).unwrap_err();
         assert!(matches!(err, CatError::CertificateValidationFailed(_)));
     }
 

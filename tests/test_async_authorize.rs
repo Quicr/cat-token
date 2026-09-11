@@ -22,7 +22,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 fn make_validated(token: &CatToken) -> ValidatedToken {
     let key = HmacSha256Algorithm::new(b"test-key-for-roundtrip-000000000");
     let encoded = encode_token(token, &key).unwrap();
-    let validator = CatTokenValidator::new().dangerously_allow_unencrypted_privacy_claims();
+    let validator = CatTokenValidator::dangerously_any_issuer().dangerously_allow_unencrypted_privacy_claims();
     Decoder::with_algorithm(&key)
         .decode(&encoded)
         .unwrap()
@@ -73,7 +73,7 @@ async fn async_authorize_happy_path_commits_jti() {
         .unwrap()
         .with_jti_processing(true);
     let sync = cat_token::moqt::MoqtValidator::new().dpop_best_effort(settings);
-    let store = Arc::new(AsyncInMemoryStrictJtiStore::new());
+    let store = Arc::new(AsyncInMemoryStrictJtiStore::new(1024));
     let validator =
         AsyncMoqtValidator::strict(sync, store.clone()).expect("strict store construction");
 
@@ -116,7 +116,7 @@ async fn async_authorize_rejects_replayed_jti() {
         .unwrap()
         .with_jti_processing(true);
     let sync = cat_token::moqt::MoqtValidator::new().dpop_best_effort(settings);
-    let store: Arc<dyn AsyncJtiStore> = Arc::new(AsyncInMemoryStrictJtiStore::new());
+    let store: Arc<dyn AsyncJtiStore> = Arc::new(AsyncInMemoryStrictJtiStore::new(1024));
     let validator = AsyncMoqtValidator::strict(sync, store).expect("strict store construction");
 
     let request = cat_token::moqt::RelayRequestContext::new(
@@ -287,7 +287,7 @@ async fn async_authorize_commits_catreplay_via_guard() {
         .unwrap()
         .with_jti_processing(true);
     let sync = cat_token::moqt::MoqtValidator::new().dpop_best_effort(settings);
-    let jti_store = Arc::new(AsyncInMemoryStrictJtiStore::new());
+    let jti_store = Arc::new(AsyncInMemoryStrictJtiStore::new(1024));
     let validator = AsyncMoqtValidator::strict(sync, jti_store).expect("strict store construction");
     let guard = RecordingReplayGuard::new();
 
@@ -377,7 +377,7 @@ async fn strict_validator_refuses_best_effort_replay_guard() {
         .unwrap()
         .with_jti_processing(true);
     let sync = cat_token::moqt::MoqtValidator::new().dpop_best_effort(settings);
-    let jti_store = Arc::new(AsyncInMemoryStrictJtiStore::new());
+    let jti_store = Arc::new(AsyncInMemoryStrictJtiStore::new(1024));
     let validator = AsyncMoqtValidator::strict(sync, jti_store)
         .expect("strict store construction")
         .require_strict_replay_guard();
@@ -424,7 +424,7 @@ async fn strict_validator_accepts_strict_replay_guard() {
         .unwrap()
         .with_jti_processing(true);
     let sync = cat_token::moqt::MoqtValidator::new().dpop_best_effort(settings);
-    let jti_store = Arc::new(AsyncInMemoryStrictJtiStore::new());
+    let jti_store = Arc::new(AsyncInMemoryStrictJtiStore::new(1024));
     let validator = AsyncMoqtValidator::strict(sync, jti_store)
         .expect("strict store construction")
         .require_strict_replay_guard();
@@ -470,7 +470,7 @@ async fn strict_validator_no_guard_no_catreplay_still_authorizes() {
         .unwrap()
         .with_jti_processing(true);
     let sync = cat_token::moqt::MoqtValidator::new().dpop_best_effort(settings);
-    let jti_store = Arc::new(AsyncInMemoryStrictJtiStore::new());
+    let jti_store = Arc::new(AsyncInMemoryStrictJtiStore::new(1024));
     let validator = AsyncMoqtValidator::strict(sync, jti_store)
         .expect("strict store construction")
         .require_strict_replay_guard();

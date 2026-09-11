@@ -61,7 +61,7 @@ fn test_geohash_builder_accumulates() {
 
 #[test]
 fn test_validator_rejects_invalid_in_array() {
-    let validator = CatTokenValidator::new().dangerously_allow_unencrypted_privacy_claims();
+    let validator = CatTokenValidator::dangerously_any_issuer().dangerously_allow_unencrypted_privacy_claims();
 
     let mut token = CatToken::new();
     token.cat.geohash = Some(vec![
@@ -77,7 +77,7 @@ fn test_validator_rejects_invalid_in_array() {
 
 #[test]
 fn test_validator_accepts_valid_array() {
-    let validator = CatTokenValidator::new().dangerously_allow_unencrypted_privacy_claims();
+    let validator = CatTokenValidator::dangerously_any_issuer().dangerously_allow_unencrypted_privacy_claims();
 
     let mut token = CatToken::new();
     token.cat.geohash = Some(vec!["9q8yyk".to_string(), "dr5regw".to_string()]);

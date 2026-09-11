@@ -165,7 +165,7 @@ fn test_token_validation_success() {
         .build()
         .unwrap();
 
-    let validator = CatTokenValidator::new()
+    let validator = CatTokenValidator::dangerously_any_issuer()
         .with_expected_issuers(vec!["https://trusted-issuer.com".to_string()])
         .with_expected_audiences(vec!["https://my-service.com".to_string()])
         .with_clock_skew_tolerance(60)
@@ -188,7 +188,7 @@ fn test_token_validation_expired() {
         .build()
         .unwrap();
 
-    let validator = CatTokenValidator::new()
+    let validator = CatTokenValidator::dangerously_any_issuer()
         .with_expected_issuers(vec!["https://trusted-issuer.com".to_string()])
         .with_expected_audiences(vec!["https://my-service.com".to_string()]);
 
@@ -211,7 +211,7 @@ fn test_token_validation_not_yet_valid() {
         .build()
         .unwrap();
 
-    let validator = CatTokenValidator::new()
+    let validator = CatTokenValidator::dangerously_any_issuer()
         .with_expected_issuers(vec!["https://trusted-issuer.com".to_string()])
         .with_expected_audiences(vec!["https://my-service.com".to_string()]);
 
@@ -232,7 +232,7 @@ fn test_token_validation_invalid_issuer() {
         .build()
         .unwrap();
 
-    let validator = CatTokenValidator::new()
+    let validator = CatTokenValidator::dangerously_any_issuer()
         .with_expected_issuers(vec!["https://trusted-issuer.com".to_string()])
         .with_expected_audiences(vec!["https://my-service.com".to_string()]);
 
@@ -253,7 +253,7 @@ fn test_token_validation_invalid_audience() {
         .build()
         .unwrap();
 
-    let validator = CatTokenValidator::new()
+    let validator = CatTokenValidator::dangerously_any_issuer()
         .with_expected_issuers(vec!["https://trusted-issuer.com".to_string()])
         .with_expected_audiences(vec!["https://my-service.com".to_string()]);
 
@@ -416,7 +416,7 @@ fn test_invalid_token_format() {
 
 #[test]
 fn test_geographic_validation() {
-    let validator = CatTokenValidator::new().dangerously_allow_unencrypted_privacy_claims();
+    let validator = CatTokenValidator::dangerously_any_issuer().dangerously_allow_unencrypted_privacy_claims();
 
     // Test invalid coordinates
     let mut token = CatToken::new();
