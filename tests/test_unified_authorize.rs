@@ -40,7 +40,8 @@ impl ReplayGuard for MemReplayGuard {
 fn make_validated(token: &CatToken) -> ValidatedToken {
     let key = HmacSha256Algorithm::new(b"test-key-for-roundtrip-000000000");
     let encoded = encode_token(token, &key).unwrap();
-    let validator = CatTokenValidator::dangerously_any_issuer().dangerously_allow_unencrypted_privacy_claims();
+    let validator =
+        CatTokenValidator::dangerously_any_issuer().dangerously_allow_unencrypted_privacy_claims();
     Decoder::with_algorithm(&key)
         .decode(&encoded)
         .unwrap()
@@ -105,7 +106,8 @@ fn test_authorize_rejects_unknown_catv() {
         .unwrap();
     let key = HmacSha256Algorithm::new(b"test-key-for-roundtrip-000000000");
     let encoded = encode_token(&token, &key).unwrap();
-    let validator = CatTokenValidator::dangerously_any_issuer().dangerously_allow_unencrypted_privacy_claims();
+    let validator =
+        CatTokenValidator::dangerously_any_issuer().dangerously_allow_unencrypted_privacy_claims();
     let result = Decoder::with_algorithm(&key)
         .decode(&encoded)
         .unwrap()

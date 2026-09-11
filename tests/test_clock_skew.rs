@@ -102,15 +102,18 @@ fn test_separate_tolerances() {
 fn test_tolerance_above_cap_rejected() {
     // Above the 1 hour cap: reject.
     assert!(matches!(
-        CatTokenValidator::dangerously_any_issuer().with_clock_skew_tolerance(MAX_CLOCK_SKEW_TOLERANCE_SECS + 1),
+        CatTokenValidator::dangerously_any_issuer()
+            .with_clock_skew_tolerance(MAX_CLOCK_SKEW_TOLERANCE_SECS + 1),
         Err(CatError::InvalidClaimValue(_))
     ));
     assert!(matches!(
-        CatTokenValidator::dangerously_any_issuer().with_separate_tolerances(MAX_CLOCK_SKEW_TOLERANCE_SECS + 1, 0),
+        CatTokenValidator::dangerously_any_issuer()
+            .with_separate_tolerances(MAX_CLOCK_SKEW_TOLERANCE_SECS + 1, 0),
         Err(CatError::InvalidClaimValue(_))
     ));
     assert!(matches!(
-        CatTokenValidator::dangerously_any_issuer().with_separate_tolerances(0, MAX_CLOCK_SKEW_TOLERANCE_SECS + 1),
+        CatTokenValidator::dangerously_any_issuer()
+            .with_separate_tolerances(0, MAX_CLOCK_SKEW_TOLERANCE_SECS + 1),
         Err(CatError::InvalidClaimValue(_))
     ));
 

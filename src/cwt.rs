@@ -2637,10 +2637,7 @@ pub fn peek_issuer(cbor_payload: &[u8]) -> Result<Option<String>, CatError> {
         if kmt == 0 && matches_ai_as_i64(kai, &mut c)? == Some(CLAIM_ISS) {
             let (vmt, vai) = c.read_header()?;
             if vmt != 3 {
-                return Err(CatError::malformed(
-                    "iss",
-                    "iss must be a text string",
-                ));
+                return Err(CatError::malformed("iss", "iss must be a text string"));
             }
             let n = c.length_from_ai(vai)? as usize;
             let bytes = c.read_bytes(n)?;
@@ -2797,9 +2794,7 @@ impl<'a> PeekCursor<'a> {
                         let _ = self.read_bytes(8)?;
                         Ok(())
                     }
-                    _ => Err(CatError::InvalidCbor(
-                        "unexpected simple/float".to_string(),
-                    )),
+                    _ => Err(CatError::InvalidCbor("unexpected simple/float".to_string())),
                 }
             }
             _ => Err(CatError::InvalidCbor("unknown major type".to_string())),
@@ -2856,9 +2851,7 @@ impl<'a> PeekCursor<'a> {
                             let _ = self.read_bytes(8)?;
                             Ok(())
                         }
-                        _ => Err(CatError::InvalidCbor(
-                            "unexpected simple/float".to_string(),
-                        )),
+                        _ => Err(CatError::InvalidCbor("unexpected simple/float".to_string())),
                     }
                 }
             }
@@ -2883,12 +2876,7 @@ impl<'a> PeekCursor<'a> {
         }
     }
 
-    fn skip_array_or_map(
-        &mut self,
-        ai: u8,
-        is_map: bool,
-        depth: u32,
-    ) -> Result<(), CatError> {
+    fn skip_array_or_map(&mut self, ai: u8, is_map: bool, depth: u32) -> Result<(), CatError> {
         if depth > PEEK_MAX_DEPTH {
             return Err(CatError::InvalidCbor("peek nesting too deep".to_string()));
         }

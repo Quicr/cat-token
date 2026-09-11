@@ -492,7 +492,11 @@ impl DpopProof {
         // both computations produce the same bytes so there is no
         // observable divergence.
         let _ = self.jkt_cache.set(computed);
-        Ok(self.jkt_cache.get().expect("jkt_cache populated").as_slice())
+        Ok(self
+            .jkt_cache
+            .get()
+            .expect("jkt_cache populated")
+            .as_slice())
     }
 
     pub fn header(&self) -> &DpopHeader {
@@ -2055,7 +2059,9 @@ impl InMemoryStrictJtiStore {
     }
 
     fn build(freshness_window_seconds: i64, max_entries: Option<usize>) -> Self {
-        let shards = (0..DEFAULT_JTI_SHARDS).map(|_| StrictShard::new()).collect();
+        let shards = (0..DEFAULT_JTI_SHARDS)
+            .map(|_| StrictShard::new())
+            .collect();
         Self {
             shards,
             hasher_state: std::collections::hash_map::RandomState::new(),
@@ -2114,7 +2120,10 @@ impl JtiStore for InMemoryStrictJtiStore {
         // relay must refuse inserts on every shard uniformly; without
         // this check a caller could see per-shard slop.
         if let Some(max) = self.max_entries
-            && self.total_entries.load(std::sync::atomic::Ordering::Relaxed) >= max
+            && self
+                .total_entries
+                .load(std::sync::atomic::Ordering::Relaxed)
+                >= max
         {
             self.rejected_over_capacity
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);

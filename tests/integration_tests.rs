@@ -416,7 +416,8 @@ fn test_invalid_token_format() {
 
 #[test]
 fn test_geographic_validation() {
-    let validator = CatTokenValidator::dangerously_any_issuer().dangerously_allow_unencrypted_privacy_claims();
+    let validator =
+        CatTokenValidator::dangerously_any_issuer().dangerously_allow_unencrypted_privacy_claims();
 
     // Test invalid coordinates
     let mut token = CatToken::new();

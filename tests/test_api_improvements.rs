@@ -11,7 +11,8 @@ const RELAY: &str = "relay";
 fn make_validated(token: &CatToken) -> ValidatedToken {
     let key = HmacSha256Algorithm::new(b"test-key-for-roundtrip-000000000");
     let encoded = encode_token(token, &key).unwrap();
-    let validator = CatTokenValidator::dangerously_any_issuer().dangerously_allow_unencrypted_privacy_claims();
+    let validator =
+        CatTokenValidator::dangerously_any_issuer().dangerously_allow_unencrypted_privacy_claims();
     Decoder::with_algorithm(&key)
         .decode(&encoded)
         .unwrap()
@@ -103,11 +104,12 @@ fn test_single_audience_convenience() {
         .unwrap()
         .into_unvalidated_token();
 
-    let validator = CatTokenValidator::dangerously_any_issuer().with_expected_audiences(vec!["my-relay".to_string()]);
+    let validator = CatTokenValidator::dangerously_any_issuer()
+        .with_expected_audiences(vec!["my-relay".to_string()]);
     assert!(validator.validate(&decoded).is_ok());
 
-    let validator_wrong =
-        CatTokenValidator::dangerously_any_issuer().with_expected_audiences(vec!["other-relay".to_string()]);
+    let validator_wrong = CatTokenValidator::dangerously_any_issuer()
+        .with_expected_audiences(vec!["other-relay".to_string()]);
     assert!(matches!(
         validator_wrong.validate(&decoded),
         Err(CatError::InvalidAudience)

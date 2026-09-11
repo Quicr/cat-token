@@ -111,7 +111,8 @@ fn build_token_and_proof(dpop_alg: &Es256Algorithm) -> (ValidatedToken, DpopProo
         .unwrap();
     let key = HmacSha256Algorithm::new(b"test-key-for-roundtrip-000000000");
     let encoded = encode_token(&token, &key).unwrap();
-    let cat_validator = CatTokenValidator::dangerously_any_issuer().dangerously_allow_unencrypted_privacy_claims();
+    let cat_validator =
+        CatTokenValidator::dangerously_any_issuer().dangerously_allow_unencrypted_privacy_claims();
     let validated = Decoder::with_algorithm(&key)
         .decode(&encoded)
         .unwrap()
@@ -214,7 +215,10 @@ fn test_transient_backend_failure_does_not_burn_jti() {
     let validated = Decoder::with_algorithm(&key)
         .decode(&encoded)
         .unwrap()
-        .validate(&CatTokenValidator::dangerously_any_issuer().dangerously_allow_unencrypted_privacy_claims())
+        .validate(
+            &CatTokenValidator::dangerously_any_issuer()
+                .dangerously_allow_unencrypted_privacy_claims(),
+        )
         .unwrap();
     let ath = compute_access_token_hash(validated.serialized());
 

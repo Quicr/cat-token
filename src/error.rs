@@ -56,13 +56,11 @@ pub struct SafeDisplay<'a>(pub &'a str);
 
 impl fmt::Display for SafeDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut count = 0usize;
-        for c in self.0.chars() {
+        for (count, c) in self.0.chars().enumerate() {
             if count >= SAFE_DISPLAY_MAX_LEN {
                 f.write_str("…")?;
                 return Ok(());
             }
-            count += 1;
             match c {
                 '\r' | '\n' | '\t' | '\0' | '\x08' | '\x0b' | '\x0c' | '\x7f' => {
                     write!(f, "\\x{:02x}", c as u32)?
@@ -156,10 +154,7 @@ pub enum CatError {
     /// `detail` may echo attacker-controlled bytes; it is
     /// `SafeDisplay`-sanitized before rendering.
     #[error("Malformed claim {claim}: {}", SafeDisplay(.detail))]
-    MalformedClaim {
-        claim: &'static str,
-        detail: String,
-    },
+    MalformedClaim { claim: &'static str, detail: String },
 
     /// The request/peer does not satisfy a well-formed claim (e.g.,
     /// `catu` prefix mismatch, `cath` header rule not met, `catnip`
@@ -170,10 +165,7 @@ pub enum CatError {
     /// `detail` may echo attacker-controlled bytes; it is
     /// `SafeDisplay`-sanitized before rendering.
     #[error("Claim {claim} enforcement failed: {}", SafeDisplay(.detail))]
-    ClaimEnforcementFailed {
-        claim: &'static str,
-        detail: String,
-    },
+    ClaimEnforcementFailed { claim: &'static str, detail: String },
 
     /// The token asserts a claim that requires a piece of request
     /// context (peer IP, ALPN, URI, request method, header set, block

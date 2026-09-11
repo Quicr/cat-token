@@ -184,7 +184,8 @@ fn test_token_validation_failures() {
 
 #[test]
 fn test_geographic_validation() {
-    let validator = CatTokenValidator::dangerously_any_issuer().dangerously_allow_unencrypted_privacy_claims();
+    let validator =
+        CatTokenValidator::dangerously_any_issuer().dangerously_allow_unencrypted_privacy_claims();
 
     // Valid coordinates
     let valid_token = CatToken::new()
