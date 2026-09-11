@@ -9,7 +9,8 @@ use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_ma
 fn make_validated(token: &CatToken) -> ValidatedToken {
     let key = HmacSha256Algorithm::new(b"test-key-for-roundtrip-000000000");
     let encoded = encode_token(token, &key).unwrap();
-    let validator = CatTokenValidator::new().dangerously_allow_unencrypted_privacy_claims();
+    let validator =
+        CatTokenValidator::dangerously_any_issuer().dangerously_allow_unencrypted_privacy_claims();
     Decoder::with_algorithm(&key)
         .decode(&encoded)
         .unwrap()
@@ -84,7 +85,7 @@ fn bench_token_validation(c: &mut Criterion) {
     let simple_token = create_simple_token();
     let complex_token = create_complex_token();
 
-    let validator = CatTokenValidator::new()
+    let validator = CatTokenValidator::dangerously_any_issuer()
         .with_expected_issuers(vec!["https://auth.example.com".to_string()])
         .with_expected_audiences(vec!["client1".to_string(), "client2".to_string()])
         .with_clock_skew_tolerance(60)

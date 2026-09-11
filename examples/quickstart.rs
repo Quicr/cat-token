@@ -40,8 +40,7 @@ fn main() -> Result<(), CatError> {
     let verified = Decoder::with_algorithm(&key).decode(&encoded)?;
 
     // 5. Validate claims (produces ValidatedToken)
-    let validator = CatTokenValidator::new()
-        .with_expected_issuers(vec!["https://auth.example.com".to_string()])
+    let validator = CatTokenValidator::for_expected_issuers(["https://auth.example.com"])
         .with_expected_audiences(vec!["relay.example.com".to_string()]);
     let validated = verified.validate(&validator)?;
 

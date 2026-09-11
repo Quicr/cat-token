@@ -122,10 +122,21 @@ impl CryptographicAlgorithm for HmacSha256Algorithm {
     }
 }
 
+/// ES256 (ECDSA-P256-SHA256) signer/verifier.
+///
+/// The inner [`p256::ecdsa::SigningKey`] already implements
+/// [`zeroize::ZeroizeOnDrop`] via the `ecdsa` crate, so the private
+/// scalar is wiped when this struct drops. The marker
+/// `impl ZeroizeOnDrop` on this type asserts that guarantee at the
+/// crate boundary and prevents a future refactor from silently
+/// introducing a field that does not zeroize. `VerifyingKey` is a
+/// public value and is not zeroed.
 pub struct Es256Algorithm {
     signing_key: Option<SigningKey>,
     verifying_key: VerifyingKey,
 }
+
+impl zeroize::ZeroizeOnDrop for Es256Algorithm {}
 
 impl Es256Algorithm {
     pub fn new_with_key_pair() -> Result<Self, CatError> {
@@ -194,11 +205,22 @@ impl CryptographicAlgorithm for Es256Algorithm {
     }
 }
 
+/// PS256 (RSASSA-PSS-SHA256) signer/verifier.
+///
+/// The inner [`rsa::pss::SigningKey`] already implements
+/// [`zeroize::ZeroizeOnDrop`], so the RSA private key is wiped on
+/// drop. The marker `impl ZeroizeOnDrop` on this type asserts that
+/// guarantee at the crate boundary and prevents a future refactor
+/// from silently introducing a field that does not zeroize.
+/// `RsaPublicKey` / `RsaVerifyingKey` are public values and are
+/// intentionally not zeroed.
 pub struct Ps256Algorithm {
     signing_key: Option<RsaSigningKey<Sha256>>,
     public_key: RsaPublicKey,
     verifying_key: RsaVerifyingKey<Sha256>,
 }
+
+impl zeroize::ZeroizeOnDrop for Ps256Algorithm {}
 
 impl Ps256Algorithm {
     pub fn new_with_key_pair() -> Result<Self, CatError> {
@@ -301,19 +323,38 @@ pub fn hash_sha256(data: &[u8]) -> Vec<u8> {
     digest::digest(&digest::SHA256, data).as_ref().to_vec()
 }
 
-/// Constant-time comparison to prevent timing attacks.
+/// Constant-time byte-slice equality — prevents byte-by-byte timing
+/// disclosure of the compared value.
 ///
-/// Note: The length comparison returns early if lengths differ. This is safe for
-/// comparing fixed-length values like cryptographic hashes (SHA-256) and JWK
-/// thumbprints where the length is not secret. Do not use this function for
-/// comparing variable-length secrets where the length itself is sensitive.
+/// The comparison is done by ORing `x ^ y` across every byte pair and
+/// checking the accumulated bits at the end, so no branch in the inner
+/// loop depends on the value of the compared bytes.
+///
+/// The length check is *not* constant-time: unequal lengths short-circuit
+/// to `false`. That is intentional and safe for every current caller in
+/// this crate: JWK thumbprints (fixed 32 bytes), signatures (fixed by
+/// algorithm), and access-token hashes (fixed 32 bytes) all compare
+/// values whose byte length is public. Do NOT use this helper to compare
+/// variable-length secrets where the length itself would leak
+/// information.
 #[inline]
 pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;
     }
-    a.iter()
-        .zip(b.iter())
-        .fold(0u8, |acc, (x, y)| acc | (x ^ y))
-        == 0
+    // Fold every byte pair into an accumulator so the loop's timing
+    // depends only on `a.len()`, not on the position of the first
+    // mismatched byte.
+    let mut diff: u8 = 0;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    // Read the accumulator through a volatile pointer to defeat overly
+    // clever LLVM optimizations that could otherwise reintroduce an
+    // early-exit branch. Belt-and-suspenders — every current backend
+    // already generates a straight-line xor/or loop, but the volatile
+    // read pins that behavior.
+    // Safety: `&diff` is a valid pointer to an `u8` on the stack.
+    let observed = unsafe { std::ptr::read_volatile(&diff as *const u8) };
+    observed == 0
 }

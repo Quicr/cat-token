@@ -277,6 +277,43 @@ impl AsyncMoqtValidator {
         self.commit_async(pre, Some(replay_guard)).await
     }
 
+    /// Run the sync pre-commit half on tokio's blocking pool, then
+    /// perform the two async commits on the current reactor.
+    ///
+    /// At CDN scale the ES256/PS256 verify inside `authorize_precommit`
+    /// is expensive enough that running it on the I/O reactor inflates
+    /// p99/p999 tail latency for every unrelated request. This helper
+    /// packages the recommended offload shape from
+    /// [`AsyncMoqtValidator`]'s rustdoc so relay integrators do not
+    /// re-implement it per site (and get the `.await`/`.await??`
+    /// wiring right).
+    ///
+    /// Requires the `tokio` crate feature. Caller must be on a tokio
+    /// runtime with `rt-multi-thread` (or another executor that
+    /// provides a `spawn_blocking`-compatible pool). Cap the blocking
+    /// pool with a semaphore per connection so a DPoP surge cannot
+    /// exhaust it.
+    #[cfg(feature = "tokio")]
+    pub async fn authorize_offloaded(
+        &self,
+        token: ValidatedToken,
+        ctx: RelayRequestContext,
+        replay_guard: Option<&dyn AsyncReplayGuard>,
+        catpor_block_list: Option<CatPorBlockList>,
+    ) -> Result<AuthorizedRequest, CatError> {
+        let sync = self.sync.clone();
+        let use_replay = replay_guard.is_some();
+        let pre = tokio::task::spawn_blocking(move || {
+            let block_list_ref = catpor_block_list.as_ref();
+            sync.authorize_precommit(&token, &ctx, use_replay, block_list_ref)
+        })
+        .await
+        .map_err(|e| {
+            CatError::BackendUnavailable(format!("tokio spawn_blocking join error: {e}"))
+        })??;
+        self.commit_async(pre, replay_guard).await
+    }
+
     /// Perform the async commit half of the pipeline. JTI first, then
     /// cti — matches the sync ordering documented on
     /// [`MoqtValidator::authorize`]. Split out from `authorize` so
@@ -344,19 +381,28 @@ pub struct AsyncInMemoryStrictJtiStore {
 }
 
 impl AsyncInMemoryStrictJtiStore {
+    /// Create an async strict store with a mandatory entry cap. See
+    /// [`crate::dpop::InMemoryStrictJtiStore::new`] for the rationale on
+    /// bounded-by-default. `dangerously_unbounded` is available for
+    /// tests and diagnostics that intentionally accept unbounded growth.
     #[must_use = "AsyncInMemoryStrictJtiStore::new returns the store; discarding it drops all replay state"]
-    pub fn new() -> Self {
+    pub fn new(max_entries: usize) -> Self {
+        Self {
+            entries: Mutex::new(std::collections::HashMap::new()),
+            max_entries: Some(max_entries),
+            rejected_over_capacity: std::sync::atomic::AtomicU64::new(0),
+        }
+    }
+
+    /// Create an async strict store with no cap. Fuzz / diagnostic use
+    /// only — a production async relay must call [`Self::new`].
+    #[must_use = "AsyncInMemoryStrictJtiStore::dangerously_unbounded returns the store; discarding it drops all replay state"]
+    pub fn dangerously_unbounded() -> Self {
         Self {
             entries: Mutex::new(std::collections::HashMap::new()),
             max_entries: None,
             rejected_over_capacity: std::sync::atomic::AtomicU64::new(0),
         }
-    }
-
-    #[must_use = "with_max_entries returns a modified store; discarding it drops the cap"]
-    pub fn with_max_entries(mut self, max: usize) -> Self {
-        self.max_entries = Some(max);
-        self
     }
 
     pub fn len(&self) -> usize {
@@ -381,12 +427,6 @@ impl AsyncInMemoryStrictJtiStore {
         if let Ok(mut entries) = self.entries.lock() {
             entries.retain(|_, iat| now.saturating_sub(*iat) < max_age_seconds);
         }
-    }
-}
-
-impl Default for AsyncInMemoryStrictJtiStore {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

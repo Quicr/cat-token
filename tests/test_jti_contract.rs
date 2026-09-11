@@ -18,13 +18,13 @@ use std::sync::Arc;
 
 #[test]
 fn strict_in_memory_store_meets_contract() {
-    let store = InMemoryStrictJtiStore::new(300);
+    let store = InMemoryStrictJtiStore::new(300, 1024);
     jti_contract::assert_no_dropped_insert_within_ttl(&store, 1);
     // Distinct-key + atomicity assertions need Sync — InMemoryStrictJtiStore
     // holds a Mutex so it satisfies that.
-    let store = InMemoryStrictJtiStore::new(300);
+    let store = InMemoryStrictJtiStore::new(300, 1024);
     jti_contract::assert_distinct_keys_never_collide(&store, 256);
-    let store = InMemoryStrictJtiStore::new(300);
+    let store = InMemoryStrictJtiStore::new(300, 1024);
     jti_contract::assert_atomic_insert_if_absent(&store, 32);
 }
 
@@ -58,10 +58,10 @@ mod async_contract {
 
     #[tokio::test]
     async fn async_strict_in_memory_store_meets_contract() {
-        let store = AsyncInMemoryStrictJtiStore::new();
+        let store = AsyncInMemoryStrictJtiStore::new(1024);
         asynchronous::assert_no_dropped_insert_within_ttl(&store, 1).await;
 
-        let store: Arc<dyn AsyncJtiStore> = Arc::new(AsyncInMemoryStrictJtiStore::new());
+        let store: Arc<dyn AsyncJtiStore> = Arc::new(AsyncInMemoryStrictJtiStore::new(1024));
         asynchronous::assert_atomic_insert_if_absent(store, 32).await;
     }
 

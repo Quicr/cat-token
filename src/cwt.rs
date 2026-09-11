@@ -2613,31 +2613,304 @@ impl Cwt {
 /// entry is present but not a text string — a hostile issuer must not be able
 /// to smuggle bytes/integer-typed `iss` past the resolver.
 pub fn peek_issuer(cbor_payload: &[u8]) -> Result<Option<String>, CatError> {
-    let value: Value = ciborium::de::from_reader(cbor_payload)
-        .map_err(|e| CatError::InvalidCbor(e.to_string()))?;
-    let map = match value {
-        Value::Map(m) => m,
-        _ => return Err(CatError::InvalidTokenFormat),
-    };
-    for (k, v) in map {
-        if let Value::Integer(i) = k {
-            let key: i64 = match i.try_into() {
-                Ok(k) => k,
-                Err(_) => continue,
-            };
-            if key == CLAIM_ISS {
-                match v {
-                    Value::Text(s) => return Ok(Some(s)),
-                    _ => {
-                        return Err(CatError::InvalidClaimValue(
-                            "iss must be a text string".to_string(),
-                        ));
+    let mut c = PeekCursor::new(cbor_payload);
+    let (mt, ai) = c.read_header()?;
+    if mt != 5 {
+        return Err(CatError::InvalidTokenFormat);
+    }
+    let (len, indef) = c.count_from_ai(ai)?;
+
+    let max_entries = len.min(PEEK_MAX_MAP_ENTRIES);
+    let mut i: u64 = 0;
+    loop {
+        if !indef && i >= len {
+            break;
+        }
+        if i >= max_entries {
+            break;
+        }
+        if indef && c.peek_break()? {
+            c.consume_byte();
+            break;
+        }
+        let (kmt, kai) = c.read_header()?;
+        if kmt == 0 && matches_ai_as_i64(kai, &mut c)? == Some(CLAIM_ISS) {
+            let (vmt, vai) = c.read_header()?;
+            if vmt != 3 {
+                return Err(CatError::malformed("iss", "iss must be a text string"));
+            }
+            let n = c.length_from_ai(vai)? as usize;
+            let bytes = c.read_bytes(n)?;
+            let s = std::str::from_utf8(bytes)
+                .map_err(|_| CatError::malformed("iss", "iss is not valid UTF-8"))?;
+            return Ok(Some(s.to_string()));
+        }
+        c.skip_after_header(kmt, kai)?;
+        c.skip_next_item()?;
+        i += 1;
+    }
+    Ok(None)
+}
+
+/// Cap on the number of top-level map entries the [`peek_issuer`] byte
+/// walker will scan. Well-formed CAT tokens carry a small number of
+/// top-level claims; this cap prevents a hostile payload from forcing
+/// unbounded pre-signature scanning.
+const PEEK_MAX_MAP_ENTRIES: u64 = 128;
+/// Cap on nested CBOR item depth traversed while skipping non-`iss`
+/// entries in [`peek_issuer`]. Independent of the full-decode limits;
+/// the peek walker sees fewer bytes and can afford a tighter bound.
+const PEEK_MAX_DEPTH: u32 = 16;
+
+/// Minimal, non-recursive CBOR byte-cursor used exclusively by
+/// [`peek_issuer`]. No intermediate `Value` allocation, no ciborium
+/// dependency reachable from this path — an attacker cannot inflate
+/// pre-signature CPU by presenting a maximally-nested payload.
+struct PeekCursor<'a> {
+    buf: &'a [u8],
+    pos: usize,
+}
+
+impl<'a> PeekCursor<'a> {
+    fn new(buf: &'a [u8]) -> Self {
+        Self { buf, pos: 0 }
+    }
+
+    fn read_u8(&mut self) -> Result<u8, CatError> {
+        if self.pos >= self.buf.len() {
+            return Err(CatError::InvalidCbor("truncated".to_string()));
+        }
+        let b = self.buf[self.pos];
+        self.pos += 1;
+        Ok(b)
+    }
+
+    fn read_bytes(&mut self, n: usize) -> Result<&'a [u8], CatError> {
+        let end = self
+            .pos
+            .checked_add(n)
+            .ok_or_else(|| CatError::InvalidCbor("length overflow".to_string()))?;
+        if end > self.buf.len() {
+            return Err(CatError::InvalidCbor("truncated".to_string()));
+        }
+        let out = &self.buf[self.pos..end];
+        self.pos = end;
+        Ok(out)
+    }
+
+    fn consume_byte(&mut self) {
+        self.pos = self.pos.saturating_add(1);
+    }
+
+    fn peek_break(&self) -> Result<bool, CatError> {
+        if self.pos >= self.buf.len() {
+            return Err(CatError::InvalidCbor("truncated".to_string()));
+        }
+        Ok(self.buf[self.pos] == 0xff)
+    }
+
+    fn read_header(&mut self) -> Result<(u8, u8), CatError> {
+        let b = self.read_u8()?;
+        Ok((b >> 5, b & 0x1f))
+    }
+
+    fn length_from_ai(&mut self, ai: u8) -> Result<u64, CatError> {
+        match ai {
+            0..=23 => Ok(ai as u64),
+            24 => Ok(self.read_u8()? as u64),
+            25 => {
+                let hi = self.read_u8()? as u64;
+                let lo = self.read_u8()? as u64;
+                Ok((hi << 8) | lo)
+            }
+            26 => {
+                let mut acc: u64 = 0;
+                for _ in 0..4 {
+                    acc = (acc << 8) | self.read_u8()? as u64;
+                }
+                Ok(acc)
+            }
+            27 => {
+                let mut acc: u64 = 0;
+                for _ in 0..8 {
+                    acc = (acc << 8) | self.read_u8()? as u64;
+                }
+                Ok(acc)
+            }
+            _ => Err(CatError::InvalidCbor(
+                "unexpected indefinite length".to_string(),
+            )),
+        }
+    }
+
+    /// Returns `(count, indefinite)` for the outer map header.
+    fn count_from_ai(&mut self, ai: u8) -> Result<(u64, bool), CatError> {
+        if ai == 31 {
+            Ok((0, true))
+        } else {
+            Ok((self.length_from_ai(ai)?, false))
+        }
+    }
+
+    fn skip_after_header(&mut self, mt: u8, ai: u8) -> Result<(), CatError> {
+        match mt {
+            0 | 1 => {
+                let _ = self.length_from_ai(ai)?;
+                Ok(())
+            }
+            2 | 3 => {
+                if ai == 31 {
+                    self.skip_indefinite_string()
+                } else {
+                    let n = self.length_from_ai(ai)? as usize;
+                    let _ = self.read_bytes(n)?;
+                    Ok(())
+                }
+            }
+            4 => self.skip_array_or_map(ai, false, 1),
+            5 => self.skip_array_or_map(ai, true, 1),
+            6 => {
+                let _ = self.length_from_ai(ai)?;
+                self.skip_next_item()
+            }
+            7 => {
+                if ai <= 23 {
+                    return Ok(());
+                }
+                match ai {
+                    24 => {
+                        let _ = self.read_u8()?;
+                        Ok(())
+                    }
+                    25 => {
+                        let _ = self.read_bytes(2)?;
+                        Ok(())
+                    }
+                    26 => {
+                        let _ = self.read_bytes(4)?;
+                        Ok(())
+                    }
+                    27 => {
+                        let _ = self.read_bytes(8)?;
+                        Ok(())
+                    }
+                    _ => Err(CatError::InvalidCbor("unexpected simple/float".to_string())),
+                }
+            }
+            _ => Err(CatError::InvalidCbor("unknown major type".to_string())),
+        }
+    }
+
+    fn skip_next_item(&mut self) -> Result<(), CatError> {
+        self.skip_next_item_at_depth(0)
+    }
+
+    fn skip_next_item_at_depth(&mut self, depth: u32) -> Result<(), CatError> {
+        if depth > PEEK_MAX_DEPTH {
+            return Err(CatError::InvalidCbor("peek nesting too deep".to_string()));
+        }
+        let (mt, ai) = self.read_header()?;
+        match mt {
+            0 | 1 => {
+                let _ = self.length_from_ai(ai)?;
+                Ok(())
+            }
+            2 | 3 => {
+                if ai == 31 {
+                    self.skip_indefinite_string()
+                } else {
+                    let n = self.length_from_ai(ai)? as usize;
+                    let _ = self.read_bytes(n)?;
+                    Ok(())
+                }
+            }
+            4 => self.skip_array_or_map(ai, false, depth + 1),
+            5 => self.skip_array_or_map(ai, true, depth + 1),
+            6 => {
+                let _ = self.length_from_ai(ai)?;
+                self.skip_next_item_at_depth(depth + 1)
+            }
+            7 => {
+                if ai <= 23 {
+                    Ok(())
+                } else {
+                    match ai {
+                        24 => {
+                            let _ = self.read_u8()?;
+                            Ok(())
+                        }
+                        25 => {
+                            let _ = self.read_bytes(2)?;
+                            Ok(())
+                        }
+                        26 => {
+                            let _ = self.read_bytes(4)?;
+                            Ok(())
+                        }
+                        27 => {
+                            let _ = self.read_bytes(8)?;
+                            Ok(())
+                        }
+                        _ => Err(CatError::InvalidCbor("unexpected simple/float".to_string())),
                     }
                 }
             }
+            _ => Err(CatError::InvalidCbor("unknown major type".to_string())),
         }
     }
-    Ok(None)
+
+    fn skip_indefinite_string(&mut self) -> Result<(), CatError> {
+        loop {
+            if self.peek_break()? {
+                self.consume_byte();
+                return Ok(());
+            }
+            let (mt, ai) = self.read_header()?;
+            if mt != 2 && mt != 3 {
+                return Err(CatError::InvalidCbor(
+                    "indefinite chunk wrong type".to_string(),
+                ));
+            }
+            let n = self.length_from_ai(ai)? as usize;
+            let _ = self.read_bytes(n)?;
+        }
+    }
+
+    fn skip_array_or_map(&mut self, ai: u8, is_map: bool, depth: u32) -> Result<(), CatError> {
+        if depth > PEEK_MAX_DEPTH {
+            return Err(CatError::InvalidCbor("peek nesting too deep".to_string()));
+        }
+        let (len, indef) = self.count_from_ai(ai)?;
+        let entries_per = if is_map { 2u64 } else { 1u64 };
+        if indef {
+            loop {
+                if self.peek_break()? {
+                    self.consume_byte();
+                    return Ok(());
+                }
+                self.skip_next_item_at_depth(depth)?;
+                if is_map {
+                    self.skip_next_item_at_depth(depth)?;
+                }
+            }
+        } else {
+            let total = len
+                .checked_mul(entries_per)
+                .ok_or_else(|| CatError::InvalidCbor("map length overflow".to_string()))?;
+            for _ in 0..total {
+                self.skip_next_item_at_depth(depth)?;
+            }
+            Ok(())
+        }
+    }
+}
+
+fn matches_ai_as_i64(ai: u8, c: &mut PeekCursor<'_>) -> Result<Option<i64>, CatError> {
+    let n = c.length_from_ai(ai)?;
+    if n > i64::MAX as u64 {
+        return Ok(None);
+    }
+    Ok(Some(n as i64))
 }
 
 fn decode_composite_claim_with_counters(

@@ -49,7 +49,7 @@ struct LatencyStore {
 impl LatencyStore {
     fn new(latency: Duration) -> Self {
         Self {
-            inner: AsyncInMemoryStrictJtiStore::new(),
+            inner: AsyncInMemoryStrictJtiStore::new(1024),
             latency,
             calls: AtomicU64::new(0),
         }
@@ -99,7 +99,8 @@ fn make_bench_context() -> (ValidatedToken, Es256Algorithm, Jwk) {
 
     let key = HmacSha256Algorithm::new(b"bench-key-for-async-scale-0000000");
     let encoded = encode_token(&token, &key).unwrap();
-    let cat_validator = CatTokenValidator::new().dangerously_allow_unencrypted_privacy_claims();
+    let cat_validator =
+        CatTokenValidator::dangerously_any_issuer().dangerously_allow_unencrypted_privacy_claims();
     let validated = Decoder::with_algorithm(&key)
         .decode(&encoded)
         .unwrap()

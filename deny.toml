@@ -17,10 +17,6 @@ ignore = [
     # surface. Issuers using this crate to sign PS256 tokens ARE
     # exposed. Awaiting rsa 0.10 stable; see docs/DEPENDENCY-DEBT.md.
     { id = "RUSTSEC-2023-0071", reason = "verifier-side only; awaiting rsa 0.10 stable — see docs/DEPENDENCY-DEBT.md" },
-    # serde_cbor is unmaintained (upstream archived 2021). Migration to
-    # ciborium is tracked separately because it touches every CBOR call
-    # site in the strict parser and needs its own review.
-    { id = "RUSTSEC-2021-0127", reason = "serde_cbor unmaintained; ciborium migration tracked in docs/DEPENDENCY-DEBT.md" },
 ]
 
 [licenses]

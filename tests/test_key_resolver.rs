@@ -43,7 +43,7 @@ fn test_single_resolver_accepts_matching_alg() {
     let token = build_token_with(ISS);
     let encoded = encode_token(&token, &key).unwrap();
 
-    let resolver = SingleKeyResolver::new(Es256Algorithm::new_verifier(*key.verifying_key()));
+    let resolver = SingleKeyResolver::new(Es256Algorithm::new_verifier(*key.verifying_key()), ISS);
     let verified = Decoder::with_resolver(&resolver).decode(&encoded).unwrap();
     assert_eq!(
         verified.into_unvalidated_token().core.iss,
@@ -60,7 +60,7 @@ fn test_single_resolver_rejects_alg_mismatch() {
 
     let hs_key = HmacSha256Algorithm::generate_key().unwrap();
     let hs_alg = HmacSha256Algorithm::from_secret_key(&hs_key);
-    let resolver = SingleKeyResolver::new(hs_alg);
+    let resolver = SingleKeyResolver::new(hs_alg, ISS);
 
     let mut hint = KeyHint::new(-7).with_kid(KID.to_vec());
     hint.issuer = Some(ISS.to_string());
@@ -78,8 +78,7 @@ fn test_single_resolver_require_issuer_matches() {
     let token = build_token_with(ISS);
     let encoded = encode_token(&token, &key).unwrap();
 
-    let resolver = SingleKeyResolver::new(Es256Algorithm::new_verifier(*key.verifying_key()))
-        .require_issuer(ISS);
+    let resolver = SingleKeyResolver::new(Es256Algorithm::new_verifier(*key.verifying_key()), ISS);
     assert!(Decoder::with_resolver(&resolver).decode(&encoded).is_ok());
 }
 
@@ -90,14 +89,13 @@ fn test_single_resolver_require_issuer_mismatch_rejected() {
     let token = build_token_with("https://other.example");
     let encoded = encode_token(&token, &key).unwrap();
 
-    let resolver = SingleKeyResolver::new(Es256Algorithm::new_verifier(*key.verifying_key()))
-        .require_issuer(ISS);
+    let resolver = SingleKeyResolver::new(Es256Algorithm::new_verifier(*key.verifying_key()), ISS);
     let err = Decoder::with_resolver(&resolver)
         .decode(&encoded)
         .unwrap_err();
     assert!(
-        matches!(err, CatError::ConfigurationRefused(_)),
-        "expected issuer-mismatch ConfigurationRefused, got {err:?}"
+        matches!(err, CatError::InvalidIssuer),
+        "expected InvalidIssuer, got {err:?}"
     );
 }
 
@@ -111,8 +109,7 @@ fn test_single_resolver_require_issuer_missing_rejected() {
         .unwrap();
     let encoded = encode_token(&token, &key).unwrap();
 
-    let resolver = SingleKeyResolver::new(Es256Algorithm::new_verifier(*key.verifying_key()))
-        .require_issuer(ISS);
+    let resolver = SingleKeyResolver::new(Es256Algorithm::new_verifier(*key.verifying_key()), ISS);
     let err = Decoder::with_resolver(&resolver)
         .decode(&encoded)
         .unwrap_err();
@@ -127,7 +124,7 @@ fn test_single_resolver_require_kid_missing_rejected() {
     let token = build_token_with(ISS);
     let encoded = encode_token(&token, &key).unwrap();
 
-    let resolver = SingleKeyResolver::new(Es256Algorithm::new_verifier(*key.verifying_key()))
+    let resolver = SingleKeyResolver::new(Es256Algorithm::new_verifier(*key.verifying_key()), ISS)
         .require_kid(KID.to_vec());
     let err = Decoder::with_resolver(&resolver)
         .decode(&encoded)
@@ -272,11 +269,10 @@ fn test_full_pipeline_with_keyring_and_peeked_iss() {
     // so we can exercise the (iss, kid, alg) match path via the hand-built
     // hint path below rather than through decode.
     let encoded = encode_with_kid(&token, &key, b"");
-    let resolver = SingleKeyResolver::new(Es256Algorithm::new_verifier(*key.verifying_key()))
-        .require_issuer(ISS);
+    let resolver = SingleKeyResolver::new(Es256Algorithm::new_verifier(*key.verifying_key()), ISS);
 
     let verified = Decoder::with_resolver(&resolver).decode(&encoded).unwrap();
-    let validator = CatTokenValidator::new()
+    let validator = CatTokenValidator::dangerously_any_issuer()
         .with_expected_issuers(vec![ISS.to_string()])
         .with_expected_audiences(vec!["relay.example.com".to_string()]);
     let validated = verified.validate(&validator).unwrap();
@@ -291,6 +287,6 @@ fn test_single_resolver_wrong_key_fails() {
     let token = build_token_with(ISS);
     let encoded = encode_token(&token, &signing_key).unwrap();
 
-    let resolver = SingleKeyResolver::new(wrong_key);
+    let resolver = SingleKeyResolver::new(wrong_key, ISS);
     assert!(Decoder::with_resolver(&resolver).decode(&encoded).is_err());
 }

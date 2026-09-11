@@ -65,9 +65,11 @@ pub trait KeyResolver: Send + Sync {
 }
 
 /// Single trust anchor. Suitable for single-issuer relays, tests, and
-/// bootstrapping. Callers can pin the accepted issuer and kid so that a token
-/// bearing a different iss/kid combination is rejected before signature
-/// verification.
+/// bootstrapping. The constructor requires an expected issuer; the
+/// resolver rejects any token whose peeked `iss` does not match. Callers
+/// who genuinely need to accept any issuer must opt in explicitly via
+/// [`SingleKeyResolver::dangerously_any_issuer`].
+#[must_use = "SingleKeyResolver must be installed on a Decoder; discarding it means no verification key is trusted"]
 pub struct SingleKeyResolver<A: CryptographicAlgorithm> {
     algorithm: A,
     required_issuer: Option<String>,
@@ -75,18 +77,31 @@ pub struct SingleKeyResolver<A: CryptographicAlgorithm> {
 }
 
 impl<A: CryptographicAlgorithm> SingleKeyResolver<A> {
-    pub fn new(algorithm: A) -> Self {
+    /// Construct a resolver pinned to `issuer`. Any token whose peeked
+    /// `iss` claim is absent or differs is rejected before signature
+    /// verification runs. This is the fail-closed default: an
+    /// unauthenticated bearer of a valid signature from another tenant
+    /// cannot cause key confusion.
+    pub fn new(algorithm: A, issuer: impl Into<String>) -> Self {
+        Self {
+            algorithm,
+            required_issuer: Some(issuer.into()),
+            required_kid: None,
+        }
+    }
+
+    /// Construct a resolver that accepts tokens from *any* issuer. Only
+    /// safe when the caller is certain the algorithm+key material is
+    /// bound to a single trust anchor by some other means (e.g., a
+    /// deployment with exactly one CAT issuer and no risk of key
+    /// confusion with another tenant). Prefer [`SingleKeyResolver::new`]
+    /// or [`KeyRingResolver`] in production.
+    pub fn dangerously_any_issuer(algorithm: A) -> Self {
         Self {
             algorithm,
             required_issuer: None,
             required_kid: None,
         }
-    }
-
-    /// Reject tokens whose (peeked) `iss` claim does not match `issuer`.
-    pub fn require_issuer(mut self, issuer: impl Into<String>) -> Self {
-        self.required_issuer = Some(issuer.into());
-        self
     }
 
     /// Reject tokens whose protected-header `kid` does not match `kid`.
@@ -109,10 +124,8 @@ impl<A: CryptographicAlgorithm + Send + Sync> KeyResolver for SingleKeyResolver<
         if let Some(ref expected_iss) = self.required_issuer {
             match &hint.issuer {
                 Some(actual) if actual == expected_iss => {}
-                Some(actual) => {
-                    return Err(CatError::ConfigurationRefused(format!(
-                        "issuer mismatch: token iss '{actual}' does not match pinned '{expected_iss}'"
-                    )));
+                Some(_) => {
+                    return Err(CatError::InvalidIssuer);
                 }
                 None => {
                     return Err(CatError::MissingRequiredClaim("iss".to_string()));

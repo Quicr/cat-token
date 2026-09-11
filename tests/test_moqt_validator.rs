@@ -14,7 +14,8 @@ const RELAY: &str = "relay";
 fn make_validated(token: &CatToken) -> ValidatedToken {
     let key = HmacSha256Algorithm::new(b"test-key-for-roundtrip-000000000");
     let encoded = encode_token(token, &key).unwrap();
-    let validator = CatTokenValidator::new().dangerously_allow_unencrypted_privacy_claims();
+    let validator =
+        CatTokenValidator::dangerously_any_issuer().dangerously_allow_unencrypted_privacy_claims();
     Decoder::with_algorithm(&key)
         .decode(&encoded)
         .unwrap()

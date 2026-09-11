@@ -105,8 +105,7 @@ fn main() {
         .unwrap()
         .into_unvalidated_token();
 
-    let validator = CatTokenValidator::new()
-        .with_expected_issuers(vec!["https://auth.streaming.com".to_string()])
+    let validator = CatTokenValidator::for_expected_issuers(["https://auth.streaming.com"])
         .with_expected_audiences(vec!["streaming-service".to_string()])
         .with_clock_skew_tolerance(60)
         .unwrap();

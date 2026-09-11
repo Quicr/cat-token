@@ -74,7 +74,7 @@ mod composite_claims_tests {
         let token2 = create_valid_token("issuer2");
 
         let or_composite = composite_utils::create_or_from_tokens(vec![token1, token2]);
-        let validator = CatTokenValidator::new();
+        let validator = CatTokenValidator::dangerously_any_issuer();
 
         let validator_fn = |token: &CatToken| -> Result<(), Box<dyn std::error::Error>> {
             validator
@@ -92,7 +92,7 @@ mod composite_claims_tests {
         let expired_token = create_expired_token();
 
         let or_composite = composite_utils::create_or_from_tokens(vec![valid_token, expired_token]);
-        let validator = CatTokenValidator::new();
+        let validator = CatTokenValidator::dangerously_any_issuer();
 
         let validator_fn = |token: &CatToken| -> Result<(), Box<dyn std::error::Error>> {
             validator
@@ -111,7 +111,7 @@ mod composite_claims_tests {
 
         let or_composite =
             composite_utils::create_or_from_tokens(vec![expired_token1, expired_token2]);
-        let validator = CatTokenValidator::new();
+        let validator = CatTokenValidator::dangerously_any_issuer();
 
         let validator_fn = |token: &CatToken| -> Result<(), Box<dyn std::error::Error>> {
             validator
@@ -130,7 +130,7 @@ mod composite_claims_tests {
 
         let nor_composite =
             composite_utils::create_nor_from_tokens(vec![expired_token1, expired_token2]);
-        let validator = CatTokenValidator::new();
+        let validator = CatTokenValidator::dangerously_any_issuer();
 
         let validator_fn = |token: &CatToken| -> Result<(), Box<dyn std::error::Error>> {
             validator
@@ -149,7 +149,7 @@ mod composite_claims_tests {
 
         let nor_composite =
             composite_utils::create_nor_from_tokens(vec![valid_token, expired_token]);
-        let validator = CatTokenValidator::new();
+        let validator = CatTokenValidator::dangerously_any_issuer();
 
         let validator_fn = |token: &CatToken| -> Result<(), Box<dyn std::error::Error>> {
             validator
@@ -167,7 +167,7 @@ mod composite_claims_tests {
         let token2 = create_valid_token("issuer2");
 
         let and_composite = composite_utils::create_and_from_tokens(vec![token1, token2]);
-        let validator = CatTokenValidator::new();
+        let validator = CatTokenValidator::dangerously_any_issuer();
 
         let validator_fn = |token: &CatToken| -> Result<(), Box<dyn std::error::Error>> {
             validator
@@ -186,7 +186,7 @@ mod composite_claims_tests {
 
         let and_composite =
             composite_utils::create_and_from_tokens(vec![valid_token, expired_token]);
-        let validator = CatTokenValidator::new();
+        let validator = CatTokenValidator::dangerously_any_issuer();
 
         let validator_fn = |token: &CatToken| -> Result<(), Box<dyn std::error::Error>> {
             validator
@@ -225,7 +225,7 @@ mod composite_claims_tests {
         outer_or.add_token(valid_token1);
         outer_or.add_composite(inner_and);
 
-        let validator = CatTokenValidator::new();
+        let validator = CatTokenValidator::dangerously_any_issuer();
         let validator_fn = |token: &CatToken| -> Result<(), Box<dyn std::error::Error>> {
             validator
                 .validate(token)
@@ -246,7 +246,7 @@ mod composite_claims_tests {
         let token_with_composite =
             create_valid_token("main-issuer").with_or_composite(or_composite);
 
-        let validator = CatTokenValidator::new();
+        let validator = CatTokenValidator::dangerously_any_issuer();
 
         // Main token validation should include composite claims validation
         assert!(validator.validate(&token_with_composite).is_ok());
@@ -263,7 +263,7 @@ mod composite_claims_tests {
         let token_with_composite =
             create_valid_token("main-issuer").with_and_composite(and_composite);
 
-        let validator = CatTokenValidator::new();
+        let validator = CatTokenValidator::dangerously_any_issuer();
 
         // Should fail because composite claims validation fails
         match validator.validate(&token_with_composite) {
@@ -290,7 +290,7 @@ mod composite_claims_tests {
         let token_with_deep_composite =
             create_valid_token("main-issuer").with_or_composite(composite);
 
-        let validator = CatTokenValidator::new();
+        let validator = CatTokenValidator::dangerously_any_issuer();
 
         // Should fail due to excessive nesting depth
         match validator.validate(&token_with_deep_composite) {
@@ -310,7 +310,7 @@ mod composite_claims_tests {
 
         assert!(container.has_composites());
 
-        let validator = CatTokenValidator::new();
+        let validator = CatTokenValidator::dangerously_any_issuer();
         let validator_fn = |token: &CatToken| -> Result<(), Box<dyn std::error::Error>> {
             validator
                 .validate(token)

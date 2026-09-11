@@ -35,18 +35,31 @@ thread_local! {
     );
 }
 
+/// Fail-closed claim validator for [`CatToken`]s decoded via
+/// [`Decoder::decode`].
+///
+/// # Fail-closed contract
+///
+/// The validator refuses to run unless the caller has *explicitly* declared
+/// how it wants issuer trust handled. Silently accepting tokens from any
+/// issuer at CDN scale has been a repeated source of authorization bypass —
+/// the mandatory constructor argument forces the decision at compile time.
+/// Two paths exist:
+///
+/// - [`CatTokenValidator::for_expected_issuers`] — production. Reject any
+///   token whose `iss` is not on the allow-list.
+/// - [`CatTokenValidator::dangerously_any_issuer`] — accept any `iss`. Only
+///   safe in tests or when trust is proven by other means (e.g., a
+///   `SingleKeyResolver` already pinned to one issuer).
+///
+/// [`Decoder::decode`]: crate::token::Decoder::decode
+#[must_use = "CatTokenValidator must be passed to VerifiedToken::validate; discarding it means the token is unvalidated"]
 pub struct CatTokenValidator {
     expected_issuers: Option<HashSet<String>>,
     expected_audiences: Option<HashSet<String>>,
     exp_tolerance: i64,
     nbf_tolerance: i64,
     dangerously_allow_unencrypted_privacy_claims: bool,
-}
-
-impl Default for CatTokenValidator {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 fn check_tolerance(name: &str, seconds: i64) -> Result<(), CatError> {
@@ -64,7 +77,33 @@ fn check_tolerance(name: &str, seconds: i64) -> Result<(), CatError> {
 }
 
 impl CatTokenValidator {
-    pub fn new() -> Self {
+    /// Construct a validator pinned to `issuers`. Any token whose `iss`
+    /// claim is not present in the set is rejected with
+    /// [`CatError::InvalidIssuer`]. Passing an empty vector is a
+    /// configuration bug — this constructor accepts it (the resulting
+    /// validator will reject every token), but callers should prefer
+    /// [`CatTokenValidator::dangerously_any_issuer`] if they truly want
+    /// the "trust anything" behavior.
+    pub fn for_expected_issuers<I, S>(issuers: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        Self {
+            expected_issuers: Some(issuers.into_iter().map(Into::into).collect()),
+            expected_audiences: None,
+            exp_tolerance: 0,
+            nbf_tolerance: 0,
+            dangerously_allow_unencrypted_privacy_claims: false,
+        }
+    }
+
+    /// Construct a validator that accepts any `iss`. Reserved for tests
+    /// and for callers who have already pinned the issuer through the
+    /// resolver (`SingleKeyResolver::new` / `KeyRingResolver` bind the
+    /// verifying key to a specific issuer). Prefer
+    /// [`CatTokenValidator::for_expected_issuers`] in production.
+    pub fn dangerously_any_issuer() -> Self {
         Self {
             expected_issuers: None,
             expected_audiences: None,
@@ -74,6 +113,15 @@ impl CatTokenValidator {
         }
     }
 
+    /// Pin the issuer allow-list on an existing validator. Overrides any
+    /// previous setting: after this call the validator rejects every
+    /// `iss` not listed. If the validator was built with
+    /// [`dangerously_any_issuer`], this call promotes it back to the
+    /// fail-closed mode. Prefer [`for_expected_issuers`] as the primary
+    /// constructor.
+    ///
+    /// [`dangerously_any_issuer`]: CatTokenValidator::dangerously_any_issuer
+    /// [`for_expected_issuers`]: CatTokenValidator::for_expected_issuers
     pub fn with_expected_issuers(mut self, issuers: Vec<String>) -> Self {
         self.expected_issuers = Some(issuers.into_iter().collect());
         self
@@ -413,26 +461,39 @@ pub(crate) fn validate_all_headers(
 
 /// Unfold multi-line header values per RFC 9110 §5.2.
 /// Joins comma-separated values and removes obs-fold (CRLF + whitespace).
+/// Operates on bytes and writes UTF-8 back through `push_str` on ASCII
+/// slice fragments, so multi-byte UTF-8 bytes are copied verbatim rather
+/// than mangled by a `byte as char` Latin-1 reinterpretation.
 #[cfg(feature = "moqt")]
 pub(crate) fn unfold_header_value(value: &str) -> String {
     let mut result = String::with_capacity(value.len());
     let bytes = value.as_bytes();
     let mut i = 0;
+    let mut copy_start = 0;
     while i < bytes.len() {
         if i + 2 < bytes.len()
             && bytes[i] == b'\r'
             && bytes[i + 1] == b'\n'
             && (bytes[i + 2] == b' ' || bytes[i + 2] == b'\t')
         {
+            // Safety: `value` is `&str`, so every byte in the slice
+            // `&bytes[copy_start..i]` is part of a valid UTF-8 sequence
+            // that starts at or after the previous unfold point (which
+            // itself lay on a UTF-8 boundary — only ASCII bytes `\r`,
+            // `\n`, ' ', '\t' terminate a run).
+            result.push_str(unsafe { std::str::from_utf8_unchecked(&bytes[copy_start..i]) });
             result.push(' ');
             i += 3;
             while i < bytes.len() && (bytes[i] == b' ' || bytes[i] == b'\t') {
                 i += 1;
             }
+            copy_start = i;
         } else {
-            result.push(bytes[i] as char);
             i += 1;
         }
+    }
+    if copy_start < bytes.len() {
+        result.push_str(unsafe { std::str::from_utf8_unchecked(&bytes[copy_start..]) });
     }
     result
 }
@@ -554,22 +615,34 @@ impl CatPorBlockList {
         }
     }
 
-    pub fn is_blocked(&self, id: &[u8]) -> bool {
-        let mut entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(exp) = entries.get(id) {
-            if let Some(exp_ts) = exp {
-                Utc::now().timestamp() < *exp_ts
-            } else {
-                true
-            }
-        } else {
-            false
-        }
+    /// Return `Ok(true)` when the id is currently in the block list
+    /// (and its expiration, if any, has not yet elapsed).
+    ///
+    /// Returns [`CatError::BackendUnavailable`] on lock poisoning. A
+    /// poisoned mutex means a previous holder panicked mid-mutation; the
+    /// LRU state could be inconsistent and silently proceeding could
+    /// admit a token that should have been rejected. Fail closed — the
+    /// authorization path treats this the same as a JTI store outage.
+    pub fn is_blocked(&self, id: &[u8]) -> Result<bool, CatError> {
+        let mut entries = self.entries.lock().map_err(|_| {
+            CatError::BackendUnavailable("CatPorBlockList lock poisoned".to_string())
+        })?;
+        Ok(match entries.get(id) {
+            Some(Some(exp_ts)) => Utc::now().timestamp() < *exp_ts,
+            Some(None) => true,
+            None => false,
+        })
     }
 
-    pub fn add(&self, id: Vec<u8>, expiration: Option<i64>) {
-        let mut entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
+    /// Insert an id into the block list with an optional expiration.
+    /// Returns [`CatError::BackendUnavailable`] on lock poisoning. See
+    /// [`Self::is_blocked`] for the fail-closed rationale.
+    pub fn add(&self, id: Vec<u8>, expiration: Option<i64>) -> Result<(), CatError> {
+        let mut entries = self.entries.lock().map_err(|_| {
+            CatError::BackendUnavailable("CatPorBlockList lock poisoned".to_string())
+        })?;
         entries.put(id, expiration);
+        Ok(())
     }
 }
 
@@ -588,7 +661,7 @@ pub(crate) fn enforce_catpor(
     block_list: &CatPorBlockList,
 ) -> Result<(), CatError> {
     if let Some(ref catpor) = token.cat.catpor {
-        if block_list.is_blocked(&catpor.id) {
+        if block_list.is_blocked(&catpor.id)? {
             return Err(CatError::RejectedByProbability);
         }
 
@@ -603,7 +676,7 @@ pub(crate) fn enforce_catpor(
         };
 
         if random < catpor.probability {
-            block_list.add(catpor.id.clone(), catpor.expiration);
+            block_list.add(catpor.id.clone(), catpor.expiration)?;
             return Err(CatError::RejectedByProbability);
         }
     }
@@ -652,6 +725,17 @@ fn percent_decode(s: &str) -> String {
     String::from_utf8(result).unwrap_or_else(|_| s.to_string())
 }
 
+/// Fluent builder for [`CatToken`].
+///
+/// Naming convention: builder methods use **bare verbs**
+/// (`issuer(...)`, `audience(...)`, `expires_at(...)`) because the
+/// builder consumes and returns `Self` in a build-then-consume flow —
+/// the `with_` prefix reads as noise in a chain and diverges from
+/// how validator setters are named. Validator setters
+/// ([`CatTokenValidator::with_expected_issuers`] et al.) keep the
+/// `with_` prefix because a validator is a long-lived, sharable value
+/// where "with X" reads as configuration composition, not fluent
+/// construction.
 pub struct CatTokenBuilder {
     inner: CatToken,
 }
@@ -1203,9 +1287,16 @@ fn parse_cose_envelope(cose_bytes: &[u8]) -> Result<ParsedCoseEnvelope, CatError
         _ => return Err(CatError::InvalidTokenFormat),
     };
 
+    // RFC 9052 §3: the COSE unprotected header is always a CBOR map
+    // (empty for tokens that carry no unprotected fields). A `bstr`
+    // here would be legal for the *protected* header only. Some legacy
+    // encoders emit an empty `bstr` in the unprotected slot; accepting
+    // it silently would let an attacker slip a protected-shaped byte
+    // string past the parser and later confuse a re-encoder that
+    // round-trips the envelope back onto the wire. Rejecting fails
+    // early and matches the RFC 9052 profile literally.
     match &arr[1] {
-        ciborium::Value::Map(m) if m.is_empty() => {}
-        ciborium::Value::Bytes(b) if b.is_empty() => {}
+        ciborium::Value::Map(_) => {}
         _ => {
             return Err(CatError::InvalidTokenFormat);
         }
@@ -1503,7 +1594,7 @@ mod moqt_helper_tests {
     #[test]
     fn test_catpor_block_list_persists() {
         let block_list = CatPorBlockList::new();
-        block_list.add(vec![1, 2, 3], None);
+        block_list.add(vec![1, 2, 3], None).unwrap();
 
         let token = CatTokenBuilder::new()
             .probability_of_rejection(0.0, vec![1, 2, 3], None)
@@ -1516,7 +1607,7 @@ mod moqt_helper_tests {
     #[test]
     fn test_catpor_block_list_expiration() {
         let block_list = CatPorBlockList::new();
-        block_list.add(vec![1, 2, 3], Some(0));
+        block_list.add(vec![1, 2, 3], Some(0)).unwrap();
 
         let token = CatTokenBuilder::new()
             .probability_of_rejection(0.0, vec![1, 2, 3], None)

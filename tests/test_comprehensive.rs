@@ -130,7 +130,7 @@ fn test_token_validation_comprehensive() {
         .with_not_before(nbf)
         .with_geo_coordinate(37.7749, -122.4194, 50); // San Francisco
 
-    let validator = CatTokenValidator::new()
+    let validator = CatTokenValidator::dangerously_any_issuer()
         .with_expected_issuers(vec!["https://trusted.issuer.com".to_string()])
         .with_expected_audiences(vec!["expected-audience".to_string()])
         .with_clock_skew_tolerance(120)
@@ -150,7 +150,7 @@ fn test_token_validation_failures() {
         .with_audience(vec!["audience".to_string()])
         .with_expiration(now - chrono::Duration::hours(1));
 
-    let validator = CatTokenValidator::new()
+    let validator = CatTokenValidator::dangerously_any_issuer()
         .with_expected_issuers(vec!["https://issuer.com".to_string()])
         .with_expected_audiences(vec!["audience".to_string()]);
 
@@ -184,7 +184,8 @@ fn test_token_validation_failures() {
 
 #[test]
 fn test_geographic_validation() {
-    let validator = CatTokenValidator::new().dangerously_allow_unencrypted_privacy_claims();
+    let validator =
+        CatTokenValidator::dangerously_any_issuer().dangerously_allow_unencrypted_privacy_claims();
 
     // Valid coordinates
     let valid_token = CatToken::new()

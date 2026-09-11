@@ -40,7 +40,8 @@ impl ReplayGuard for MemReplayGuard {
 fn make_validated(token: &CatToken) -> ValidatedToken {
     let key = HmacSha256Algorithm::new(b"test-key-for-roundtrip-000000000");
     let encoded = encode_token(token, &key).unwrap();
-    let validator = CatTokenValidator::new().dangerously_allow_unencrypted_privacy_claims();
+    let validator =
+        CatTokenValidator::dangerously_any_issuer().dangerously_allow_unencrypted_privacy_claims();
     Decoder::with_algorithm(&key)
         .decode(&encoded)
         .unwrap()
@@ -105,7 +106,8 @@ fn test_authorize_rejects_unknown_catv() {
         .unwrap();
     let key = HmacSha256Algorithm::new(b"test-key-for-roundtrip-000000000");
     let encoded = encode_token(&token, &key).unwrap();
-    let validator = CatTokenValidator::new().dangerously_allow_unencrypted_privacy_claims();
+    let validator =
+        CatTokenValidator::dangerously_any_issuer().dangerously_allow_unencrypted_privacy_claims();
     let result = Decoder::with_algorithm(&key)
         .decode(&encoded)
         .unwrap()
@@ -205,14 +207,17 @@ fn test_authorize_enforces_cath() {
         matches: vec![MatchValue::Prefix("Bearer ".to_string())],
     }]);
 
-    let ctx = baseline_ctx().with_request_headers(vec![(
-        "Authorization".to_string(),
-        "Bearer abc".to_string(),
-    )]);
+    let ctx = baseline_ctx()
+        .with_request_headers(vec![(
+            "Authorization".to_string(),
+            "Bearer abc".to_string(),
+        )])
+        .unwrap();
     ok(&token, &ctx).expect("matching header must authorize");
 
     let ctx_bad = baseline_ctx()
-        .with_request_headers(vec![("Authorization".to_string(), "Basic zzz".to_string())]);
+        .with_request_headers(vec![("Authorization".to_string(), "Basic zzz".to_string())])
+        .unwrap();
     assert!(ok(&token, &ctx_bad).is_err());
 
     let ctx_missing = baseline_ctx();
