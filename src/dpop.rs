@@ -770,8 +770,11 @@ pub mod cwt {
     /// truncate.
     fn decode_one(bytes: &[u8]) -> Result<Value, CatError> {
         let mut cursor = std::io::Cursor::new(bytes);
-        let value: Value = ciborium::de::from_reader(&mut cursor)
-            .map_err(|e| CatError::InvalidCbor(e.to_string()))?;
+        let value: Value = ciborium::de::from_reader_with_recursion_limit(
+            &mut cursor,
+            crate::cwt::CBOR_MAX_RECURSION_DEPTH,
+        )
+        .map_err(|e| CatError::InvalidCbor(e.to_string()))?;
         if (cursor.position() as usize) < bytes.len() {
             return Err(CatError::InvalidCbor(
                 "trailing bytes after CBOR item".to_string(),

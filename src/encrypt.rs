@@ -157,8 +157,11 @@ pub fn cose_decrypt0_with_max_plaintext(
     }
 
     let mut cursor = Cursor::new(cose_bytes);
-    let value: Value =
-        ciborium::de::from_reader(&mut cursor).map_err(|e| CatError::InvalidCbor(e.to_string()))?;
+    let value: Value = ciborium::de::from_reader_with_recursion_limit(
+        &mut cursor,
+        crate::cwt::CBOR_MAX_RECURSION_DEPTH,
+    )
+    .map_err(|e| CatError::InvalidCbor(e.to_string()))?;
 
     if (cursor.position() as usize) != cose_bytes.len() {
         return Err(CatError::InvalidCbor(format!(
@@ -216,8 +219,11 @@ pub fn cose_decrypt0_with_max_plaintext(
         )));
     }
 
-    let header_val: Value = ciborium::de::from_reader(protected.as_slice())
-        .map_err(|e| CatError::InvalidCbor(e.to_string()))?;
+    let header_val: Value = ciborium::de::from_reader_with_recursion_limit(
+        protected.as_slice(),
+        crate::cwt::CBOR_MAX_RECURSION_DEPTH,
+    )
+    .map_err(|e| CatError::InvalidCbor(e.to_string()))?;
     let alg_id = match header_val {
         Value::Map(map) => {
             let mut alg = None;

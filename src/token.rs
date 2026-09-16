@@ -1413,8 +1413,11 @@ fn parse_cose_envelope(cose_bytes: &[u8]) -> Result<ParsedCoseEnvelope, CatError
     }
 
     let mut cursor = std::io::Cursor::new(cose_bytes);
-    let value: ciborium::Value =
-        ciborium::de::from_reader(&mut cursor).map_err(|e| CatError::InvalidCbor(e.to_string()))?;
+    let value: ciborium::Value = ciborium::de::from_reader_with_recursion_limit(
+        &mut cursor,
+        crate::cwt::CBOR_MAX_RECURSION_DEPTH,
+    )
+    .map_err(|e| CatError::InvalidCbor(e.to_string()))?;
     if (cursor.position() as usize) < cose_bytes.len() {
         return Err(CatError::InvalidCbor(format!(
             "Trailing bytes after COSE envelope: {} unconsumed bytes",
@@ -1517,8 +1520,11 @@ fn verify_and_decode(
 }
 
 fn extract_header_info(header_cbor: &[u8]) -> Result<(i64, Option<Vec<u8>>), CatError> {
-    let value: ciborium::Value =
-        ciborium::de::from_reader(header_cbor).map_err(|e| CatError::InvalidCbor(e.to_string()))?;
+    let value: ciborium::Value = ciborium::de::from_reader_with_recursion_limit(
+        header_cbor,
+        crate::cwt::CBOR_MAX_RECURSION_DEPTH,
+    )
+    .map_err(|e| CatError::InvalidCbor(e.to_string()))?;
 
     let map = match value {
         ciborium::Value::Map(m) => m,
@@ -1597,6 +1603,29 @@ mod tests {
         let uri = "https://example.com/path";
         let stripped = strip_token_from_uri(uri, &["CATToken", "token"]);
         assert_eq!(stripped, "https://example.com/path");
+    }
+
+    /// A payload that nests deeper than [`crate::cwt::CBOR_MAX_RECURSION_DEPTH`]
+    /// must be rejected by the raw CBOR decoder before reaching the
+    /// higher-level validation limits — a defence against stack-exhaustion
+    /// on hostile issuer input.
+    #[test]
+    fn test_cbor_recursion_limit_rejects_deep_nesting() {
+        let mut bytes: Vec<u8> = Vec::new();
+        let depth = crate::cwt::CBOR_MAX_RECURSION_DEPTH + 5;
+        for _ in 0..depth {
+            bytes.push(0x81);
+        }
+        bytes.push(0x00);
+        let mut cursor = std::io::Cursor::new(&bytes[..]);
+        let res: Result<ciborium::Value, _> = ciborium::de::from_reader_with_recursion_limit(
+            &mut cursor,
+            crate::cwt::CBOR_MAX_RECURSION_DEPTH,
+        );
+        assert!(
+            res.is_err(),
+            "decoder must refuse nesting past CBOR_MAX_RECURSION_DEPTH"
+        );
     }
 }
 

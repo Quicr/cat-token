@@ -273,8 +273,11 @@ fn encode_composite_claim(composite: &crate::claims::CompositeClaim) -> Result<V
             crate::claims::ClaimSet::Token(token) => {
                 let cwt = Cwt::new(0, (**token).clone());
                 let encoded = cwt.encode_payload()?;
-                let value: Value = ciborium::de::from_reader(encoded.as_slice())
-                    .map_err(|e| CatError::InvalidCbor(e.to_string()))?;
+                let value: Value = ciborium::de::from_reader_with_recursion_limit(
+                    encoded.as_slice(),
+                    CBOR_MAX_RECURSION_DEPTH,
+                )
+                .map_err(|e| CatError::InvalidCbor(e.to_string()))?;
                 claim_sets.push(value);
             }
             crate::claims::ClaimSet::Composite(nested) => {
@@ -1015,6 +1018,13 @@ fn decode_namespace_match(value: &Value) -> Result<crate::claims::NamespaceMatch
 }
 
 pub(crate) const DEFAULT_MAX_CBOR_PAYLOAD_SIZE: usize = 16 * 1024;
+
+/// Hard cap on ciborium's recursion depth. ciborium defaults to 256 which
+/// is large enough for a hostile encoder to burn considerable stack on
+/// deeply nested arrays/maps before we ever get a chance to reject on
+/// [`ValidationLimits`]. We clamp every decoder in the crate to this
+/// value, well above the 8-level nesting the profile actually permits.
+pub(crate) const CBOR_MAX_RECURSION_DEPTH: usize = 32;
 pub(crate) const DEFAULT_MAX_MOQT_SCOPES: usize = 1000;
 pub(crate) const DEFAULT_MAX_CUSTOM_CLAIMS: usize = 100;
 pub(crate) const DEFAULT_MAX_STRING_CLAIM_LENGTH: usize = 8 * 1024;
@@ -1336,8 +1346,11 @@ impl Cwt {
         }
 
         let mut cursor = std::io::Cursor::new(cbor_data);
-        let value: Value = ciborium::de::from_reader(&mut cursor)
-            .map_err(|e| CatError::InvalidCbor(e.to_string()))?;
+        let value: Value = ciborium::de::from_reader_with_recursion_limit(
+            &mut cursor,
+            CBOR_MAX_RECURSION_DEPTH,
+        )
+        .map_err(|e| CatError::InvalidCbor(e.to_string()))?;
         if (cursor.position() as usize) < cbor_data.len() {
             return Err(CatError::InvalidCbor(format!(
                 "Trailing bytes after CBOR payload: {} unconsumed bytes",
