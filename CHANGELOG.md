@@ -17,6 +17,10 @@
 - `docs/security-model.md` and `docs/metrics.md`.
 - Three libfuzzer slow-unit corpus files promoted to bounded-time
   regression tests.
+- `test_jwk_debug_redacts_key_material` regression guard on the `Jwk`
+  `Debug` redaction. A future field addition that forgets to redact
+  will fail this test rather than silently start printing key
+  material to a log line.
 
 ### Changed
 - JTI LRU shards now hash the `iss:` prefix on its own before mixing in

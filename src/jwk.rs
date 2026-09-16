@@ -310,4 +310,38 @@ mod tests {
         // RFC 7638 requires alphabetical ordering: e, kty, n
         assert_eq!(canonical, r#"{"e":"e_value","kty":"RSA","n":"n_value"}"#);
     }
+
+    /// Guards the `Debug` impl on `Jwk` against a future field addition that
+    /// forgets to redact. `n`/`x`/`y`/`e` are the public-key material an
+    /// operator's log-scrubber pipeline can't easily filter out after the
+    /// fact — if this test fails, add the new field to the redaction list
+    /// in the `impl Debug for Jwk` block above.
+    #[test]
+    fn test_jwk_debug_redacts_key_material() {
+        let ec = Jwk {
+            kty: "EC".to_string(),
+            crv: Some("P-256".to_string()),
+            x: Some("secret_x_material".to_string()),
+            y: Some("secret_y_material".to_string()),
+            n: None,
+            e: None,
+        };
+        let dbg = format!("{ec:?}");
+        assert!(!dbg.contains("secret_x_material"), "Debug leaked x: {dbg}");
+        assert!(!dbg.contains("secret_y_material"), "Debug leaked y: {dbg}");
+        assert!(dbg.contains("REDACTED"));
+
+        let rsa = Jwk {
+            kty: "RSA".to_string(),
+            crv: None,
+            x: None,
+            y: None,
+            n: Some("secret_n_modulus".to_string()),
+            e: Some("secret_e_exponent".to_string()),
+        };
+        let dbg = format!("{rsa:?}");
+        assert!(!dbg.contains("secret_n_modulus"), "Debug leaked n: {dbg}");
+        assert!(!dbg.contains("secret_e_exponent"), "Debug leaked e: {dbg}");
+        assert!(dbg.contains("REDACTED"));
+    }
 }
