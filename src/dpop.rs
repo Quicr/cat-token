@@ -36,7 +36,8 @@ use lru::LruCache;
 #[cfg(feature = "moqt")]
 use std::num::NonZeroUsize;
 #[cfg(feature = "moqt")]
-use std::sync::{Arc, Mutex};
+use parking_lot::Mutex;
+use std::sync::Arc;
 #[cfg(feature = "moqt")]
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -1978,10 +1979,7 @@ impl JtiStore for LruJtiStore {
             )));
         }
         let shard = self.shard_for(&key);
-        let mut cache = shard
-            .cache
-            .lock()
-            .map_err(|_| CatError::BackendUnavailable("Lock poisoned".to_string()))?;
+        let mut cache = shard.cache.lock();
         if cache.contains(&key) {
             return Err(CatError::ReplayAttackDetected);
         }
@@ -2000,10 +1998,7 @@ impl JtiStore for LruJtiStore {
     }
 
     fn len(&self) -> usize {
-        self.shards
-            .iter()
-            .map(|s| s.cache.lock().map(|c| c.len()).unwrap_or(0))
-            .sum()
+        self.shards.iter().map(|s| s.cache.lock().len()).sum()
     }
 
     fn cleanup(&self, max_age_seconds: i64) {
@@ -2013,15 +2008,14 @@ impl JtiStore for LruJtiStore {
             .as_secs() as i64;
 
         for shard in &self.shards {
-            if let Ok(mut cache) = shard.cache.lock() {
-                let expired: Vec<String> = cache
-                    .iter()
-                    .filter(|(_, iat): &(&String, &i64)| now - **iat >= max_age_seconds)
-                    .map(|(k, _)| k.clone())
-                    .collect();
-                for key in expired {
-                    cache.pop(&key);
-                }
+            let mut cache = shard.cache.lock();
+            let expired: Vec<String> = cache
+                .iter()
+                .filter(|(_, iat): &(&String, &i64)| now - **iat >= max_age_seconds)
+                .map(|(k, _)| k.clone())
+                .collect();
+            for key in expired {
+                cache.pop(&key);
             }
         }
     }
@@ -2195,10 +2189,7 @@ impl JtiStore for InMemoryStrictJtiStore {
         }
 
         let shard = self.shard_for(&key);
-        let mut entries = shard
-            .entries
-            .lock()
-            .map_err(|_| CatError::BackendUnavailable("Lock poisoned".to_string()))?;
+        let mut entries = shard.entries.lock();
         if entries.contains_key(&key) {
             return Err(CatError::ReplayAttackDetected);
         }
@@ -2220,11 +2211,10 @@ impl JtiStore for InMemoryStrictJtiStore {
             .as_secs() as i64;
         let mut removed = 0usize;
         for shard in &self.shards {
-            if let Ok(mut entries) = shard.entries.lock() {
-                let before = entries.len();
-                entries.retain(|_, iat| now.saturating_sub(*iat) < max_age_seconds);
-                removed += before - entries.len();
-            }
+            let mut entries = shard.entries.lock();
+            let before = entries.len();
+            entries.retain(|_, iat| now.saturating_sub(*iat) < max_age_seconds);
+            removed += before - entries.len();
         }
         if removed > 0 {
             self.total_entries

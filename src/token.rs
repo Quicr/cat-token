@@ -14,7 +14,7 @@ use lru::LruCache;
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::num::NonZeroUsize;
-use std::sync::Mutex;
+use parking_lot::Mutex;
 
 const COSE_TAG_SIGN1: u64 = 18;
 const COSE_TAG_MAC0: u64 = 17;
@@ -622,6 +622,145 @@ pub(crate) fn enforce_catnip(
     Ok(())
 }
 
+/// Enforce a token's geographic claims (`catgeoiso3166`, `catgeocoord`,
+/// `geohash`) against a resolved peer [`RequestLocation`]. Fail-closed:
+/// any of those claims present with no peer location supplied returns
+/// [`CatError::MissingRelayContext`], and a non-matching location returns
+/// [`CatError::GeographicValidationFailed`].
+///
+/// A token that carries none of the geo claims is a no-op regardless of
+/// whether `peer_location` is populated.
+///
+/// Matching semantics:
+/// - `catgeoiso3166`: the peer's `country_code` (optionally combined with
+///   `subdivision_code` as `"US-CA"`) must appear in the token's list.
+/// - `catgeocoord`: at least one zone must contain the peer's
+///   `(latitude, longitude)` within its `radius` (metres, great-circle
+///   distance).
+/// - `geohash`: the peer's `geohash` must share a prefix with at least
+///   one token geohash.
+#[cfg(feature = "moqt")]
+pub(crate) fn enforce_geo(
+    token: &CatToken,
+    peer_location: Option<&crate::geo::RequestLocation>,
+) -> Result<(), CatError> {
+    let has_iso = token
+        .cat
+        .catgeoiso3166
+        .as_ref()
+        .map(|v| !v.is_empty())
+        .unwrap_or(false);
+    let has_coord = token
+        .cat
+        .catgeocoord
+        .as_ref()
+        .map(|v| !v.is_empty())
+        .unwrap_or(false);
+    let has_geohash = token
+        .cat
+        .geohash
+        .as_ref()
+        .map(|v| !v.is_empty())
+        .unwrap_or(false);
+
+    if !has_iso && !has_coord && !has_geohash {
+        return Ok(());
+    }
+
+    let location = peer_location.ok_or(CatError::MissingRelayContext {
+        claim: "catgeo*",
+        field: "peer_location",
+    })?;
+
+    if has_iso {
+        let codes = token.cat.catgeoiso3166.as_ref().unwrap();
+        let country = location
+            .country_code
+            .as_deref()
+            .ok_or(CatError::MissingRelayContext {
+                claim: "catgeoiso3166",
+                field: "peer_location.country_code",
+            })?;
+        let matched = codes.iter().any(|code| {
+            if let Some((c, sub)) = code.split_once('-') {
+                c.eq_ignore_ascii_case(country)
+                    && location
+                        .subdivision_code
+                        .as_deref()
+                        .map(|s| s.eq_ignore_ascii_case(sub))
+                        .unwrap_or(false)
+            } else {
+                code.eq_ignore_ascii_case(country)
+            }
+        });
+        if !matched {
+            return Err(CatError::GeographicValidationFailed(
+                "peer country/subdivision does not match catgeoiso3166".to_string(),
+            ));
+        }
+    }
+
+    if has_coord {
+        let zones = token.cat.catgeocoord.as_ref().unwrap();
+        let lat = location
+            .latitude
+            .ok_or(CatError::MissingRelayContext {
+                claim: "catgeocoord",
+                field: "peer_location.latitude",
+            })?;
+        let lon = location
+            .longitude
+            .ok_or(CatError::MissingRelayContext {
+                claim: "catgeocoord",
+                field: "peer_location.longitude",
+            })?;
+        let matched = zones
+            .iter()
+            .any(|z| haversine_metres(z.lat, z.lon, lat, lon) <= z.radius as f64);
+        if !matched {
+            return Err(CatError::GeographicValidationFailed(
+                "peer coordinates outside every catgeocoord zone".to_string(),
+            ));
+        }
+    }
+
+    if has_geohash {
+        let token_hashes = token.cat.geohash.as_ref().unwrap();
+        let peer_hash = location
+            .geohash
+            .as_deref()
+            .ok_or(CatError::MissingRelayContext {
+                claim: "geohash",
+                field: "peer_location.geohash",
+            })?;
+        let matched = token_hashes
+            .iter()
+            .any(|t| peer_hash.starts_with(t.as_str()) || t.starts_with(peer_hash));
+        if !matched {
+            return Err(CatError::GeographicValidationFailed(
+                "peer geohash does not match any catgeo geohash".to_string(),
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+/// Great-circle distance in metres between two lat/lon pairs, using the
+/// haversine formula. Accurate to within ~0.3% for the token's radius
+/// bucket scale (metres to hundreds of kilometres).
+#[cfg(feature = "moqt")]
+fn haversine_metres(lat1_deg: f64, lon1_deg: f64, lat2_deg: f64, lon2_deg: f64) -> f64 {
+    const EARTH_RADIUS_M: f64 = 6_371_000.0;
+    let lat1 = lat1_deg.to_radians();
+    let lat2 = lat2_deg.to_radians();
+    let dlat = (lat2_deg - lat1_deg).to_radians();
+    let dlon = (lon2_deg - lon1_deg).to_radians();
+    let a = (dlat / 2.0).sin().powi(2) + lat1.cos() * lat2.cos() * (dlon / 2.0).sin().powi(2);
+    let c = 2.0 * a.sqrt().asin();
+    EARTH_RADIUS_M * c
+}
+
 /// Block list for catpor probability-of-rejection enforcement.
 /// Uses a bounded LRU cache to prevent unbounded memory growth.
 pub struct CatPorBlockList {
@@ -642,34 +781,21 @@ impl CatPorBlockList {
         }
     }
 
-    /// Return `Ok(true)` when the id is currently in the block list
+    /// Return `true` when the id is currently in the block list
     /// (and its expiration, if any, has not yet elapsed).
-    ///
-    /// Returns [`CatError::BackendUnavailable`] on lock poisoning. A
-    /// poisoned mutex means a previous holder panicked mid-mutation; the
-    /// LRU state could be inconsistent and silently proceeding could
-    /// admit a token that should have been rejected. Fail closed — the
-    /// authorization path treats this the same as a JTI store outage.
-    pub fn is_blocked(&self, id: &[u8]) -> Result<bool, CatError> {
-        let mut entries = self.entries.lock().map_err(|_| {
-            CatError::BackendUnavailable("CatPorBlockList lock poisoned".to_string())
-        })?;
-        Ok(match entries.get(id) {
+    pub fn is_blocked(&self, id: &[u8]) -> bool {
+        let mut entries = self.entries.lock();
+        match entries.get(id) {
             Some(Some(exp_ts)) => Utc::now().timestamp() < *exp_ts,
             Some(None) => true,
             None => false,
-        })
+        }
     }
 
     /// Insert an id into the block list with an optional expiration.
-    /// Returns [`CatError::BackendUnavailable`] on lock poisoning. See
-    /// [`Self::is_blocked`] for the fail-closed rationale.
-    pub fn add(&self, id: Vec<u8>, expiration: Option<i64>) -> Result<(), CatError> {
-        let mut entries = self.entries.lock().map_err(|_| {
-            CatError::BackendUnavailable("CatPorBlockList lock poisoned".to_string())
-        })?;
+    pub fn add(&self, id: Vec<u8>, expiration: Option<i64>) {
+        let mut entries = self.entries.lock();
         entries.put(id, expiration);
-        Ok(())
     }
 }
 
@@ -688,7 +814,7 @@ pub(crate) fn enforce_catpor(
     block_list: &CatPorBlockList,
 ) -> Result<(), CatError> {
     if let Some(ref catpor) = token.cat.catpor {
-        if block_list.is_blocked(&catpor.id)? {
+        if block_list.is_blocked(&catpor.id) {
             return Err(CatError::RejectedByProbability);
         }
 
@@ -703,7 +829,7 @@ pub(crate) fn enforce_catpor(
         };
 
         if random < catpor.probability {
-            block_list.add(catpor.id.clone(), catpor.expiration)?;
+            block_list.add(catpor.id.clone(), catpor.expiration);
             return Err(CatError::RejectedByProbability);
         }
     }
@@ -1621,7 +1747,7 @@ mod moqt_helper_tests {
     #[test]
     fn test_catpor_block_list_persists() {
         let block_list = CatPorBlockList::new();
-        block_list.add(vec![1, 2, 3], None).unwrap();
+        block_list.add(vec![1, 2, 3], None);
 
         let token = CatTokenBuilder::new()
             .probability_of_rejection(0.0, vec![1, 2, 3], None)
@@ -1634,7 +1760,7 @@ mod moqt_helper_tests {
     #[test]
     fn test_catpor_block_list_expiration() {
         let block_list = CatPorBlockList::new();
-        block_list.add(vec![1, 2, 3], Some(0)).unwrap();
+        block_list.add(vec![1, 2, 3], Some(0));
 
         let token = CatTokenBuilder::new()
             .probability_of_rejection(0.0, vec![1, 2, 3], None)
@@ -1649,6 +1775,138 @@ mod moqt_helper_tests {
         let token = CatToken::new();
         let block_list = CatPorBlockList::new();
         assert!(enforce_catpor(&token, &block_list).is_ok());
+    }
+
+    // --- catgeo* enforcement ---
+
+    #[test]
+    fn test_enforce_geo_absent_passes() {
+        let token = CatToken::new();
+        assert!(enforce_geo(&token, None).is_ok());
+        assert!(enforce_geo(&token, Some(&crate::geo::RequestLocation::new())).is_ok());
+    }
+
+    #[test]
+    fn test_enforce_geo_iso3166_no_context_fails_closed() {
+        let mut token = CatToken::new();
+        token.cat.catgeoiso3166 = Some(vec!["US".to_string()]);
+        assert!(matches!(
+            enforce_geo(&token, None),
+            Err(CatError::MissingRelayContext {
+                claim: "catgeo*",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn test_enforce_geo_iso3166_country_match() {
+        let mut token = CatToken::new();
+        token.cat.catgeoiso3166 = Some(vec!["US".to_string(), "CA".to_string()]);
+        let loc = crate::geo::RequestLocation {
+            country_code: Some("US".to_string()),
+            ..Default::default()
+        };
+        assert!(enforce_geo(&token, Some(&loc)).is_ok());
+    }
+
+    #[test]
+    fn test_enforce_geo_iso3166_country_mismatch() {
+        let mut token = CatToken::new();
+        token.cat.catgeoiso3166 = Some(vec!["US".to_string()]);
+        let loc = crate::geo::RequestLocation {
+            country_code: Some("FR".to_string()),
+            ..Default::default()
+        };
+        assert!(matches!(
+            enforce_geo(&token, Some(&loc)),
+            Err(CatError::GeographicValidationFailed(_))
+        ));
+    }
+
+    #[test]
+    fn test_enforce_geo_iso3166_subdivision_match() {
+        let mut token = CatToken::new();
+        token.cat.catgeoiso3166 = Some(vec!["US-CA".to_string()]);
+        let loc = crate::geo::RequestLocation {
+            country_code: Some("US".to_string()),
+            subdivision_code: Some("CA".to_string()),
+            ..Default::default()
+        };
+        assert!(enforce_geo(&token, Some(&loc)).is_ok());
+    }
+
+    #[test]
+    fn test_enforce_geo_coord_within_radius() {
+        let mut token = CatToken::new();
+        token.cat.catgeocoord = Some(vec![crate::claims::GeoCoordinate::new(
+            37.7749, -122.4194, 5000,
+        )]);
+        let loc = crate::geo::RequestLocation {
+            latitude: Some(37.78),
+            longitude: Some(-122.42),
+            ..Default::default()
+        };
+        assert!(enforce_geo(&token, Some(&loc)).is_ok());
+    }
+
+    #[test]
+    fn test_enforce_geo_coord_outside_radius() {
+        let mut token = CatToken::new();
+        token.cat.catgeocoord = Some(vec![crate::claims::GeoCoordinate::new(
+            37.7749, -122.4194, 1000,
+        )]);
+        let loc = crate::geo::RequestLocation {
+            latitude: Some(48.8566),
+            longitude: Some(2.3522),
+            ..Default::default()
+        };
+        assert!(matches!(
+            enforce_geo(&token, Some(&loc)),
+            Err(CatError::GeographicValidationFailed(_))
+        ));
+    }
+
+    #[test]
+    fn test_enforce_geo_coord_missing_lat_lon() {
+        let mut token = CatToken::new();
+        token.cat.catgeocoord = Some(vec![crate::claims::GeoCoordinate::new(0.0, 0.0, 1000)]);
+        let loc = crate::geo::RequestLocation {
+            country_code: Some("US".to_string()),
+            ..Default::default()
+        };
+        assert!(matches!(
+            enforce_geo(&token, Some(&loc)),
+            Err(CatError::MissingRelayContext {
+                claim: "catgeocoord",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn test_enforce_geo_geohash_prefix_match() {
+        let mut token = CatToken::new();
+        token.cat.geohash = Some(vec!["9q8yy".to_string()]);
+        let loc = crate::geo::RequestLocation {
+            geohash: Some("9q8yywe".to_string()),
+            ..Default::default()
+        };
+        assert!(enforce_geo(&token, Some(&loc)).is_ok());
+    }
+
+    #[test]
+    fn test_enforce_geo_geohash_no_shared_prefix() {
+        let mut token = CatToken::new();
+        token.cat.geohash = Some(vec!["gcpvj".to_string()]);
+        let loc = crate::geo::RequestLocation {
+            geohash: Some("9q8yywe".to_string()),
+            ..Default::default()
+        };
+        assert!(matches!(
+            enforce_geo(&token, Some(&loc)),
+            Err(CatError::GeographicValidationFailed(_))
+        ));
     }
 
     // --- apply_match_value ---

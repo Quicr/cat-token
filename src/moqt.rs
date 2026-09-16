@@ -3,7 +3,8 @@
 
 use crate::claims::{CatIfAction, CatRenewal};
 use crate::token::{
-    enforce_catnip, enforce_catpor, enforce_catu, validate_all_headers, validate_method,
+    enforce_catnip, enforce_catpor, enforce_catu, enforce_geo, validate_all_headers,
+    validate_method,
 };
 use crate::{
     BinaryMatch, CatDpopSettings, CatError, CatPorBlockList, CatToken, DpopProof, DpopValidator,
@@ -200,6 +201,7 @@ pub struct RelayRequestContext {
     pub(crate) tenant_id: Option<String>,
     pub(crate) dpop_proof: Option<DpopProof>,
     pub(crate) expected_dpop_nonce: Option<String>,
+    pub(crate) peer_location: Option<crate::geo::RequestLocation>,
 }
 
 impl RelayRequestContext {
@@ -223,6 +225,7 @@ impl RelayRequestContext {
             tenant_id: None,
             dpop_proof: None,
             expected_dpop_nonce: None,
+            peer_location: None,
         }
     }
 
@@ -314,6 +317,19 @@ impl RelayRequestContext {
         self
     }
 
+    /// Attach the peer's resolved geographic context. Required whenever a
+    /// token carries `catgeoiso3166`, `catgeocoord`, or `geohash` — those
+    /// claims otherwise fail closed because the authorization pipeline has
+    /// no other way to know where the peer is.
+    ///
+    /// Callers who lack a geo-IP resolver should not populate this and
+    /// should not accept tokens with geo claims; both operator errors are
+    /// surfaced as [`CatError::MissingRelayContext`].
+    pub fn with_peer_location(mut self, location: crate::geo::RequestLocation) -> Self {
+        self.peer_location = Some(location);
+        self
+    }
+
     /// Canonical relay endpoint the client connected to. Matched against
     /// the token's `aud` claim (if present).
     pub fn relay_endpoint(&self) -> &str {
@@ -391,6 +407,13 @@ impl RelayRequestContext {
     /// proof must carry a matching `nonce`.
     pub fn expected_dpop_nonce(&self) -> Option<&str> {
         self.expected_dpop_nonce.as_deref()
+    }
+
+    /// Resolved peer location — country/subdivision, coordinates, and
+    /// geohash. `None` when the caller has not supplied a geo-IP source;
+    /// geographic claims on the token fail closed against `None`.
+    pub fn peer_location(&self) -> Option<&crate::geo::RequestLocation> {
+        self.peer_location.as_ref()
     }
 }
 
@@ -834,6 +857,12 @@ impl MoqtValidator {
 
         // 8. catnip — peer network identity restrictions.
         enforce_catnip(claims, ctx.peer_ip, ctx.peer_asn)?;
+
+        // 8b. catgeo* — geographic restrictions. Fail-closed if the token
+        //     carries any geo claim (`catgeoiso3166`, `catgeocoord`,
+        //     `geohash`) but the caller did not attach a resolved peer
+        //     location.
+        enforce_geo(claims, ctx.peer_location.as_ref())?;
 
         // 9. catpor — probability of rejection. Fail-closed: if the token
         //    carries catpor and no block list is provided, the caller has
