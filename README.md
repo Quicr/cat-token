@@ -231,10 +231,9 @@ Note also that:
 ## Security
 
 Security-relevant behaviour (fail-closed defaults, trust boundary between
-issuer and relay, DPoP replay retention obligations, metrics exposed for
-alerting) is documented in [docs/security-model.md](docs/security-model.md).
-Emitted metric names and their operational meaning are in
-[docs/metrics.md](docs/metrics.md).
+issuer and relay, DPoP replay retention obligations, metric names, and
+alerting guidance) is documented in
+[docs/security-model.md](docs/security-model.md).
 
 For vulnerability disclosure, please open a private security advisory on
 the repository rather than filing a public issue.

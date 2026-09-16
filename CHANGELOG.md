@@ -14,7 +14,9 @@
   crate (COSE envelope, header extraction, DPoP payload, COSE_Encrypt0).
 - IPv6 authorities are now bracket-aware in `normalize_uri`; RFC 6874 zone
   identifiers (`%25<zone>`) survive normalization with case preserved.
-- `docs/security-model.md` and `docs/metrics.md`.
+- `docs/security-model.md` (fail-closed defaults, trust boundary,
+  metric names, alerting guidance — folded from an earlier
+  `docs/metrics.md` draft).
 - Three libfuzzer slow-unit corpus files promoted to bounded-time
   regression tests.
 - `test_jwk_debug_redacts_key_material` regression guard on the `Jwk`
