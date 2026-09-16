@@ -125,10 +125,21 @@ pub trait PathValidator {
 
 /// Constant-time SPKI pin check against the `cattpk` claim value.
 ///
-/// Signature is deliberately narrow: callers pass a `VerifiedPeerCertificate`
-/// obtained from their own `PathValidator`. If the two SPKI values are equal
-/// in constant time, returns `Ok(())`; otherwise returns
-/// `CatError::CertificateValidationFailed`.
+/// This function performs a **single, narrow check**: extract the SPKI
+/// from the DER inside `verified` and compare it byte-for-byte (in
+/// constant time) to `cattpk`. It does **not** validate the certificate
+/// itself — not the signature chain, not expiry, not revocation, not
+/// name constraints, not the subject. That is by design: callers pass a
+/// [`VerifiedPeerCertificate`] which the type system marks as already
+/// validated by their own [`PathValidator`]. Passing an unverified
+/// certificate DER here is a caller bug that this function cannot detect.
+///
+/// Prefer [`authenticate_and_pin`] when the caller wants both stages
+/// wired together with fail-closed semantics.
+///
+/// Returns `Ok(())` on match, or [`CatError::CertificateValidationFailed`]
+/// on mismatch (or if SPKI extraction fails, which itself means the DER
+/// is malformed and the caller's path validator should have caught it).
 pub fn check_cattpk_pin(cattpk: &[u8], verified: &VerifiedPeerCertificate) -> Result<(), CatError> {
     let spki = extract_spki_from_cert(&verified.leaf_der)?;
     if crate::crypto::constant_time_eq(&spki, cattpk) {
