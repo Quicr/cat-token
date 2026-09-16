@@ -260,6 +260,7 @@ impl ConfirmationClaim {
 pub const CATDPOP_MAX_WINDOW_SECS: i64 = 3600;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Default)]
+#[non_exhaustive]
 pub struct CatDpopSettings {
     pub(crate) crit: Option<Vec<i64>>,
     pub(crate) window: Option<i64>,
@@ -351,8 +352,15 @@ impl CatDpopSettings {
         self.window.unwrap_or(300)
     }
 
+    /// Whether the caller should record and reject DPoP JTI replays for
+    /// tokens carrying this settings object. Defaults to `true` when the
+    /// token omits the sub-claim: a `catdpop` settings object exists in
+    /// the token only because the issuer opted into DPoP, and silently
+    /// disabling replay protection when the field is absent turned out to
+    /// be a footgun in earlier revisions. Explicit `false` is still
+    /// honored.
     pub fn should_honor_jti(&self) -> bool {
-        self.honor_jti.unwrap_or(false)
+        self.honor_jti.unwrap_or(true)
     }
 }
 
@@ -1358,6 +1366,12 @@ impl BinaryMatch {
         match self.match_type {
             BinaryMatchType::Any => true,
             BinaryMatchType::Exact => input == self.pattern.as_slice(),
+            // An empty prefix/suffix matches every input, which would turn the
+            // pattern into a universal wildcard. Callers that want "any"
+            // must construct `BinaryMatchType::Any` explicitly; anything else
+            // fails closed.
+            BinaryMatchType::Prefix if self.pattern.is_empty() => false,
+            BinaryMatchType::Suffix if self.pattern.is_empty() => false,
             BinaryMatchType::Prefix => input.starts_with(&self.pattern),
             BinaryMatchType::Suffix => input.ends_with(&self.pattern),
         }
@@ -1469,13 +1483,17 @@ impl MoqtScope {
         self.actions.contains(action)
     }
 
+    /// Match a namespace tuple and track name against this scope. Per
+    /// draft-ietf-moq-c4m, a scope with an empty `namespace_matches` list
+    /// (or with the namespace slot omitted on the wire) matches every
+    /// namespace. Fail-closed enforcement in this profile lives at the
+    /// action layer: unlisted actions are blocked, but a listed action
+    /// with no namespace selector is universally scoped by design.
     pub fn matches_full_track_name(&self, namespace_tuple: &[&[u8]], track: &[u8]) -> bool {
-        if !self.namespace_matches.is_empty() {
-            for (i, ns_match) in self.namespace_matches.iter().enumerate() {
-                let tuple_elem = namespace_tuple.get(i).copied();
-                if !ns_match.matches(tuple_elem) {
-                    return false;
-                }
+        for (i, ns_match) in self.namespace_matches.iter().enumerate() {
+            let tuple_elem = namespace_tuple.get(i).copied();
+            if !ns_match.matches(tuple_elem) {
+                return false;
             }
         }
 
@@ -1488,10 +1506,10 @@ impl MoqtScope {
         true
     }
 
+    /// Match a namespace tuple against this scope. Per draft-ietf-moq-c4m,
+    /// an empty `namespace_matches` list is the spec-sanctioned "any
+    /// namespace" idiom.
     pub fn matches_namespace(&self, namespace: &[Vec<u8>]) -> bool {
-        if self.namespace_matches.is_empty() {
-            return true;
-        }
         for (i, ns_match) in self.namespace_matches.iter().enumerate() {
             let tuple_elem = namespace.get(i).map(|v| v.as_slice());
             if !ns_match.matches(tuple_elem) {
@@ -1841,9 +1859,19 @@ impl CatToken {
     ) -> bool {
         if let Some(ref scopes) = self.moqt.moqt {
             scopes.iter().any(|scope| {
-                scope.allows_action(action)
-                    && scope.matches_namespace(namespace)
-                    && scope.matches_track(track)
+                if !scope.allows_action(action) {
+                    return false;
+                }
+                // Per draft-ietf-moq-c4m, an omitted/empty namespace
+                // selector matches every namespace; present selectors are
+                // enforced against the request tuple.
+                if !scope.matches_namespace(namespace) {
+                    return false;
+                }
+                if scope.track_match().is_some() && !scope.matches_track(track) {
+                    return false;
+                }
+                true
             })
         } else {
             false

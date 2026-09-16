@@ -105,8 +105,13 @@ impl<A: CryptographicAlgorithm> SingleKeyResolver<A> {
     }
 
     /// Reject tokens whose protected-header `kid` does not match `kid`.
+    /// An empty `kid` is not a legitimate key identifier; passing one
+    /// leaves the pinned `kid` unset so this resolver continues to accept
+    /// any header `kid` rather than silently matching the empty variant.
     pub fn require_kid(mut self, kid: Vec<u8>) -> Self {
-        self.required_kid = Some(kid);
+        if !kid.is_empty() {
+            self.required_kid = Some(kid);
+        }
         self
     }
 }

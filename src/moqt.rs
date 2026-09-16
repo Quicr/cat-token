@@ -185,6 +185,7 @@ impl AuthorizedRequest {
 /// Fields are private; access them through the getter methods. This keeps
 /// the struct growable without breaking downstream matches.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct RelayRequestContext {
     pub(crate) relay_endpoint: String,
     pub(crate) action: MoqtAction,
@@ -1133,13 +1134,15 @@ impl MoqtValidator {
             return false;
         }
 
-        // "Matches are performed bytewise against the corresponding field of the Full Track Name"
-        if !scope.namespace_matches.is_empty() {
-            for (i, ns_match) in scope.namespace_matches.iter().enumerate() {
-                let tuple_elem = ctx.namespace.get(i).map(|v| v.as_slice());
-                if !ns_match.matches(tuple_elem) {
-                    return false;
-                }
+        // Per draft-ietf-moq-c4m, an empty/omitted `namespace_matches`
+        // list matches every namespace regardless of action shape. A
+        // non-empty list is enforced against the request context — a
+        // setup grant that narrows to a specific namespace hint still
+        // applies.
+        for (i, ns_match) in scope.namespace_matches.iter().enumerate() {
+            let tuple_elem = ctx.namespace.get(i).map(|v| v.as_slice());
+            if !ns_match.matches(tuple_elem) {
+                return false;
             }
         }
 
@@ -1259,15 +1262,37 @@ impl MoqtScopeBuilder {
         self
     }
 
-    /// Set prefix track match
+    /// Set prefix track match. An empty prefix is treated as "match any
+    /// track" via [`track_any`]; a genuine wildcard should use that method
+    /// directly so intent is explicit at the call site.
+    ///
+    /// [`track_any`]: MoqtScopeBuilder::track_any
     pub fn track_prefix(mut self, prefix: &[u8]) -> Self {
-        self.track_match = Some(BinaryMatch::prefix(prefix.to_vec()));
+        if prefix.is_empty() {
+            self.track_match = None;
+        } else {
+            self.track_match = Some(BinaryMatch::prefix(prefix.to_vec()));
+        }
         self
     }
 
-    /// Set suffix track match
+    /// Set suffix track match. An empty suffix is treated as "match any
+    /// track" via [`track_any`].
+    ///
+    /// [`track_any`]: MoqtScopeBuilder::track_any
     pub fn track_suffix(mut self, suffix: &[u8]) -> Self {
-        self.track_match = Some(BinaryMatch::suffix(suffix.to_vec()));
+        if suffix.is_empty() {
+            self.track_match = None;
+        } else {
+            self.track_match = Some(BinaryMatch::suffix(suffix.to_vec()));
+        }
+        self
+    }
+
+    /// Match any track name. Equivalent to omitting `track_match` from the
+    /// scope on the wire.
+    pub fn track_any(mut self) -> Self {
+        self.track_match = None;
         self
     }
 

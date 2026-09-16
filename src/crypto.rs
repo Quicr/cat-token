@@ -331,12 +331,13 @@ pub fn hash_sha256(data: &[u8]) -> Vec<u8> {
 /// loop depends on the value of the compared bytes.
 ///
 /// The length check is *not* constant-time: unequal lengths short-circuit
-/// to `false`. That is intentional and safe for every current caller in
-/// this crate: JWK thumbprints (fixed 32 bytes), signatures (fixed by
-/// algorithm), and access-token hashes (fixed 32 bytes) all compare
-/// values whose byte length is public. Do NOT use this helper to compare
-/// variable-length secrets where the length itself would leak
-/// information.
+/// to `false`. Every caller inside this crate compares values whose byte
+/// length is public (JWK thumbprints fixed at 32 bytes, signatures fixed
+/// by algorithm, access-token hashes fixed at 32 bytes, DER SPKI bytes
+/// whose length is determined by the peer's certificate). This helper
+/// therefore does not attempt to hide length from the timing side; do NOT
+/// use it to compare variable-length secrets where the length itself
+/// would leak information the attacker cannot otherwise learn.
 #[inline]
 pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {

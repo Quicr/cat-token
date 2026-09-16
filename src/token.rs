@@ -89,8 +89,17 @@ impl CatTokenValidator {
         I: IntoIterator<Item = S>,
         S: Into<String>,
     {
+        // Empty strings sometimes creep in from config parsing (blank line
+        // in a YAML/CSV list). An empty `iss` is not a legitimate CAT
+        // identity — filter them out here so a config typo cannot widen
+        // the issuer allow-list unnoticed.
+        let set: HashSet<String> = issuers
+            .into_iter()
+            .map(Into::into)
+            .filter(|s| !s.is_empty())
+            .collect();
         Self {
-            expected_issuers: Some(issuers.into_iter().map(Into::into).collect()),
+            expected_issuers: Some(set),
             expected_audiences: None,
             exp_tolerance: 0,
             nbf_tolerance: 0,
@@ -123,12 +132,12 @@ impl CatTokenValidator {
     /// [`dangerously_any_issuer`]: CatTokenValidator::dangerously_any_issuer
     /// [`for_expected_issuers`]: CatTokenValidator::for_expected_issuers
     pub fn with_expected_issuers(mut self, issuers: Vec<String>) -> Self {
-        self.expected_issuers = Some(issuers.into_iter().collect());
+        self.expected_issuers = Some(issuers.into_iter().filter(|s| !s.is_empty()).collect());
         self
     }
 
     pub fn with_expected_audiences(mut self, audiences: Vec<String>) -> Self {
-        self.expected_audiences = Some(audiences.into_iter().collect());
+        self.expected_audiences = Some(audiences.into_iter().filter(|s| !s.is_empty()).collect());
         self
     }
 
@@ -193,7 +202,10 @@ impl CatTokenValidator {
 
         if let Some(ref expected_issuers) = self.expected_issuers {
             if let Some(ref iss) = token.core.iss {
-                if !expected_issuers.contains(iss) {
+                // An empty `iss` in the token is never a legitimate
+                // identity; reject before consulting the allow-list so a
+                // stray empty entry (config typo) cannot authorize it.
+                if iss.is_empty() || !expected_issuers.contains(iss) {
                     return Err(CatError::InvalidIssuer);
                 }
             } else {
@@ -203,7 +215,10 @@ impl CatTokenValidator {
 
         if let Some(ref expected_audiences) = self.expected_audiences {
             if let Some(ref aud) = token.core.aud {
-                if !aud.iter().any(|a| expected_audiences.contains(a)) {
+                if !aud
+                    .iter()
+                    .any(|a| !a.is_empty() && expected_audiences.contains(a))
+                {
                     return Err(CatError::InvalidAudience);
                 }
             } else {
@@ -371,6 +386,14 @@ pub(crate) fn validate_method(token: &CatToken, method: &str) -> Result<(), CatE
     Ok(())
 }
 
+/// Maximum length (bytes) of an input string that will be tested against a
+/// `MatchValue::Regex`. The `regex` crate guarantees O(n) time in the
+/// input, but the constant factor can still add up under adversarial
+/// input sizes on a per-request auth path. Values above this cap fail
+/// the match closed rather than burning CPU.
+#[cfg(feature = "moqt")]
+pub(crate) const MAX_REGEX_INPUT_LEN: usize = 4096;
+
 /// Apply a single `MatchValue` against an input string.
 #[cfg(feature = "moqt")]
 pub(crate) fn apply_match_value(mv: &crate::claims::MatchValue, input: &str) -> bool {
@@ -380,24 +403,29 @@ pub(crate) fn apply_match_value(mv: &crate::claims::MatchValue, input: &str) -> 
         MatchValue::Prefix(s) => input.starts_with(s.as_str()),
         MatchValue::Suffix(s) => input.ends_with(s.as_str()),
         MatchValue::Contains(s) => input.contains(s.as_str()),
-        MatchValue::Regex(pattern) => REGEX_CACHE.with(|cache| {
-            let mut cache = cache.borrow_mut();
-            if let Some(re) = cache.get(pattern) {
-                return re.is_match(input);
+        MatchValue::Regex(pattern) => {
+            if input.len() > MAX_REGEX_INPUT_LEN {
+                return false;
             }
-            match regex::RegexBuilder::new(pattern)
-                .size_limit(1 << 20)
-                .dfa_size_limit(1 << 20)
-                .build()
-            {
-                Ok(re) => {
-                    let result = re.is_match(input);
-                    cache.put(pattern.clone(), re);
-                    result
+            REGEX_CACHE.with(|cache| {
+                let mut cache = cache.borrow_mut();
+                if let Some(re) = cache.get(pattern) {
+                    return re.is_match(input);
                 }
-                Err(_) => false,
-            }
-        }),
+                match regex::RegexBuilder::new(pattern)
+                    .size_limit(1 << 20)
+                    .dfa_size_limit(1 << 20)
+                    .build()
+                {
+                    Ok(re) => {
+                        let result = re.is_match(input);
+                        cache.put(pattern.clone(), re);
+                        result
+                    }
+                    Err(_) => false,
+                }
+            })
+        }
         MatchValue::Sha256(expected) => {
             use sha2::{Digest, Sha256};
             let hash = Sha256::digest(input.as_bytes());
@@ -461,9 +489,9 @@ pub(crate) fn validate_all_headers(
 
 /// Unfold multi-line header values per RFC 9110 §5.2.
 /// Joins comma-separated values and removes obs-fold (CRLF + whitespace).
-/// Operates on bytes and writes UTF-8 back through `push_str` on ASCII
-/// slice fragments, so multi-byte UTF-8 bytes are copied verbatim rather
-/// than mangled by a `byte as char` Latin-1 reinterpretation.
+/// Slices the input `&str` at ASCII boundaries (`\r`, `\n`, space, tab)
+/// which are guaranteed to be char boundaries, so no `unsafe` is needed
+/// to preserve UTF-8 validity for the copied fragments.
 #[cfg(feature = "moqt")]
 pub(crate) fn unfold_header_value(value: &str) -> String {
     let mut result = String::with_capacity(value.len());
@@ -476,12 +504,11 @@ pub(crate) fn unfold_header_value(value: &str) -> String {
             && bytes[i + 1] == b'\n'
             && (bytes[i + 2] == b' ' || bytes[i + 2] == b'\t')
         {
-            // Safety: `value` is `&str`, so every byte in the slice
-            // `&bytes[copy_start..i]` is part of a valid UTF-8 sequence
-            // that starts at or after the previous unfold point (which
-            // itself lay on a UTF-8 boundary — only ASCII bytes `\r`,
-            // `\n`, ' ', '\t' terminate a run).
-            result.push_str(unsafe { std::str::from_utf8_unchecked(&bytes[copy_start..i]) });
+            // `bytes[i] == b'\r'` (ASCII) means `i` is a char boundary,
+            // and `copy_start` was set immediately after a run of ASCII
+            // whitespace, so it is also a char boundary. The `&str`
+            // slice below cannot produce invalid UTF-8.
+            result.push_str(&value[copy_start..i]);
             result.push(' ');
             i += 3;
             while i < bytes.len() && (bytes[i] == b' ' || bytes[i] == b'\t') {
@@ -493,7 +520,7 @@ pub(crate) fn unfold_header_value(value: &str) -> String {
         }
     }
     if copy_start < bytes.len() {
-        result.push_str(unsafe { std::str::from_utf8_unchecked(&bytes[copy_start..]) });
+        result.push_str(&value[copy_start..]);
     }
     result
 }

@@ -980,8 +980,22 @@ fn decode_binary_match(value: &Value) -> Result<crate::claims::BinaryMatch, CatE
             };
 
             match match_type {
-                1 => Ok(BinaryMatch::prefix(pattern)),
-                2 => Ok(BinaryMatch::suffix(pattern)),
+                1 => {
+                    if pattern.is_empty() {
+                        return Err(CatError::InvalidClaimValue(
+                            "prefix match pattern must not be empty".to_string(),
+                        ));
+                    }
+                    Ok(BinaryMatch::prefix(pattern))
+                }
+                2 => {
+                    if pattern.is_empty() {
+                        return Err(CatError::InvalidClaimValue(
+                            "suffix match pattern must not be empty".to_string(),
+                        ));
+                    }
+                    Ok(BinaryMatch::suffix(pattern))
+                }
                 _ => Err(CatError::InvalidClaimValue(format!(
                     "Unknown match type: {}",
                     match_type

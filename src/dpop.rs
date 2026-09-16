@@ -364,8 +364,15 @@ impl DpopPayload {
         self.actx.is_valid() && self.iat > 0
     }
 
+    /// Freshness check using the default future-clock tolerance. The
+    /// default is deliberately tight (5 seconds) so a stolen proof cannot
+    /// be replayed against a well-synchronized fleet. Deployments with
+    /// looser clock discipline should call
+    /// [`is_fresh_with_future_tolerance`] with an explicit budget.
+    ///
+    /// [`is_fresh_with_future_tolerance`]: DpopPayload::is_fresh_with_future_tolerance
     pub fn is_fresh(&self, window_seconds: i64) -> bool {
-        self.is_fresh_with_future_tolerance(window_seconds, 30)
+        self.is_fresh_with_future_tolerance(window_seconds, 5)
     }
 
     pub fn is_fresh_with_future_tolerance(
@@ -397,10 +404,19 @@ pub fn confirmation_from_jwk(jwk: &Jwk) -> Result<ConfirmationClaim, CatError> {
     Ok(ConfirmationClaim::new(thumbprint))
 }
 
-/// Check if a ConfirmationClaim matches a JWK (constant-time comparison)
-pub fn confirmation_matches_jwk(cnf: &ConfirmationClaim, jwk: &Jwk) -> Result<bool, CatError> {
+/// Verify that a confirmation claim binds the supplied JWK. Returns
+/// `Ok(())` when the constant-time thumbprint comparison succeeds and
+/// [`CatError::InvalidDpopBinding`] otherwise. The prior `Result<bool>`
+/// signature encouraged callers to accidentally `?` the outer `Result`
+/// and silently accept a `false` inner value — the new signature makes a
+/// mismatch impossible to ignore.
+pub fn confirmation_matches_jwk(cnf: &ConfirmationClaim, jwk: &Jwk) -> Result<(), CatError> {
     let thumbprint = jwk.thumbprint()?;
-    Ok(crate::crypto::constant_time_eq(&cnf.jkt, &thumbprint))
+    if crate::crypto::constant_time_eq(&cnf.jkt, &thumbprint) {
+        Ok(())
+    } else {
+        Err(CatError::InvalidDpopBinding)
+    }
 }
 
 /// Constant-time compare a cached thumbprint against a confirmation claim.
@@ -1447,7 +1463,49 @@ pub mod cwt {
 #[cfg(feature = "moqt")]
 pub mod jwt {
     use super::*;
+    use serde::de::{self, MapAccess, Visitor};
     use serde_json::{Map, Value as Json};
+    use std::collections::HashSet;
+    use std::fmt;
+
+    /// Detect duplicate keys in the top-level JSON object before feeding
+    /// the bytes to `serde_json::Value`, which silently keeps the last
+    /// occurrence. A DPoP proof whose header or payload carries duplicate
+    /// keys is a parser-differential hazard: a middlebox or audit tool
+    /// using a different JSON library may see a different value than this
+    /// crate. Reject rather than paper over the ambiguity.
+    struct TopLevelKeyChecker;
+
+    impl<'de> Visitor<'de> for TopLevelKeyChecker {
+        type Value = ();
+
+        fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            f.write_str("a JSON object with unique top-level keys")
+        }
+
+        fn visit_map<M>(self, mut map: M) -> Result<(), M::Error>
+        where
+            M: MapAccess<'de>,
+        {
+            let mut seen: HashSet<String> = HashSet::new();
+            while let Some(key) = map.next_key::<String>()? {
+                if !seen.insert(key.clone()) {
+                    return Err(de::Error::custom(format!("duplicate JSON key: {key}")));
+                }
+                // Consume the value without materializing it.
+                let _: de::IgnoredAny = map.next_value()?;
+            }
+            Ok(())
+        }
+    }
+
+    pub(super) fn reject_duplicate_top_level_keys(bytes: &[u8]) -> Result<(), CatError> {
+        use serde::Deserializer as _;
+        let mut de = serde_json::Deserializer::from_slice(bytes);
+        (&mut de)
+            .deserialize_map(TopLevelKeyChecker)
+            .map_err(|e: serde_json::Error| CatError::InvalidClaimValue(e.to_string()))
+    }
 
     pub(super) fn encode(proof: &DpopProof) -> Result<Vec<u8>, CatError> {
         let bytes = if proof.signed_bytes.is_empty() {
@@ -1549,6 +1607,7 @@ pub mod jwt {
     }
 
     fn decode_header(bytes: &[u8]) -> Result<DpopHeader, CatError> {
+        reject_duplicate_top_level_keys(bytes)?;
         let v: Json =
             serde_json::from_slice(bytes).map_err(|e| CatError::InvalidCbor(e.to_string()))?;
         let obj = v.as_object().ok_or(CatError::InvalidTokenFormat)?;
@@ -1606,6 +1665,7 @@ pub mod jwt {
     }
 
     fn decode_payload(bytes: &[u8]) -> Result<DpopPayload, CatError> {
+        reject_duplicate_top_level_keys(bytes)?;
         let v: Json =
             serde_json::from_slice(bytes).map_err(|e| CatError::InvalidCbor(e.to_string()))?;
         let obj = v.as_object().ok_or(CatError::InvalidTokenFormat)?;
@@ -1974,6 +2034,8 @@ impl JtiStore for LruJtiStore {
 
 #[cfg(feature = "moqt")]
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
+#[must_use = "JtiCacheStats reports replay-store health; dropping it defeats the check"]
 pub struct JtiCacheStats {
     pub size: usize,
     pub capacity: usize,
@@ -3298,6 +3360,6 @@ mod tests {
 
         let cnf = confirmation_from_jwk(&jwk).unwrap();
         assert_eq!(cnf.jkt.len(), 32);
-        assert!(confirmation_matches_jwk(&cnf, &jwk).unwrap());
+        confirmation_matches_jwk(&cnf, &jwk).expect("confirmation must match its own JWK");
     }
 }
