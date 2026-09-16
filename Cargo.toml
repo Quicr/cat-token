@@ -2,12 +2,23 @@
 name = "cat-token"
 version = "0.3.0"
 edition = "2024"
+# Uses stabilized let-chains (1.88+) and edition 2024 (1.85+); pin to the
+# lower bound we actually exercise in CI.
+rust-version = "1.88"
 authors = ["Suhas Nandakumar"]
 description = "Strict fail-closed profile of CTA-5007-B CAT and CAT-4-MOQT (see docs/PROFILE.md for supported claim forms and rejections)"
 license = "BSD-2-Clause"
 repository = "https://github.com/Quicr/cat-token"
 keywords = ["cat", "cwt", "cbor", "token", "authentication"]
 categories = ["authentication", "cryptography"]
+# Keep the published crate lean: the fuzz corpus, working-doc HTML/Markdown,
+# and generated code-analysis artefacts are not needed by downstream users.
+exclude = [
+    "fuzz/",
+    "code_analysis.*",
+    "SECURITY-AUDIT.md",
+    ".github/",
+]
 
 [dependencies]
 ciborium = "0.2"
@@ -18,7 +29,11 @@ ring = "0.17"
 hmac = "0.12"
 sha2 = "0.10"
 p256 = { version = "0.13", features = ["ecdsa", "pem"] }
-rsa = { version = "0.9", features = ["sha2"] }
+# Pin to the 0.9.x line explicitly. rsa has had multiple high-severity
+# advisories historically (marvin timing attack, RUSTSEC-2023-0071);
+# staying on the audited series avoids silent uptake of a semver-major
+# rewrite that has not yet been reviewed against this crate.
+rsa = { version = "~0.9.10", features = ["sha2"] }
 thiserror = "1.0"
 zeroize = { version = "1.7", features = ["derive"] }
 lru = "0.18"

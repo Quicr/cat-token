@@ -81,6 +81,23 @@ pub trait AsyncJtiStore: Send + Sync {
 /// deployments MUST use a strict guard behind
 /// [`AsyncMoqtValidator::require_strict_replay_guard`]; a best-effort LRU
 /// is a replay-defense bypass under memory pressure or restart.
+///
+/// # Ordering contract (READ THIS BEFORE IMPLEMENTING)
+///
+/// **`check_and_record` MUST run *after* every other validation step.**
+/// The authorize pipeline in this crate is structured so the replay
+/// commit is the last check on the accept path; if an earlier step
+/// (signature verify, claim enforcement, DPoP binding) fails, the cti
+/// is never recorded. An implementer who reorders — for example, an
+/// `AsyncReplayGuard` that record-then-checks internally, or one that
+/// commits in `Drop` regardless of the outer future's outcome — is
+/// silently poisoning the replay cache with `cti` values that never
+/// actually authorized. A subsequent legitimate presentation of the
+/// same `cti` will then be rejected as a replay.
+///
+/// If your backend does not support insert-if-absent atomically, do
+/// **not** try to fake it inside this trait — advertise `is_strict()
+/// == false` and let the validator refuse to authorize on that path.
 #[async_trait]
 pub trait AsyncReplayGuard: Send + Sync {
     async fn check_and_record(&self, cti: &[u8]) -> Result<bool, CatError>;

@@ -1,5 +1,33 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- `catgeo*` enforcement now wires to `RelayRequestContext::peer_location` —
+  tokens carrying `catgeoiso3166`, `catgeocoord`, or `geohash` fail closed
+  unless the relay attaches a resolved peer location.
+- `DpopValidator::minimum_jti_cache_capacity()` and
+  `maximum_jti_cache_capacity()` const accessors.
+- `jti_cache_stats()` marked `#[must_use]`; `MIN_JTI_CACHE_SIZE` promoted to
+  `pub const` for operator sanity-checks.
+- Ciborium recursion depth clamped to 32 for every raw CBOR decoder in the
+  crate (COSE envelope, header extraction, DPoP payload, COSE_Encrypt0).
+- IPv6 authorities are now bracket-aware in `normalize_uri`; RFC 6874 zone
+  identifiers (`%25<zone>`) survive normalization with case preserved.
+- `docs/security-model.md` and `docs/metrics.md`.
+- Three libfuzzer slow-unit corpus files promoted to bounded-time
+  regression tests.
+
+### Changed
+- JTI LRU shards now hash the `iss:` prefix on its own before mixing in
+  the full key, so one bursty issuer's inserts spread across all shards.
+- `check_cattpk_pin` rustdoc now spells out the caller's chain-validation
+  obligation explicitly.
+- JTI store and `CatPorBlockList` hot paths use `parking_lot::Mutex`;
+  the `Result<bool, CatError>` on `is_blocked` / `add` is gone.
+- `rsa` pinned to `~0.9.10`; `rust-version = "1.88"`; `exclude` list on
+  the manifest keeps the published crate lean.
+
 ## 0.3.0 — 2026-09-10
 
 Pre-embed hardening pass in preparation for CDN-scale fleet

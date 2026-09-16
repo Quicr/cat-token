@@ -228,6 +228,17 @@ Note also that:
   implementation is in-memory only; production deployments must supply a
   distributed backend behind the `ReplayGuard` trait.
 
+## Security
+
+Security-relevant behaviour (fail-closed defaults, trust boundary between
+issuer and relay, DPoP replay retention obligations, metrics exposed for
+alerting) is documented in [docs/security-model.md](docs/security-model.md).
+Emitted metric names and their operational meaning are in
+[docs/metrics.md](docs/metrics.md).
+
+For vulnerability disclosure, please open a private security advisory on
+the repository rather than filing a public issue.
+
 ## License
 
 BSD-2-Clause
