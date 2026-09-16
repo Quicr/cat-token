@@ -194,31 +194,48 @@ pub fn normalize_uri(uri: &str) -> Result<String, CatError> {
 
     // §6.2.2.1 Case normalization: host to lowercase
     // §6.2.3 Scheme-based: remove default ports
-    if let Some(colon_pos) = authority.rfind(':') {
-        let host_part = &authority[..colon_pos];
-        let port_part = &authority[colon_pos + 1..];
-        result.push_str(&host_part.to_ascii_lowercase());
-
-        let scheme = if result.starts_with("http://") {
-            "http"
-        } else if result.starts_with("https://") {
-            "https"
-        } else {
-            ""
-        };
-
-        let default_port = match scheme {
-            "http" => "80",
-            "https" => "443",
-            _ => "",
-        };
-
-        if port_part != default_port {
-            result.push(':');
-            result.push_str(port_part);
-        }
+    //
+    // Split authority into host and optional port. An IPv6 literal is
+    // wrapped in `[...]` per RFC 3986 §3.2.2 and may carry a zone
+    // identifier as `%25<zone>` per RFC 6874. The zone contains ASCII
+    // letters/digits and is not case-normalized here — an interface name
+    // like `eth0` or a literal ifindex is a system identifier, not part
+    // of the host, and case may matter to the OS. Everything else in the
+    // bracketed host (the hex digits) is folded to lowercase.
+    let (host_part, port_part) = if let Some(bracket_end) = authority
+        .starts_with('[')
+        .then(|| authority.find(']'))
+        .flatten()
+    {
+        let host = &authority[..=bracket_end];
+        let rest = &authority[bracket_end + 1..];
+        let port = rest.strip_prefix(':').unwrap_or("");
+        (host, port)
+    } else if let Some(colon_pos) = authority.rfind(':') {
+        (&authority[..colon_pos], &authority[colon_pos + 1..])
     } else {
-        result.push_str(&authority.to_ascii_lowercase());
+        (authority, "")
+    };
+
+    result.push_str(&lowercase_host(host_part));
+
+    let scheme = if result.starts_with("http://") {
+        "http"
+    } else if result.starts_with("https://") {
+        "https"
+    } else {
+        ""
+    };
+
+    let default_port = match scheme {
+        "http" => "80",
+        "https" => "443",
+        _ => "",
+    };
+
+    if !port_part.is_empty() && port_part != default_port {
+        result.push(':');
+        result.push_str(port_part);
     }
 
     let (path, query) = if let Some(pos) = path_and_query.find('?') {
@@ -303,6 +320,23 @@ fn normalize_percent_encoding(s: &str) -> String {
     }
 
     result
+}
+
+/// Lowercase a host authority component. For an IPv6 literal `[...]` this
+/// lowercases the hex digits but leaves any RFC 6874 zone identifier
+/// (introduced by `%25`) untouched — the zone is a system identifier
+/// whose case may be significant to the underlying OS.
+fn lowercase_host(host: &str) -> String {
+    if !(host.starts_with('[') && host.ends_with(']')) {
+        return host.to_ascii_lowercase();
+    }
+    if let Some(zone_pos) = host.find("%25") {
+        let mut out = String::with_capacity(host.len());
+        out.push_str(&host[..zone_pos].to_ascii_lowercase());
+        out.push_str(&host[zone_pos..]);
+        return out;
+    }
+    host.to_ascii_lowercase()
 }
 
 fn hex_val(b: u8) -> Option<u8> {
@@ -437,5 +471,63 @@ mod tests {
         assert!(decompose_uri("https://example.com/path#frag").is_err());
         assert!(normalize_uri("https://example.com/path#").is_err());
         assert!(decompose_uri("https://example.com/p?k=v#f").is_err());
+    }
+
+    #[test]
+    fn test_ipv6_literal_no_port() {
+        assert_eq!(
+            normalize_uri("https://[::1]/api").unwrap(),
+            "https://[::1]/api"
+        );
+        let c = decompose_uri("https://[::1]/api").unwrap();
+        assert_eq!(c.host, "[::1]");
+        assert!(c.port.is_empty());
+        assert_eq!(c.path, "/api");
+    }
+
+    #[test]
+    fn test_ipv6_literal_with_port() {
+        assert_eq!(
+            normalize_uri("https://[2001:db8::1]:8080/").unwrap(),
+            "https://[2001:db8::1]:8080/"
+        );
+        let c = decompose_uri("https://[2001:DB8::1]:8080/x").unwrap();
+        assert_eq!(c.host, "[2001:db8::1]");
+        assert_eq!(c.port, "8080");
+    }
+
+    #[test]
+    fn test_ipv6_literal_default_port_removed() {
+        assert_eq!(
+            normalize_uri("https://[::1]:443/").unwrap(),
+            "https://[::1]/"
+        );
+        assert_eq!(
+            normalize_uri("http://[::1]:80/x").unwrap(),
+            "http://[::1]/x"
+        );
+    }
+
+    #[test]
+    fn test_ipv6_hex_case_folded_zone_preserved() {
+        // Zone identifier (RFC 6874) is `%25<zone>` inside brackets. Hex
+        // digits fold to lowercase but the zone name is a system
+        // identifier — leave it as the caller wrote it.
+        assert_eq!(
+            normalize_uri("https://[FE80::1%25eth0]/api").unwrap(),
+            "https://[fe80::1%25eth0]/api"
+        );
+        assert_eq!(
+            normalize_uri("https://[FE80::1%25ETH0]:8443/").unwrap(),
+            "https://[fe80::1%25ETH0]:8443/"
+        );
+    }
+
+    #[test]
+    fn test_ipv6_zone_survives_decompose() {
+        let c = decompose_uri("https://[fe80::1%25eth0]:8443/x").unwrap();
+        assert_eq!(c.host, "[fe80::1%25eth0]");
+        assert_eq!(c.port, "8443");
+        assert_eq!(c.path, "/x");
     }
 }
