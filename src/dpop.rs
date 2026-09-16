@@ -1807,8 +1807,14 @@ pub mod jwt {
 #[cfg(feature = "moqt")]
 const DEFAULT_JTI_CACHE_SIZE: usize = 100_000;
 
+/// Minimum LRU JTI cache size. Requests below this value are clamped up
+/// so the sharded cache always has enough headroom to hold at least one
+/// freshness window of proofs without immediate eviction pressure. A
+/// deployment that legitimately wants a smaller cache should switch to a
+/// strict store (see [`InMemoryStrictJtiStore`] or a distributed
+/// TTL-backed backend) rather than lowering this bound.
 #[cfg(feature = "moqt")]
-const MIN_JTI_CACHE_SIZE: usize = 1000;
+pub const MIN_JTI_CACHE_SIZE: usize = 1000;
 
 /// Hard upper bound on the LRU JTI cache. Capacity requests above this are
 /// clamped to prevent a config typo from allocating gigabytes of shard state
@@ -2347,6 +2353,12 @@ impl DpopValidator {
         Ok(Self::with_jti_store(settings, store))
     }
 
+    /// Snapshot the replay-store health. Operators should scrape this on
+    /// a schedule and alert on `under_pressure` (soft signal) or
+    /// `premature_evictions > 0` (hard signal — an accepted JTI has been
+    /// dropped before its freshness window elapsed and replay protection
+    /// is degraded).
+    #[must_use = "JtiCacheStats reports replay-store health; dropping it defeats the check"]
     pub fn jti_cache_stats(&self) -> JtiCacheStats {
         let size = self.jti_store.len();
         let under_pressure = self.cache_capacity > 0 && size >= (self.cache_capacity * 9 / 10);
@@ -2356,6 +2368,23 @@ impl DpopValidator {
             under_pressure,
             premature_evictions: self.jti_store.premature_evictions(),
         }
+    }
+
+    /// The minimum LRU JTI cache size the validator will accept. Capacity
+    /// requests below this value are clamped up on construction. Exposed
+    /// so operators can sanity-check their configured cache size against
+    /// the library floor without hardcoding the constant.
+    #[must_use]
+    pub const fn minimum_jti_cache_capacity() -> usize {
+        MIN_JTI_CACHE_SIZE
+    }
+
+    /// The maximum LRU JTI cache size the validator will accept. Capacity
+    /// requests above this value are clamped down on construction. See
+    /// [`MAX_JTI_CACHE_SIZE`] for the rationale.
+    #[must_use]
+    pub const fn maximum_jti_cache_capacity() -> usize {
+        MAX_JTI_CACHE_SIZE
     }
 
     fn validate_claims_pre_sig(
