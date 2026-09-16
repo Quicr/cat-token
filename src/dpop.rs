@@ -1920,6 +1920,19 @@ impl LruShard {
 /// construct the validator via [`DpopValidator::with_jti_store_strict`].
 /// Monitor [`LruJtiStore::premature_evictions`] as a canary for cache
 /// pressure regardless.
+///
+/// # Multi-tenant behaviour
+///
+/// Shard selection hashes the `iss:` prefix of the composite JTI key on
+/// its own, then mixes in the full key. This spreads a bursty issuer's
+/// inserts uniformly across shards (rather than piling up in one shard
+/// determined by the full-key hash) so eviction pressure from one tenant
+/// is bounded per shard, not concentrated. Cross-tenant contention on a
+/// single shared LRU still exists — a truly noisy neighbour will still
+/// evict a quiet tenant's JTIs; the fix at CDN scale is to run per-tenant
+/// strict stores in the plug-in backend, not to make the in-process LRU
+/// itself per-tenant. Bump `shards` and `capacity` if
+/// [`LruJtiStore::premature_evictions`] climbs.
 #[cfg(feature = "moqt")]
 pub struct LruJtiStore {
     shards: Vec<LruShard>,
@@ -1970,9 +1983,20 @@ impl LruJtiStore {
         }
     }
 
+    /// Pick a shard for `key`. Composite JTI keys produced by
+    /// [`DpopValidator::dpop_commit_key`] are of the form
+    /// `iss:thumbprint:cti` — we hash the leading `iss` segment on its
+    /// own to spread each issuer across all shards uniformly, then mix
+    /// in the full key so distinct JTIs from the same issuer still land
+    /// on different shards. Without the two-stage hash a bursty issuer
+    /// could crowd a single shard and cause premature LRU eviction of
+    /// another tenant's JTIs even when many shards are idle.
     fn shard_for(&self, key: &str) -> &LruShard {
         use std::hash::{BuildHasher, Hasher};
+        let iss_end = key.find(':').unwrap_or(key.len());
         let mut hasher = self.hasher_state.build_hasher();
+        hasher.write(key[..iss_end].as_bytes());
+        hasher.write(&[0xff]);
         hasher.write(key.as_bytes());
         let idx = (hasher.finish() as usize) % self.shards.len();
         &self.shards[idx]
@@ -3317,6 +3341,27 @@ mod tests {
         store.check_and_insert("k".into(), now).unwrap();
         let replay = store.check_and_insert("k".into(), now);
         assert!(matches!(replay, Err(CatError::ReplayAttackDetected)));
+    }
+
+    /// A bursty tenant should not land every insert in the same shard.
+    /// With per-issuer prefix hashing an issuer's stream spreads across
+    /// multiple shards, so no single shard fills long before the others.
+    #[cfg(feature = "moqt")]
+    #[test]
+    fn test_lru_store_spreads_single_issuer_across_shards() {
+        let shards = 8;
+        let store = LruJtiStore::with_shards_and_window(MIN_JTI_CACHE_SIZE, shards, 300);
+        let mut seen = std::collections::HashSet::new();
+        for i in 0..64 {
+            let key = format!("issuer-alpha:tp:cti-{i}");
+            let shard_ptr = store.shard_for(&key) as *const _ as usize;
+            seen.insert(shard_ptr);
+        }
+        assert!(
+            seen.len() > 1,
+            "a single issuer's inserts collapsed onto one shard: {} shards touched",
+            seen.len()
+        );
     }
 
     #[cfg(feature = "moqt")]
