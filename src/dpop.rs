@@ -34,9 +34,10 @@ use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 #[cfg(feature = "moqt")]
 use lru::LruCache;
 #[cfg(feature = "moqt")]
+use parking_lot::Mutex;
+#[cfg(feature = "moqt")]
 use std::num::NonZeroUsize;
 #[cfg(feature = "moqt")]
-use parking_lot::Mutex;
 use std::sync::Arc;
 #[cfg(feature = "moqt")]
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -1995,7 +1996,7 @@ impl LruJtiStore {
         use std::hash::{BuildHasher, Hasher};
         let iss_end = key.find(':').unwrap_or(key.len());
         let mut hasher = self.hasher_state.build_hasher();
-        hasher.write(key[..iss_end].as_bytes());
+        hasher.write(&key.as_bytes()[..iss_end]);
         hasher.write(&[0xff]);
         hasher.write(key.as_bytes());
         let idx = (hasher.finish() as usize) % self.shards.len();

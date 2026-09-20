@@ -1346,11 +1346,9 @@ impl Cwt {
         }
 
         let mut cursor = std::io::Cursor::new(cbor_data);
-        let value: Value = ciborium::de::from_reader_with_recursion_limit(
-            &mut cursor,
-            CBOR_MAX_RECURSION_DEPTH,
-        )
-        .map_err(|e| CatError::InvalidCbor(e.to_string()))?;
+        let value: Value =
+            ciborium::de::from_reader_with_recursion_limit(&mut cursor, CBOR_MAX_RECURSION_DEPTH)
+                .map_err(|e| CatError::InvalidCbor(e.to_string()))?;
         if (cursor.position() as usize) < cbor_data.len() {
             return Err(CatError::InvalidCbor(format!(
                 "Trailing bytes after CBOR payload: {} unconsumed bytes",

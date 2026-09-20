@@ -7,7 +7,7 @@ use p256::ecdsa::{Signature, SigningKey, VerifyingKey};
 
 pub use p256::ecdsa::VerifyingKey as Es256VerifyingKey;
 use p256::elliptic_curve::rand_core::OsRng;
-use p256::pkcs8::DecodePublicKey;
+use p256::pkcs8::{DecodePrivateKey, DecodePublicKey};
 use ring::rand::SecureRandom;
 use ring::{digest, rand};
 use rsa::pss::{SigningKey as RsaSigningKey, VerifyingKey as RsaVerifyingKey};
@@ -173,6 +173,28 @@ impl Es256Algorithm {
         let verifying_key = VerifyingKey::from_public_key_der(der)
             .map_err(|e| CatError::KeyOperationFailed(format!("invalid DER: {e}")))?;
         Ok(Self::new_verifier(verifying_key))
+    }
+
+    /// Load a PEM-encoded PKCS#8 private key into a full signing+verifying
+    /// algorithm. The verifying key is derived from the private scalar, so
+    /// this is the natural way for a token issuer to load its signing key
+    /// from a file without taking a direct `p256` dependency.
+    pub fn from_private_key_pem(pem: &str) -> Result<Self, CatError> {
+        let signing_key = SigningKey::from_pkcs8_pem(pem)
+            .map_err(|e| CatError::KeyOperationFailed(format!("invalid private key PEM: {e}")))?;
+        let verifying_key = VerifyingKey::from(&signing_key);
+        Ok(Self::from_key_pair(signing_key, verifying_key))
+    }
+
+    /// Load a DER-encoded PKCS#8 private key into a full signing+verifying
+    /// algorithm. Symmetric with [`Es256Algorithm::from_public_key_der`] for
+    /// deployments that store keys as raw DER bytes (e.g. from a secret
+    /// manager).
+    pub fn from_private_key_der(der: &[u8]) -> Result<Self, CatError> {
+        let signing_key = SigningKey::from_pkcs8_der(der)
+            .map_err(|e| CatError::KeyOperationFailed(format!("invalid private key DER: {e}")))?;
+        let verifying_key = VerifyingKey::from(&signing_key);
+        Ok(Self::from_key_pair(signing_key, verifying_key))
     }
 
     pub fn verifying_key(&self) -> &VerifyingKey {

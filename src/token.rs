@@ -10,11 +10,11 @@ use base64::{
 };
 use chrono::{DateTime, Utc};
 use lru::LruCache;
+use parking_lot::Mutex;
 #[cfg(feature = "moqt")]
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::num::NonZeroUsize;
-use parking_lot::Mutex;
 
 const COSE_TAG_SIGN1: u64 = 18;
 const COSE_TAG_MAC0: u64 = 17;
@@ -702,18 +702,14 @@ pub(crate) fn enforce_geo(
 
     if has_coord {
         let zones = token.cat.catgeocoord.as_ref().unwrap();
-        let lat = location
-            .latitude
-            .ok_or(CatError::MissingRelayContext {
-                claim: "catgeocoord",
-                field: "peer_location.latitude",
-            })?;
-        let lon = location
-            .longitude
-            .ok_or(CatError::MissingRelayContext {
-                claim: "catgeocoord",
-                field: "peer_location.longitude",
-            })?;
+        let lat = location.latitude.ok_or(CatError::MissingRelayContext {
+            claim: "catgeocoord",
+            field: "peer_location.latitude",
+        })?;
+        let lon = location.longitude.ok_or(CatError::MissingRelayContext {
+            claim: "catgeocoord",
+            field: "peer_location.longitude",
+        })?;
         let matched = zones
             .iter()
             .any(|z| haversine_metres(z.lat, z.lon, lat, lon) <= z.radius as f64);
@@ -1611,11 +1607,8 @@ mod tests {
     /// on hostile issuer input.
     #[test]
     fn test_cbor_recursion_limit_rejects_deep_nesting() {
-        let mut bytes: Vec<u8> = Vec::new();
         let depth = crate::cwt::CBOR_MAX_RECURSION_DEPTH + 5;
-        for _ in 0..depth {
-            bytes.push(0x81);
-        }
+        let mut bytes: Vec<u8> = vec![0x81; depth];
         bytes.push(0x00);
         let mut cursor = std::io::Cursor::new(&bytes[..]);
         let res: Result<ciborium::Value, _> = ciborium::de::from_reader_with_recursion_limit(

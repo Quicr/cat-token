@@ -10,10 +10,21 @@
 use cat_token::*;
 use chrono::{Duration, Utc};
 
-/// Your authorization server's signing key (in production, load from secure storage)
+/// Your authorization server's signing key.
+///
+/// Production issuers load the key from secure storage. If it arrives as a
+/// PEM- or DER-encoded PKCS#8 private key (the common shape from a file,
+/// KMS, or secret manager), load it directly with
+/// [`Es256Algorithm::from_private_key_pem`] / `from_private_key_der` — no
+/// direct `p256` dependency required:
+///
+/// ```ignore
+/// let pem = std::fs::read_to_string("issuer-key.pem")?;
+/// let algorithm = Es256Algorithm::from_private_key_pem(&pem)?;
+/// ```
 fn get_signing_key() -> Es256Algorithm {
-    // In production: load from HSM, KMS, or secure key storage
-    // For this example, we generate a new key pair
+    // For this self-contained example we generate a fresh key pair. See the
+    // rustdoc above for the production file/KMS-loading path.
     Es256Algorithm::new_with_key_pair().expect("Failed to create signing key")
 }
 

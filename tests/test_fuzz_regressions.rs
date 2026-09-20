@@ -41,11 +41,7 @@ fn fuzz_regression_deeply_nested_map_headers() {
         0xa3, 0xa3, 0xa3, 0xa3, 0xa3, 0xa3, 0xa3, 0xa3, 0xa3, 0xa3, 0xa3, 0xa3, 0xa3, 0xa3, 0xa3,
         0xa3, 0xa3, 0xa3, 0x08,
     ];
-    assert_decodes_within(
-        bytes,
-        Duration::from_secs(2),
-        "deeply_nested_map_headers",
-    );
+    assert_decodes_within(bytes, Duration::from_secs(2), "deeply_nested_map_headers");
 }
 
 /// `slow-unit-5cc1...`: byte-string length header (0xB7 = map(23))

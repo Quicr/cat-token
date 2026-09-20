@@ -239,6 +239,76 @@ fn test_from_public_key_der_invalid() {
     assert!(result.is_err());
 }
 
+// --- Es256Algorithm::from_private_key_pem / from_private_key_der ---
+
+#[test]
+fn test_from_private_key_pem_roundtrip() {
+    use p256::ecdsa::SigningKey;
+    use p256::elliptic_curve::rand_core::OsRng;
+    use p256::pkcs8::EncodePrivateKey;
+
+    // Independently generated PKCS#8 PEM, as a secret manager or `openssl`
+    // would hand it to a token issuer.
+    let source = SigningKey::random(&mut OsRng);
+    let pem = source.to_pkcs8_pem(p256::pkcs8::LineEnding::LF).unwrap();
+    let verifier = Es256Algorithm::new_verifier(*source.verifying_key());
+
+    // Loading the private key yields a full signer whose tokens verify
+    // against the matching public key.
+    let loaded = Es256Algorithm::from_private_key_pem(&pem).unwrap();
+
+    let token = CatTokenBuilder::new()
+        .issuer("priv-pem-test")
+        .expires_in(3600)
+        .build()
+        .unwrap();
+
+    let encoded = encode_token(&token, &loaded).unwrap();
+    let decoded = Decoder::with_algorithm(&verifier)
+        .decode(&encoded)
+        .unwrap()
+        .into_unvalidated_token();
+    assert_eq!(decoded.core.iss.as_deref(), Some("priv-pem-test"));
+}
+
+#[test]
+fn test_from_private_key_pem_invalid() {
+    let result = Es256Algorithm::from_private_key_pem("not a valid pem");
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_from_private_key_der_roundtrip() {
+    use p256::ecdsa::SigningKey;
+    use p256::elliptic_curve::rand_core::OsRng;
+    use p256::pkcs8::EncodePrivateKey;
+
+    let source = SigningKey::random(&mut OsRng);
+    let der = source.to_pkcs8_der().unwrap();
+    let verifier = Es256Algorithm::new_verifier(*source.verifying_key());
+
+    let loaded = Es256Algorithm::from_private_key_der(der.as_bytes()).unwrap();
+
+    let token = CatTokenBuilder::new()
+        .issuer("priv-der-test")
+        .expires_in(3600)
+        .build()
+        .unwrap();
+
+    let encoded = encode_token(&token, &loaded).unwrap();
+    let decoded = Decoder::with_algorithm(&verifier)
+        .decode(&encoded)
+        .unwrap()
+        .into_unvalidated_token();
+    assert_eq!(decoded.core.iss.as_deref(), Some("priv-der-test"));
+}
+
+#[test]
+fn test_from_private_key_der_invalid() {
+    let result = Es256Algorithm::from_private_key_der(&[0, 1, 2, 3]);
+    assert!(result.is_err());
+}
+
 // --- Es256VerifyingKey re-export ---
 
 #[test]
