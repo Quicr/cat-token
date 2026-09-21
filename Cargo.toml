@@ -1,6 +1,6 @@
 [package]
 name = "cat-token"
-version = "0.3.0-alpha.1"
+version = "0.3.0-alpha.2"
 edition = "2024"
 # Uses stabilized let-chains (1.88+) and edition 2024 (1.85+); pin to the
 # lower bound we actually exercise in CI.
@@ -160,8 +160,6 @@ async = ["moqt", "dep:async-trait", "dep:futures"]
 tokio = ["async", "dep:tokio"]
 
 # docs.rs renders with every feature enabled so the async / tokio / moqt
-# surface is visible in the published documentation, and sets `--cfg docsrs`
-# for feature-gated doc annotations.
+# surface is visible in the published documentation.
 [package.metadata.docs.rs]
 all-features = true
-rustdoc-args = ["--cfg", "docsrs"]
