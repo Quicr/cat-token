@@ -1,6 +1,6 @@
 [package]
 name = "cat-token"
-version = "0.3.0"
+version = "0.3.0-alpha.1"
 edition = "2024"
 # Uses stabilized let-chains (1.88+) and edition 2024 (1.85+); pin to the
 # lower bound we actually exercise in CI.
