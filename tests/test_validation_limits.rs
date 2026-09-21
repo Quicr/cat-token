@@ -5,14 +5,14 @@ use cat_token::*;
 
 #[test]
 fn test_catv_version_1_passes() {
-    let token = CatTokenBuilder::new().version(1).build().unwrap();
+    let token = CatToken::new().with_version(1);
     let validator = CatTokenValidator::dangerously_any_issuer();
     assert!(validator.validate(&token).is_ok());
 }
 
 #[test]
 fn test_catv_version_2_rejected() {
-    let token = CatTokenBuilder::new().version(2).build().unwrap();
+    let token = CatToken::new().with_version(2);
     let validator = CatTokenValidator::dangerously_any_issuer();
     let err = validator.validate(&token).unwrap_err();
     assert!(matches!(err, CatError::InvalidClaimValue(_)));
@@ -20,14 +20,14 @@ fn test_catv_version_2_rejected() {
 
 #[test]
 fn test_catv_version_0_rejected() {
-    let token = CatTokenBuilder::new().version(0).build().unwrap();
+    let token = CatToken::new().with_version(0);
     let validator = CatTokenValidator::dangerously_any_issuer();
     assert!(validator.validate(&token).is_err());
 }
 
 #[test]
 fn test_catv_absent_passes() {
-    let token = CatTokenBuilder::new().build().unwrap();
+    let token = CatToken::new();
     let validator = CatTokenValidator::dangerously_any_issuer();
     assert!(validator.validate(&token).is_ok());
 }

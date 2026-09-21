@@ -58,13 +58,11 @@ async fn async_authorize_happy_path_commits_jti() {
     let jwk = Jwk::from_es256_verifying_key(alg.verifying_key()).unwrap();
     let thumbprint = jwk.thumbprint().unwrap();
 
-    let token = CatTokenBuilder::new()
-        .issuer("https://test.com")
-        .single_audience("relay")
-        .moqt_scope(moqt_scope())
-        .confirmation(thumbprint)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://test.com")
+        .with_single_audience("relay")
+        .with_moqt_scope(moqt_scope())
+        .with_confirmation(thumbprint);
     let validated = make_validated(&token);
 
     let proof = build_dpop_proof(&alg, jwk, &validated);
@@ -100,13 +98,11 @@ async fn async_authorize_rejects_replayed_jti() {
     let jwk = Jwk::from_es256_verifying_key(alg.verifying_key()).unwrap();
     let thumbprint = jwk.thumbprint().unwrap();
 
-    let token = CatTokenBuilder::new()
-        .issuer("https://test.com")
-        .single_audience("relay")
-        .moqt_scope(moqt_scope())
-        .confirmation(thumbprint)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://test.com")
+        .with_single_audience("relay")
+        .with_moqt_scope(moqt_scope())
+        .with_confirmation(thumbprint);
     let validated = make_validated(&token);
 
     // Same proof (same JTI) used twice — the second must fail replay.
@@ -167,13 +163,11 @@ async fn async_authorize_fails_closed_on_store_outage() {
     let jwk = Jwk::from_es256_verifying_key(alg.verifying_key()).unwrap();
     let thumbprint = jwk.thumbprint().unwrap();
 
-    let token = CatTokenBuilder::new()
-        .issuer("https://test.com")
-        .single_audience("relay")
-        .moqt_scope(moqt_scope())
-        .confirmation(thumbprint)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://test.com")
+        .with_single_audience("relay")
+        .with_moqt_scope(moqt_scope())
+        .with_confirmation(thumbprint);
     let validated = make_validated(&token);
     let proof = build_dpop_proof(&alg, jwk, &validated);
 
@@ -270,15 +264,13 @@ async fn async_authorize_commits_catreplay_via_guard() {
     let thumbprint = jwk.thumbprint().unwrap();
 
     // Build a token that mandates Prohibited catreplay.
-    let token = CatTokenBuilder::new()
-        .issuer("https://test.com")
-        .single_audience("relay")
-        .moqt_scope(moqt_scope())
-        .confirmation(thumbprint)
-        .cwt_id(b"unique-cti".to_vec())
-        .replay_protection(cat_token::claims::ReplayProtection::Prohibited)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://test.com")
+        .with_single_audience("relay")
+        .with_moqt_scope(moqt_scope())
+        .with_confirmation(thumbprint)
+        .with_cwt_id(b"unique-cti".to_vec())
+        .with_replay_protection(cat_token::claims::ReplayProtection::Prohibited);
     let validated = make_validated(&token);
 
     let make_proof = || build_dpop_proof(&alg, jwk.clone(), &validated);
@@ -362,15 +354,13 @@ async fn strict_validator_refuses_best_effort_replay_guard() {
     let jwk = Jwk::from_es256_verifying_key(alg.verifying_key()).unwrap();
     let thumbprint = jwk.thumbprint().unwrap();
 
-    let token = CatTokenBuilder::new()
-        .issuer("https://test.com")
-        .single_audience("relay")
-        .moqt_scope(moqt_scope())
-        .confirmation(thumbprint)
-        .cwt_id(b"strict-cti".to_vec())
-        .replay_protection(cat_token::claims::ReplayProtection::Prohibited)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://test.com")
+        .with_single_audience("relay")
+        .with_moqt_scope(moqt_scope())
+        .with_confirmation(thumbprint)
+        .with_cwt_id(b"strict-cti".to_vec())
+        .with_replay_protection(cat_token::claims::ReplayProtection::Prohibited);
     let validated = make_validated(&token);
 
     let settings = CatDpopSettings::new()
@@ -409,15 +399,13 @@ async fn strict_validator_accepts_strict_replay_guard() {
     let jwk = Jwk::from_es256_verifying_key(alg.verifying_key()).unwrap();
     let thumbprint = jwk.thumbprint().unwrap();
 
-    let token = CatTokenBuilder::new()
-        .issuer("https://test.com")
-        .single_audience("relay")
-        .moqt_scope(moqt_scope())
-        .confirmation(thumbprint)
-        .cwt_id(b"strict-ok-cti".to_vec())
-        .replay_protection(cat_token::claims::ReplayProtection::Prohibited)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://test.com")
+        .with_single_audience("relay")
+        .with_moqt_scope(moqt_scope())
+        .with_confirmation(thumbprint)
+        .with_cwt_id(b"strict-ok-cti".to_vec())
+        .with_replay_protection(cat_token::claims::ReplayProtection::Prohibited);
     let validated = make_validated(&token);
 
     let settings = CatDpopSettings::new()
@@ -457,13 +445,11 @@ async fn strict_validator_no_guard_no_catreplay_still_authorizes() {
     let jwk = Jwk::from_es256_verifying_key(alg.verifying_key()).unwrap();
     let thumbprint = jwk.thumbprint().unwrap();
 
-    let token = CatTokenBuilder::new()
-        .issuer("https://test.com")
-        .single_audience("relay")
-        .moqt_scope(moqt_scope())
-        .confirmation(thumbprint)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://test.com")
+        .with_single_audience("relay")
+        .with_moqt_scope(moqt_scope())
+        .with_confirmation(thumbprint);
     let validated = make_validated(&token);
 
     let settings = CatDpopSettings::new()

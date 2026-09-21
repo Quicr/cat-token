@@ -263,6 +263,9 @@ pub mod asynchronous {
         );
     }
 
+    /// Async sibling of [`super::assert_fail_closed_on_backend_outage`].
+    /// Asserts the store surfaces [`CatError::BackendUnavailable`] rather than
+    /// silently accepting an insert while its backend is unreachable.
     pub async fn assert_fail_closed_on_backend_outage(outage_store: &dyn AsyncJtiStore) {
         match outage_store
             .check_and_insert("outage-probe".to_string(), 1)

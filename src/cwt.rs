@@ -1,6 +1,13 @@
 // SPDX-FileCopyrightText: Copyright (c) 2022 Quicr
 // SPDX-License-Identifier: BSD-2-Clause
 
+//! CWT (CBOR Web Token) payload encoding and decoding per RFC 8392.
+//!
+//! [`Cwt`] wraps a [`CatToken`] with its COSE header and serializes the CBOR
+//! claim map. [`CwtLimits`] / [`CwtLimitsBuilder`] bound the decoder against
+//! hostile input (recursion depth, map sizes, string lengths) so a malformed
+//! or adversarial token cannot exhaust resources.
+
 use crate::claims::*;
 use crate::claims::{CatClaims, CoreClaims};
 use crate::{CatError, CatToken, GeoCoordinate};
@@ -530,21 +537,30 @@ fn decode_network_identifier(value: &Value) -> Result<NetworkIdentifier, CatErro
     }
 }
 
+/// COSE protected header for a CWT.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CwtHeader {
+    /// COSE algorithm ID used to sign or MAC the token.
     pub alg: i64,
+    /// Optional key identifier (`kid`) selecting the verification key.
     pub kid: Option<String>,
+    /// Optional token type (`typ`), e.g. `"CAT"`.
     pub typ: Option<String>,
 }
 
+/// A CBOR Web Token: header, decoded payload claims, and signature bytes.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Cwt {
+    /// Protected header.
     pub header: CwtHeader,
+    /// Decoded CAT claim set.
     pub payload: CatToken,
+    /// Raw signature or MAC bytes; empty until the token is signed.
     pub signature: Vec<u8>,
 }
 
 impl Cwt {
+    /// Create an unsigned CWT with the given algorithm and payload (`typ` = `"CAT"`).
     pub fn new(alg: i64, payload: CatToken) -> Self {
         Self {
             header: CwtHeader {
@@ -557,11 +573,13 @@ impl Cwt {
         }
     }
 
+    /// Set the header `kid` and return the updated token (builder style).
     pub fn with_key_id(mut self, kid: impl Into<String>) -> Self {
         self.header.kid = Some(kid.into());
         self
     }
 
+    /// Encode the payload claim set to canonical CBOR bytes.
     pub fn encode_payload(&self) -> Result<Vec<u8>, CatError> {
         let mut claims_map: BTreeMap<i64, Value> = BTreeMap::new();
 
@@ -1097,36 +1115,47 @@ impl CwtLimits {
         CwtLimitsBuilder::new()
     }
 
+    /// Maximum accepted CBOR payload size in bytes.
     pub fn max_cbor_payload_size(&self) -> usize {
         self.max_cbor_payload_size
     }
+    /// Maximum number of MoQT scopes allowed in a token.
     pub fn max_moqt_scopes(&self) -> usize {
         self.max_moqt_scopes
     }
+    /// Maximum number of custom claims allowed in a token.
     pub fn max_custom_claims(&self) -> usize {
         self.max_custom_claims
     }
+    /// Maximum length of any single string claim value.
     pub fn max_string_claim_length(&self) -> usize {
         self.max_string_claim_length
     }
+    /// Maximum number of namespace matches allowed per scope.
     pub fn max_namespace_matches_per_scope(&self) -> usize {
         self.max_namespace_matches_per_scope
     }
+    /// Maximum number of URI patterns allowed in a token.
     pub fn max_uri_patterns(&self) -> usize {
         self.max_uri_patterns
     }
+    /// Maximum CBOR nesting depth accepted during decoding.
     pub fn max_nesting_depth(&self) -> usize {
         self.max_nesting_depth
     }
+    /// Maximum total number of CBOR items accepted during decoding.
     pub fn max_total_items(&self) -> usize {
         self.max_total_items
     }
+    /// Maximum aggregate byte length of all string values.
     pub fn max_total_string_bytes(&self) -> usize {
         self.max_total_string_bytes
     }
+    /// Maximum number of regular expressions allowed in a token.
     pub fn max_regex_count(&self) -> usize {
         self.max_regex_count
     }
+    /// Maximum number of CATNIP entries allowed in a token.
     pub fn max_catnip_entries(&self) -> usize {
         self.max_catnip_entries
     }
@@ -1160,29 +1189,34 @@ fn check_range(name: &'static str, value: usize, cap: usize) -> Result<usize, Ca
 }
 
 impl CwtLimitsBuilder {
+    /// Start a builder seeded with the default limits.
     pub fn new() -> Self {
         Self {
             inner: CwtLimits::default(),
         }
     }
 
+    /// Set the maximum CBOR payload size in bytes (non-zero, within policy cap).
     pub fn max_cbor_payload_size(mut self, size: usize) -> Result<Self, CatError> {
         self.inner.max_cbor_payload_size =
             check_range("max_cbor_payload_size", size, MAX_CBOR_PAYLOAD_CAP)?;
         Ok(self)
     }
 
+    /// Set the maximum number of MoQT scopes (non-zero, within policy cap).
     pub fn max_moqt_scopes(mut self, count: usize) -> Result<Self, CatError> {
         self.inner.max_moqt_scopes = check_range("max_moqt_scopes", count, MAX_SCOPES_CAP)?;
         Ok(self)
     }
 
+    /// Set the maximum number of custom claims (non-zero, within policy cap).
     pub fn max_custom_claims(mut self, count: usize) -> Result<Self, CatError> {
         self.inner.max_custom_claims =
             check_range("max_custom_claims", count, MAX_CUSTOM_CLAIMS_CAP)?;
         Ok(self)
     }
 
+    /// Set the maximum length of a single string claim (non-zero, within policy cap).
     pub fn max_string_claim_length(mut self, length: usize) -> Result<Self, CatError> {
         self.inner.max_string_claim_length = check_range(
             "max_string_claim_length",
@@ -1192,6 +1226,7 @@ impl CwtLimitsBuilder {
         Ok(self)
     }
 
+    /// Set the maximum namespace matches per scope (non-zero, within policy cap).
     pub fn max_namespace_matches_per_scope(mut self, count: usize) -> Result<Self, CatError> {
         self.inner.max_namespace_matches_per_scope = check_range(
             "max_namespace_matches_per_scope",
@@ -1201,33 +1236,39 @@ impl CwtLimitsBuilder {
         Ok(self)
     }
 
+    /// Set the maximum number of URI patterns (non-zero, within policy cap).
     pub fn max_uri_patterns(mut self, count: usize) -> Result<Self, CatError> {
         self.inner.max_uri_patterns = check_range("max_uri_patterns", count, MAX_URI_PATTERNS_CAP)?;
         Ok(self)
     }
 
+    /// Set the maximum CBOR nesting depth (non-zero, within policy cap).
     pub fn max_nesting_depth(mut self, depth: usize) -> Result<Self, CatError> {
         self.inner.max_nesting_depth =
             check_range("max_nesting_depth", depth, MAX_NESTING_DEPTH_CAP)?;
         Ok(self)
     }
 
+    /// Set the maximum total number of CBOR items (non-zero, within policy cap).
     pub fn max_total_items(mut self, count: usize) -> Result<Self, CatError> {
         self.inner.max_total_items = check_range("max_total_items", count, MAX_TOTAL_ITEMS_CAP)?;
         Ok(self)
     }
 
+    /// Set the maximum aggregate string byte length (non-zero, within policy cap).
     pub fn max_total_string_bytes(mut self, bytes: usize) -> Result<Self, CatError> {
         self.inner.max_total_string_bytes =
             check_range("max_total_string_bytes", bytes, MAX_TOTAL_STRING_BYTES_CAP)?;
         Ok(self)
     }
 
+    /// Set the maximum number of regular expressions (non-zero, within policy cap).
     pub fn max_regex_count(mut self, count: usize) -> Result<Self, CatError> {
         self.inner.max_regex_count = check_range("max_regex_count", count, MAX_REGEX_COUNT_CAP)?;
         Ok(self)
     }
 
+    /// Set the maximum number of CATNIP entries (non-zero, within policy cap).
     pub fn max_catnip_entries(mut self, count: usize) -> Result<Self, CatError> {
         self.inner.max_catnip_entries =
             check_range("max_catnip_entries", count, MAX_CATNIP_ENTRIES_CAP)?;

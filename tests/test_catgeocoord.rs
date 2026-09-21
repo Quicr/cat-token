@@ -54,10 +54,7 @@ fn test_with_geo_coordinates_bulk() {
         GeoCoordinate::new(-33.8688, 151.2093, 0),
     ];
 
-    let token = CatTokenBuilder::new()
-        .geo_coordinates(coords.clone())
-        .build()
-        .unwrap();
+    let token = CatToken::new().with_geo_coordinates(coords.clone());
 
     assert_eq!(token.cat.catgeocoord.as_ref().unwrap().len(), 3);
     assert_eq!(token.cat.catgeocoord, Some(coords));

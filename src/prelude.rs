@@ -34,8 +34,7 @@ pub use crate::structured_header::{
     get_sf_dictionary_member, normalize_sf_value, parse_sf_dictionary, parse_sf_item, parse_sf_list,
 };
 pub use crate::token::{
-    CatPorBlockList, CatTokenBuilder, CatTokenValidator, Decoder, ReplayGuard, encode_token,
-    encode_token_base64,
+    CatPorBlockList, CatTokenValidator, Decoder, ReplayGuard, encode_token, encode_token_base64,
 };
 pub use crate::x509::{
     PathValidator, VerifiedPeerCertificate, authenticate_and_pin, check_cattpk_pin,

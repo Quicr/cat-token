@@ -1,25 +1,31 @@
 // SPDX-FileCopyrightText: Copyright (c) 2022 Quicr
 // SPDX-License-Identifier: BSD-2-Clause
 
+//! CAT token encoding, decoding, and fail-closed claim validation.
+//!
+//! Home of [`CatTokenValidator`], the replay guard, and the encode/decode
+//! entry points. The validator refuses to run without an explicit issuer-trust
+//! decision to prevent accidental accept-any-issuer bypasses.
+
 use crate::cwt::{Cwt, CwtHeader, CwtLimits};
 use crate::pipeline::{TokenHeader, TokenProvenance, VerifiedToken};
-use crate::{CatError, CatToken, CryptographicAlgorithm, NetworkIdentifier};
+use crate::{CatError, CatToken, CryptographicAlgorithm};
 use base64::{
     Engine as _,
     engine::general_purpose::{URL_SAFE, URL_SAFE_NO_PAD},
 };
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use lru::LruCache;
 use parking_lot::Mutex;
-#[cfg(feature = "moqt")]
-use std::cell::RefCell;
 use std::collections::HashSet;
 use std::num::NonZeroUsize;
+#[cfg(feature = "moqt")]
+use std::sync::OnceLock;
 
 const COSE_TAG_SIGN1: u64 = 18;
 const COSE_TAG_MAC0: u64 = 17;
 #[cfg(feature = "moqt")]
-const REGEX_CACHE_SIZE: usize = 64;
+const REGEX_CACHE_SIZE: usize = 256;
 
 /// Maximum accepted clock-skew tolerance (seconds). RFC 8392 and CTA-5007-B do
 /// not specify a cap; we bound it defensively so operators cannot inadvertently
@@ -28,11 +34,17 @@ const REGEX_CACHE_SIZE: usize = 64;
 /// rejected.
 pub const MAX_CLOCK_SKEW_TOLERANCE_SECS: i64 = 3600;
 
+// Process-wide compiled-regex cache for `catm`/`cath`/`catu` regex match
+// values. Shared across all worker threads so a pattern is compiled at most
+// once per process (regex DFA compilation is milliseconds-scale), rather than
+// recompiled on the first request each new thread handles. The mutex is held
+// only for the LRU lookup/insert; `is_match` runs against a cloned `Regex`
+// (an `Arc` bump) outside the lock so matching never serializes across cores.
 #[cfg(feature = "moqt")]
-thread_local! {
-    static REGEX_CACHE: RefCell<LruCache<String, regex::Regex>> = RefCell::new(
-        LruCache::new(NonZeroUsize::new(REGEX_CACHE_SIZE).unwrap())
-    );
+fn regex_cache() -> &'static Mutex<LruCache<String, regex::Regex>> {
+    static REGEX_CACHE: OnceLock<Mutex<LruCache<String, regex::Regex>>> = OnceLock::new();
+    REGEX_CACHE
+        .get_or_init(|| Mutex::new(LruCache::new(NonZeroUsize::new(REGEX_CACHE_SIZE).unwrap())))
 }
 
 /// Fail-closed claim validator for [`CatToken`]s decoded via
@@ -136,11 +148,14 @@ impl CatTokenValidator {
         self
     }
 
+    /// Pins the audience allow-list; tokens whose `aud` is not listed are rejected.
     pub fn with_expected_audiences(mut self, audiences: Vec<String>) -> Self {
         self.expected_audiences = Some(audiences.into_iter().filter(|s| !s.is_empty()).collect());
         self
     }
 
+    /// Applies the same clock-skew tolerance to both `exp` and `nbf`; capped at
+    /// [`MAX_CLOCK_SKEW_TOLERANCE_SECS`].
     pub fn with_clock_skew_tolerance(mut self, tolerance_seconds: i64) -> Result<Self, CatError> {
         check_tolerance("clock skew tolerance", tolerance_seconds)?;
         self.exp_tolerance = tolerance_seconds;
@@ -148,6 +163,8 @@ impl CatTokenValidator {
         Ok(self)
     }
 
+    /// Sets independent `exp` and `nbf` clock-skew tolerances; each capped at
+    /// [`MAX_CLOCK_SKEW_TOLERANCE_SECS`].
     pub fn with_separate_tolerances(
         mut self,
         exp_tolerance: i64,
@@ -160,15 +177,21 @@ impl CatTokenValidator {
         Ok(self)
     }
 
+    /// Opts out of the requirement that privacy-sensitive claims arrive
+    /// encrypted. Dangerous: only for tests or non-privacy deployments.
     pub fn dangerously_allow_unencrypted_privacy_claims(mut self) -> Self {
         self.dangerously_allow_unencrypted_privacy_claims = true;
         self
     }
 
+    /// Validates the token's claims, assuming signed provenance.
     pub fn validate(&self, token: &CatToken) -> Result<(), CatError> {
         self.validate_with_provenance(token, TokenProvenance::Signed)
     }
 
+    /// Validates the token's claims for the given [`TokenProvenance`]
+    /// (signed vs. encrypted), enforcing issuer/audience/expiry and the
+    /// encrypted-privacy-claim contract.
     pub fn validate_with_provenance(
         &self,
         token: &CatToken,
@@ -407,24 +430,31 @@ pub(crate) fn apply_match_value(mv: &crate::claims::MatchValue, input: &str) -> 
             if input.len() > MAX_REGEX_INPUT_LEN {
                 return false;
             }
-            REGEX_CACHE.with(|cache| {
-                let mut cache = cache.borrow_mut();
+            // Clone the compiled `Regex` (an Arc bump) out of the cache and
+            // release the lock before running `is_match`, so matching does
+            // not serialize other threads on the shared cache mutex.
+            let cached = {
+                let mut cache = regex_cache().lock();
                 if let Some(re) = cache.get(pattern) {
-                    return re.is_match(input);
-                }
-                match regex::RegexBuilder::new(pattern)
-                    .size_limit(1 << 20)
-                    .dfa_size_limit(1 << 20)
-                    .build()
-                {
-                    Ok(re) => {
-                        let result = re.is_match(input);
-                        cache.put(pattern.clone(), re);
-                        result
+                    Some(re.clone())
+                } else {
+                    match regex::RegexBuilder::new(pattern)
+                        .size_limit(1 << 20)
+                        .dfa_size_limit(1 << 20)
+                        .build()
+                    {
+                        Ok(re) => {
+                            cache.put(pattern.clone(), re.clone());
+                            Some(re)
+                        }
+                        Err(_) => None,
                     }
-                    Err(_) => false,
                 }
-            })
+            };
+            match cached {
+                Some(re) => re.is_match(input),
+                None => false,
+            }
         }
         MatchValue::Sha256(expected) => {
             use sha2::{Digest, Sha256};
@@ -729,9 +759,14 @@ pub(crate) fn enforce_geo(
                 claim: "geohash",
                 field: "peer_location.geohash",
             })?;
+        // One-directional containment: the peer's geohash must fall inside
+        // (be prefixed by) one of the token's zones. The reverse — a coarse
+        // peer geohash that merely *contains* a finer token zone — must NOT
+        // match, or a peer whose location is only known to a broad prefix
+        // would be granted access to a narrowly-scoped token.
         let matched = token_hashes
             .iter()
-            .any(|t| peer_hash.starts_with(t.as_str()) || t.starts_with(peer_hash));
+            .any(|t| peer_hash.starts_with(t.as_str()));
         if !matched {
             return Err(CatError::GeographicValidationFailed(
                 "peer geohash does not match any catgeo geohash".to_string(),
@@ -757,30 +792,59 @@ fn haversine_metres(lat1_deg: f64, lon1_deg: f64, lat2_deg: f64, lon2_deg: f64) 
     EARTH_RADIUS_M * c
 }
 
-/// Block list for catpor probability-of-rejection enforcement.
-/// Uses a bounded LRU cache to prevent unbounded memory growth.
+type PorShard = Mutex<LruCache<Vec<u8>, Option<i64>>>;
+
+/// Block list for `catpor` probability-of-rejection enforcement.
+///
+/// Backed by a bounded LRU cache to cap memory. The cache is split into
+/// independently-locked shards so `is_blocked` (which mutates LRU recency
+/// and therefore needs an exclusive lock) does not become a single global
+/// contention point at CDN request rates — a `catpor` id is routed to a
+/// shard by a hash of its bytes.
 pub struct CatPorBlockList {
-    entries: Mutex<LruCache<Vec<u8>, Option<i64>>>,
+    shards: Box<[PorShard]>,
+    hasher_state: std::collections::hash_map::RandomState,
 }
 
 const DEFAULT_POR_BLOCK_LIST_SIZE: usize = 100_000;
+const POR_BLOCK_LIST_SHARDS: usize = 16;
 
 impl CatPorBlockList {
+    /// Create a block list with the default total capacity (100k ids).
     pub fn new() -> Self {
         Self::with_capacity(DEFAULT_POR_BLOCK_LIST_SIZE)
     }
 
+    /// Create a block list whose total capacity across all shards is
+    /// approximately `capacity` (rounded up so each shard holds an equal
+    /// share, minimum one entry per shard).
     pub fn with_capacity(capacity: usize) -> Self {
-        let cap = NonZeroUsize::new(capacity.max(1)).expect("capacity is at least 1");
+        let per_shard = capacity.div_ceil(POR_BLOCK_LIST_SHARDS).max(1);
+        let cap = NonZeroUsize::new(per_shard).expect("per-shard capacity is at least 1");
+        let shards = (0..POR_BLOCK_LIST_SHARDS)
+            .map(|_| Mutex::new(LruCache::new(cap)))
+            .collect::<Vec<_>>()
+            .into_boxed_slice();
         Self {
-            entries: Mutex::new(LruCache::new(cap)),
+            shards,
+            // One fixed seed per instance so a given id always routes to the
+            // same shard across add / is_blocked calls.
+            hasher_state: std::collections::hash_map::RandomState::new(),
         }
+    }
+
+    fn shard_for(&self, id: &[u8]) -> &PorShard {
+        use std::hash::{BuildHasher, Hasher};
+        let mut hasher = self.hasher_state.build_hasher();
+        hasher.write(id);
+        let idx = (hasher.finish() as usize) % self.shards.len();
+        &self.shards[idx]
     }
 
     /// Return `true` when the id is currently in the block list
     /// (and its expiration, if any, has not yet elapsed).
     pub fn is_blocked(&self, id: &[u8]) -> bool {
-        let mut entries = self.entries.lock();
+        let mut entries = self.shard_for(id).lock();
         match entries.get(id) {
             Some(Some(exp_ts)) => Utc::now().timestamp() < *exp_ts,
             Some(None) => true,
@@ -790,7 +854,7 @@ impl CatPorBlockList {
 
     /// Insert an id into the block list with an optional expiration.
     pub fn add(&self, id: Vec<u8>, expiration: Option<i64>) {
-        let mut entries = self.entries.lock();
+        let mut entries = self.shard_for(&id).lock();
         entries.put(id, expiration);
     }
 }
@@ -799,6 +863,19 @@ impl Default for CatPorBlockList {
     fn default() -> Self {
         Self::new()
     }
+}
+
+// Fill `buf` from a per-thread `SystemRandom`. `ring`'s `SystemRandom` is not
+// `Sync`, so a thread-local reuses one handle per worker thread rather than
+// constructing a fresh one on every `catpor` enforcement.
+#[cfg(feature = "moqt")]
+fn catpor_fill(buf: &mut [u8]) -> Result<(), CatError> {
+    use ring::rand::SecureRandom;
+    thread_local! {
+        static RNG: ring::rand::SystemRandom = ring::rand::SystemRandom::new();
+    }
+    RNG.with(|rng| rng.fill(buf))
+        .map_err(|_| CatError::KeyOperationFailed("RNG failed".to_string()))
 }
 
 /// Enforce the catpor (probability of rejection) claim.
@@ -815,11 +892,8 @@ pub(crate) fn enforce_catpor(
         }
 
         let random: f64 = {
-            use ring::rand::{SecureRandom, SystemRandom};
-            let rng = SystemRandom::new();
             let mut buf = [0u8; 8];
-            rng.fill(&mut buf)
-                .map_err(|_| CatError::KeyOperationFailed("RNG failed".to_string()))?;
+            catpor_fill(&mut buf)?;
             let val = u64::from_le_bytes(buf);
             (val as f64) / (u64::MAX as f64)
         };
@@ -874,256 +948,6 @@ fn percent_decode(s: &str) -> String {
     String::from_utf8(result).unwrap_or_else(|_| s.to_string())
 }
 
-/// Fluent builder for [`CatToken`].
-///
-/// Naming convention: builder methods use **bare verbs**
-/// (`issuer(...)`, `audience(...)`, `expires_at(...)`) because the
-/// builder consumes and returns `Self` in a build-then-consume flow —
-/// the `with_` prefix reads as noise in a chain and diverges from
-/// how validator setters are named. Validator setters
-/// ([`CatTokenValidator::with_expected_issuers`] et al.) keep the
-/// `with_` prefix because a validator is a long-lived, sharable value
-/// where "with X" reads as configuration composition, not fluent
-/// construction.
-pub struct CatTokenBuilder {
-    inner: CatToken,
-}
-
-impl Default for CatTokenBuilder {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl CatTokenBuilder {
-    pub fn new() -> Self {
-        Self {
-            inner: CatToken::new(),
-        }
-    }
-
-    pub fn issuer(mut self, issuer: impl Into<String>) -> Self {
-        self.inner = self.inner.with_issuer(issuer);
-        self
-    }
-
-    pub fn audience(mut self, audiences: Vec<String>) -> Self {
-        self.inner = self.inner.with_audience(audiences);
-        self
-    }
-
-    pub fn single_audience(self, audience: impl Into<String>) -> Self {
-        self.audience(vec![audience.into()])
-    }
-
-    pub fn expires_at(mut self, exp: DateTime<Utc>) -> Self {
-        self.inner = self.inner.with_expiration(exp);
-        self
-    }
-
-    pub fn expires_in(self, seconds: i64) -> Self {
-        self.expires_at(Utc::now() + chrono::Duration::seconds(seconds))
-    }
-
-    pub fn not_before(mut self, nbf: DateTime<Utc>) -> Self {
-        self.inner = self.inner.with_not_before(nbf);
-        self
-    }
-
-    pub fn cwt_id(mut self, cti: impl Into<Vec<u8>>) -> Self {
-        self.inner = self.inner.with_cwt_id(cti);
-        self
-    }
-
-    pub fn cwt_id_str(mut self, cti: impl AsRef<str>) -> Self {
-        self.inner = self.inner.with_cwt_id_str(cti);
-        self
-    }
-
-    pub fn version(mut self, version: u32) -> Self {
-        self.inner = self.inner.with_version(version);
-        self
-    }
-
-    pub fn uri_match_rules(mut self, rules: Vec<crate::claims::UriMatchRule>) -> Self {
-        self.inner = self.inner.with_uri_match_rules(rules);
-        self
-    }
-
-    pub fn replay_protection(mut self, mode: crate::claims::ReplayProtection) -> Self {
-        self.inner = self.inner.with_replay_protection(mode);
-        self
-    }
-
-    pub fn probability_of_rejection(
-        mut self,
-        probability: f64,
-        id: Vec<u8>,
-        expiration: Option<i64>,
-    ) -> Self {
-        self.inner = self
-            .inner
-            .with_probability_of_rejection(probability, id, expiration);
-        self
-    }
-
-    pub fn geo_coordinate(mut self, lat: f64, lon: f64, radius: u32) -> Self {
-        self.inner = self.inner.with_geo_coordinate(lat, lon, radius);
-        self
-    }
-
-    pub fn geo_coordinates(mut self, coords: Vec<crate::claims::GeoCoordinate>) -> Self {
-        self.inner = self.inner.with_geo_coordinates(coords);
-        self
-    }
-
-    pub fn geohash(mut self, geohash: impl Into<String>) -> Self {
-        self.inner = self.inner.with_geohash(geohash);
-        self
-    }
-
-    pub fn subject(mut self, subject: impl Into<String>) -> Self {
-        self.inner = self.inner.with_subject(subject);
-        self
-    }
-
-    pub fn issued_at(mut self, iat: chrono::DateTime<chrono::Utc>) -> Self {
-        self.inner = self.inner.with_issued_at(iat);
-        self
-    }
-
-    pub fn interface_data(mut self, data: impl Into<String>) -> Self {
-        self.inner = self.inner.with_interface_data(data);
-        self
-    }
-
-    pub fn confirmation(mut self, jkt: Vec<u8>) -> Self {
-        self.inner = self.inner.with_confirmation(jkt);
-        self
-    }
-
-    pub fn cose_key_thumbprint(mut self, ckt: Vec<u8>) -> Self {
-        self.inner = self.inner.with_cose_key_thumbprint(ckt);
-        self
-    }
-
-    pub fn dpop_settings(mut self, settings: crate::claims::CatDpopSettings) -> Self {
-        self.inner = self.inner.with_dpop_settings(settings);
-        self
-    }
-
-    pub fn dpop_window(mut self, window_seconds: i64) -> Result<Self, CatError> {
-        self.inner = self.inner.with_dpop_window(window_seconds)?;
-        Ok(self)
-    }
-
-    pub fn if_action(mut self, claim_key: i64, action: crate::claims::CatIfAction) -> Self {
-        self.inner = self.inner.with_if_action(claim_key, action);
-        self
-    }
-
-    pub fn if_actions(mut self, actions: Vec<(i64, crate::claims::CatIfAction)>) -> Self {
-        self.inner = self.inner.with_if_actions(actions);
-        self
-    }
-
-    pub fn renewal(mut self, renewal: crate::claims::CatRenewal) -> Self {
-        self.inner = self.inner.with_renewal(renewal);
-        self
-    }
-
-    pub fn header_match_rules(mut self, rules: Vec<crate::claims::HeaderMatchRule>) -> Self {
-        self.inner = self.inner.with_header_match_rules(rules);
-        self
-    }
-
-    pub fn network_identifiers(mut self, nips: Vec<NetworkIdentifier>) -> Self {
-        self.inner = self.inner.with_network_identifiers(nips);
-        self
-    }
-
-    pub fn ip_address(mut self, ip: impl Into<String>) -> Result<Self, CatError> {
-        self.inner = self.inner.with_ip_address(ip)?;
-        Ok(self)
-    }
-
-    pub fn ip_range(mut self, range: impl Into<String>) -> Result<Self, CatError> {
-        self.inner = self.inner.with_ip_range(range)?;
-        Ok(self)
-    }
-
-    pub fn asn(mut self, asn: u32) -> Self {
-        self.inner = self.inner.with_asn(asn);
-        self
-    }
-
-    pub fn asn_range(mut self, start: u32, end: u32) -> Self {
-        self.inner = self.inner.with_asn_range(start, end);
-        self
-    }
-
-    // Composite claims builder methods
-    pub fn or_composite(mut self, or_claim: crate::claims::CompositeClaim) -> Self {
-        self.inner = self.inner.with_or_composite(or_claim);
-        self
-    }
-
-    pub fn nor_composite(mut self, nor_claim: crate::claims::CompositeClaim) -> Self {
-        self.inner = self.inner.with_nor_composite(nor_claim);
-        self
-    }
-
-    pub fn and_composite(mut self, and_claim: crate::claims::CompositeClaim) -> Self {
-        self.inner = self.inner.with_and_composite(and_claim);
-        self
-    }
-
-    #[cfg(feature = "moqt")]
-    pub fn moqt_scopes(mut self, scopes: Vec<crate::claims::MoqtScope>) -> Self {
-        self.inner = self.inner.with_moqt_scopes(scopes);
-        self
-    }
-
-    #[cfg(feature = "moqt")]
-    pub fn moqt_scope(mut self, scope: crate::claims::MoqtScope) -> Self {
-        self.inner = self.inner.with_moqt_scope(scope);
-        self
-    }
-
-    #[cfg(feature = "moqt")]
-    pub fn moqt_reval(mut self, interval_seconds: f64) -> Self {
-        self.inner = self.inner.with_moqt_reval(interval_seconds);
-        self
-    }
-
-    pub fn build(self) -> Result<CatToken, CatError> {
-        if let Some(ref coords) = self.inner.cat.catgeocoord {
-            for coord in coords {
-                if coord.lat < -90.0 || coord.lat > 90.0 {
-                    return Err(CatError::InvalidClaimValue(format!(
-                        "latitude {} out of range [-90, 90]",
-                        coord.lat
-                    )));
-                }
-                if coord.lon < -180.0 || coord.lon > 180.0 {
-                    return Err(CatError::InvalidClaimValue(format!(
-                        "longitude {} out of range [-180, 180]",
-                        coord.lon
-                    )));
-                }
-            }
-        }
-        if let Some(ref dpop) = self.inner.dpop.catdpop
-            && dpop.effective_window() < 0
-        {
-            return Err(CatError::InvalidClaimValue(
-                "DPoP window must not be negative".to_string(),
-            ));
-        }
-        Ok(self.inner)
-    }
-}
-
 fn encode_protected_header(algorithm: &dyn CryptographicAlgorithm) -> Result<Vec<u8>, CatError> {
     let cwt = Cwt::new(algorithm.algorithm_id(), CatToken::new());
     let header = CwtHeader {
@@ -1158,6 +982,10 @@ pub fn encode_token(
     token: &CatToken,
     algorithm: &dyn CryptographicAlgorithm,
 ) -> Result<Vec<u8>, CatError> {
+    // Enforce issuer-side construction invariants (geo ranges, DPoP window)
+    // before signing, so no invalid token reaches the wire regardless of how
+    // it was assembled.
+    token.validate_construction()?;
     let cwt = Cwt::new(algorithm.algorithm_id(), token.clone());
     let header_cbor = encode_protected_header(algorithm)?;
     let payload_cbor = cwt.encode_payload()?;
@@ -1746,20 +1574,14 @@ mod moqt_helper_tests {
 
     #[test]
     fn test_catpor_probability_1_always_rejected() {
-        let token = CatTokenBuilder::new()
-            .probability_of_rejection(1.0, vec![1, 2, 3], None)
-            .build()
-            .unwrap();
+        let token = CatToken::new().with_probability_of_rejection(1.0, vec![1, 2, 3], None);
         let block_list = CatPorBlockList::new();
         assert!(enforce_catpor(&token, &block_list).is_err());
     }
 
     #[test]
     fn test_catpor_probability_0_never_rejected() {
-        let token = CatTokenBuilder::new()
-            .probability_of_rejection(0.0, vec![1, 2, 3], None)
-            .build()
-            .unwrap();
+        let token = CatToken::new().with_probability_of_rejection(0.0, vec![1, 2, 3], None);
         let block_list = CatPorBlockList::new();
         for _ in 0..100 {
             assert!(enforce_catpor(&token, &block_list).is_ok());
@@ -1771,10 +1593,7 @@ mod moqt_helper_tests {
         let block_list = CatPorBlockList::new();
         block_list.add(vec![1, 2, 3], None);
 
-        let token = CatTokenBuilder::new()
-            .probability_of_rejection(0.0, vec![1, 2, 3], None)
-            .build()
-            .unwrap();
+        let token = CatToken::new().with_probability_of_rejection(0.0, vec![1, 2, 3], None);
 
         assert!(enforce_catpor(&token, &block_list).is_err());
     }
@@ -1784,10 +1603,7 @@ mod moqt_helper_tests {
         let block_list = CatPorBlockList::new();
         block_list.add(vec![1, 2, 3], Some(0));
 
-        let token = CatTokenBuilder::new()
-            .probability_of_rejection(0.0, vec![1, 2, 3], None)
-            .build()
-            .unwrap();
+        let token = CatToken::new().with_probability_of_rejection(0.0, vec![1, 2, 3], None);
 
         assert!(enforce_catpor(&token, &block_list).is_ok());
     }

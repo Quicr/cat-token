@@ -90,12 +90,10 @@ fn make_bench_context() -> (ValidatedToken, Es256Algorithm, Jwk) {
         .full_access()
         .namespace_prefix(b"cdn.")
         .build();
-    let token = CatTokenBuilder::new()
-        .issuer("https://auth.example.com")
-        .moqt_scope(scope)
-        .confirmation(thumbprint)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://auth.example.com")
+        .with_moqt_scope(scope)
+        .with_confirmation(thumbprint);
 
     let key = HmacSha256Algorithm::new(b"bench-key-for-async-scale-0000000");
     let encoded = encode_token(&token, &key).unwrap();

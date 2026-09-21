@@ -1,6 +1,13 @@
 // SPDX-FileCopyrightText: Copyright (c) 2022 Quicr
 // SPDX-License-Identifier: BSD-2-Clause
 
+//! Signature and MAC algorithms used to protect CAT tokens.
+//!
+//! Provides the [`CryptographicAlgorithm`] trait and its three
+//! implementations — [`Es256Algorithm`] (ECDSA P-256), [`Ps256Algorithm`]
+//! (RSA-PSS), and [`HmacSha256Algorithm`] — together with the COSE algorithm
+//! identifiers and a constant-time byte comparison helper.
+
 use crate::CatError;
 use hmac::{Hmac, Mac};
 use p256::ecdsa::{Signature, SigningKey, VerifyingKey};
@@ -17,8 +24,11 @@ use rsa::{RsaPrivateKey, RsaPublicKey};
 use sha2::Sha256;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
+/// COSE algorithm ID for HMAC 256/256 (RFC 8152 registration).
 pub const ALG_HMAC256_256: i64 = 5;
+/// COSE algorithm ID for ECDSA P-256 with SHA-256 (RFC 8152 registration).
 pub const ALG_ES256: i64 = -7;
+/// COSE algorithm ID for RSASSA-PSS with SHA-256 (RFC 8230 registration).
 pub const ALG_PS256: i64 = -37;
 
 /// Convert COSE algorithm ID to JOSE algorithm string.
@@ -50,9 +60,13 @@ type HmacSha256 = Hmac<Sha256>;
 /// Minimum RSA key size in bytes (2048 bits = 256 bytes)
 pub const MIN_RSA_KEY_SIZE: usize = 256;
 
+/// A signing/verification algorithm usable to protect a CWT.
 pub trait CryptographicAlgorithm: Send + Sync {
+    /// Sign `data`, returning the raw signature (or MAC) bytes.
     fn sign(&self, data: &[u8]) -> Result<Vec<u8>, CatError>;
+    /// Verify `signature` over `data`, returning an error if it does not match.
     fn verify(&self, data: &[u8], signature: &[u8]) -> Result<(), CatError>;
+    /// Return the COSE algorithm ID for this algorithm.
     fn algorithm_id(&self) -> i64;
 }
 
@@ -61,6 +75,7 @@ pub trait CryptographicAlgorithm: Send + Sync {
 pub struct SecretKey(Vec<u8>);
 
 impl SecretKey {
+    /// Borrow the raw key bytes.
     pub fn as_bytes(&self) -> &[u8] {
         &self.0
     }
@@ -74,12 +89,14 @@ impl std::fmt::Debug for SecretKey {
     }
 }
 
+/// HMAC-SHA256 signer/verifier; the key is zeroized on drop.
 #[derive(Zeroize, ZeroizeOnDrop)]
 pub struct HmacSha256Algorithm {
     key: Vec<u8>,
 }
 
 impl HmacSha256Algorithm {
+    /// Create an algorithm from raw key bytes.
     pub fn new(key: &[u8]) -> Self {
         Self { key: key.to_vec() }
     }
@@ -139,6 +156,7 @@ pub struct Es256Algorithm {
 impl zeroize::ZeroizeOnDrop for Es256Algorithm {}
 
 impl Es256Algorithm {
+    /// Generate a fresh random P-256 key pair for signing and verification.
     pub fn new_with_key_pair() -> Result<Self, CatError> {
         let signing_key = SigningKey::random(&mut OsRng);
         let verifying_key = VerifyingKey::from(&signing_key);
@@ -149,6 +167,7 @@ impl Es256Algorithm {
         })
     }
 
+    /// Build a signing+verifying algorithm from an existing key pair.
     pub fn from_key_pair(signing_key: SigningKey, verifying_key: VerifyingKey) -> Self {
         Self {
             signing_key: Some(signing_key),
@@ -156,6 +175,7 @@ impl Es256Algorithm {
         }
     }
 
+    /// Build a verify-only algorithm from a public key.
     pub fn new_verifier(verifying_key: VerifyingKey) -> Self {
         Self {
             signing_key: None,
@@ -163,12 +183,14 @@ impl Es256Algorithm {
         }
     }
 
+    /// Build a verify-only algorithm from a PEM-encoded SPKI public key.
     pub fn from_public_key_pem(pem: &str) -> Result<Self, CatError> {
         let verifying_key = VerifyingKey::from_public_key_pem(pem)
             .map_err(|e| CatError::KeyOperationFailed(format!("invalid PEM: {e}")))?;
         Ok(Self::new_verifier(verifying_key))
     }
 
+    /// Build a verify-only algorithm from a DER-encoded SPKI public key.
     pub fn from_public_key_der(der: &[u8]) -> Result<Self, CatError> {
         let verifying_key = VerifyingKey::from_public_key_der(der)
             .map_err(|e| CatError::KeyOperationFailed(format!("invalid DER: {e}")))?;
@@ -197,6 +219,7 @@ impl Es256Algorithm {
         Ok(Self::from_key_pair(signing_key, verifying_key))
     }
 
+    /// Borrow the P-256 public verifying key.
     pub fn verifying_key(&self) -> &VerifyingKey {
         &self.verifying_key
     }
@@ -245,6 +268,7 @@ pub struct Ps256Algorithm {
 impl zeroize::ZeroizeOnDrop for Ps256Algorithm {}
 
 impl Ps256Algorithm {
+    /// Generate a fresh random 2048-bit RSA key pair for signing and verification.
     pub fn new_with_key_pair() -> Result<Self, CatError> {
         let bits = 2048;
         let private_key = RsaPrivateKey::new(&mut OsRng, bits)
@@ -260,6 +284,9 @@ impl Ps256Algorithm {
         })
     }
 
+    /// Build a verify-only algorithm from an RSA public key.
+    ///
+    /// Rejects keys smaller than [`MIN_RSA_KEY_SIZE`] (2048 bits).
     pub fn new_verifier(public_key: RsaPublicKey) -> Result<Self, CatError> {
         // Validate minimum RSA key size (2048 bits = 256 bytes)
         if public_key.size() < MIN_RSA_KEY_SIZE {
@@ -277,6 +304,7 @@ impl Ps256Algorithm {
         })
     }
 
+    /// Borrow the RSA public key.
     pub fn public_key(&self) -> &RsaPublicKey {
         &self.public_key
     }
@@ -308,6 +336,8 @@ impl CryptographicAlgorithm for Ps256Algorithm {
     }
 }
 
+/// Build the COSE `Sig_structure`/`MAC_structure` bytes to be signed or MAC'd
+/// for the given algorithm, protected header, and payload.
 pub fn create_signing_input(
     header_protected: &[u8],
     payload: &[u8],
@@ -341,6 +371,7 @@ fn create_cose_structure(
     Ok(buf)
 }
 
+/// Compute the SHA-256 digest of `data`.
 pub fn hash_sha256(data: &[u8]) -> Vec<u8> {
     digest::digest(&digest::SHA256, data).as_ref().to_vec()
 }

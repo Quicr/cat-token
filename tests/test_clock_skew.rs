@@ -7,12 +7,10 @@ fn test_default_validator_has_zero_tolerance() {
     let validator = CatTokenValidator::dangerously_any_issuer();
     let key = Es256Algorithm::new_with_key_pair().unwrap();
 
-    let token = CatTokenBuilder::new()
-        .issuer("test")
-        .single_audience("aud")
-        .expires_in(-1)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("test")
+        .with_single_audience("aud")
+        .with_expires_in(-1);
 
     let encoded = encode_token(&token, &key).unwrap();
     let decoded = Decoder::with_algorithm(&key)
@@ -32,13 +30,11 @@ fn test_default_validator_rejects_nbf_in_future() {
     let key = Es256Algorithm::new_with_key_pair().unwrap();
 
     let nbf = chrono::Utc::now() + chrono::Duration::seconds(5);
-    let token = CatTokenBuilder::new()
-        .issuer("test")
-        .single_audience("aud")
-        .expires_in(3600)
-        .not_before(nbf)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("test")
+        .with_single_audience("aud")
+        .with_expires_in(3600)
+        .with_not_before(nbf);
 
     let encoded = encode_token(&token, &key).unwrap();
     let decoded = Decoder::with_algorithm(&key)
@@ -59,12 +55,10 @@ fn test_explicit_tolerance_allows_skew() {
         .unwrap();
     let key = Es256Algorithm::new_with_key_pair().unwrap();
 
-    let token = CatTokenBuilder::new()
-        .issuer("test")
-        .single_audience("aud")
-        .expires_in(-5)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("test")
+        .with_single_audience("aud")
+        .with_expires_in(-5);
 
     let encoded = encode_token(&token, &key).unwrap();
     let decoded = Decoder::with_algorithm(&key)
@@ -82,12 +76,10 @@ fn test_separate_tolerances() {
         .unwrap();
     let key = Es256Algorithm::new_with_key_pair().unwrap();
 
-    let token = CatTokenBuilder::new()
-        .issuer("test")
-        .single_audience("aud")
-        .expires_in(-5)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("test")
+        .with_single_audience("aud")
+        .with_expires_in(-5);
 
     let encoded = encode_token(&token, &key).unwrap();
     let decoded = Decoder::with_algorithm(&key)
@@ -134,12 +126,10 @@ fn test_exp_overflow_rejected() {
         .unwrap();
     let key = Es256Algorithm::new_with_key_pair().unwrap();
 
-    let mut token = CatTokenBuilder::new()
-        .issuer("test")
-        .single_audience("aud")
-        .expires_in(3600)
-        .build()
-        .unwrap();
+    let mut token = CatToken::new()
+        .with_issuer("test")
+        .with_single_audience("aud")
+        .with_expires_in(3600);
     // Force exp to i64::MAX post-build so the checked_add overflows.
     token.core.exp = Some(i64::MAX);
 
@@ -162,12 +152,10 @@ fn test_nbf_underflow_rejected() {
         .unwrap();
     let key = Es256Algorithm::new_with_key_pair().unwrap();
 
-    let mut token = CatTokenBuilder::new()
-        .issuer("test")
-        .single_audience("aud")
-        .expires_in(3600)
-        .build()
-        .unwrap();
+    let mut token = CatToken::new()
+        .with_issuer("test")
+        .with_single_audience("aud")
+        .with_expires_in(3600);
     // Force nbf to i64::MIN post-build so the checked_sub underflows.
     token.core.nbf = Some(i64::MIN);
 

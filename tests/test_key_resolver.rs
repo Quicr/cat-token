@@ -21,11 +21,9 @@ fn resolve_err(resolver: &dyn KeyResolver, hint: &KeyHint) -> CatError {
 }
 
 fn build_token_with(iss: &str) -> CatToken {
-    CatTokenBuilder::new()
-        .issuer(iss)
-        .expires_at(Utc::now() + Duration::hours(1))
-        .build()
-        .unwrap()
+    CatToken::new()
+        .with_issuer(iss)
+        .with_expiration(Utc::now() + Duration::hours(1))
 }
 
 fn encode_with_kid(token: &CatToken, alg: &Es256Algorithm, kid: &[u8]) -> Vec<u8> {
@@ -103,10 +101,7 @@ fn test_single_resolver_require_issuer_mismatch_rejected() {
 fn test_single_resolver_require_issuer_missing_rejected() {
     let key = Es256Algorithm::new_with_key_pair().unwrap();
     // Token has no `iss` claim.
-    let token = CatTokenBuilder::new()
-        .expires_at(Utc::now() + Duration::hours(1))
-        .build()
-        .unwrap();
+    let token = CatToken::new().with_expiration(Utc::now() + Duration::hours(1));
     let encoded = encode_token(&token, &key).unwrap();
 
     let resolver = SingleKeyResolver::new(Es256Algorithm::new_verifier(*key.verifying_key()), ISS);
@@ -259,12 +254,10 @@ fn test_full_pipeline_with_keyring_and_peeked_iss() {
     // before the resolver runs, so a KeyRingResolver keyed on that iss
     // resolves without the caller supplying anything.
     let key = Es256Algorithm::new_with_key_pair().unwrap();
-    let token = CatTokenBuilder::new()
-        .issuer(ISS)
-        .audience(vec!["relay.example.com".to_string()])
-        .expires_at(Utc::now() + Duration::hours(1))
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer(ISS)
+        .with_audience(vec!["relay.example.com".to_string()])
+        .with_expiration(Utc::now() + Duration::hours(1));
     // encode_token doesn't emit a kid; register a resolver keyed on kid=b""
     // so we can exercise the (iss, kid, alg) match path via the hand-built
     // hint path below rather than through decode.

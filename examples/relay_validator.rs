@@ -154,16 +154,14 @@ fn create_test_token(key: &Es256Algorithm) -> Vec<u8> {
         .track_prefix(b"/")
         .build();
 
-    let token = CatTokenBuilder::new()
-        .issuer("https://auth.example.com")
-        .audience(vec!["moqt-relay.example.com".to_string()])
-        .subject("broadcaster123")
-        .issued_at(now)
-        .expires_at(now + Duration::hours(2))
-        .moqt_scope(scope)
-        .moqt_reval(300.0)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://auth.example.com")
+        .with_audience(vec!["moqt-relay.example.com".to_string()])
+        .with_subject("broadcaster123")
+        .with_issued_at(now)
+        .with_expiration(now + Duration::hours(2))
+        .with_moqt_scope(scope)
+        .with_moqt_reval(300.0);
 
     encode_token(&token, key).expect("Failed to encode token")
 }
@@ -171,13 +169,11 @@ fn create_test_token(key: &Es256Algorithm) -> Vec<u8> {
 fn create_expired_token(key: &Es256Algorithm) -> Vec<u8> {
     let now = Utc::now();
 
-    let token = CatTokenBuilder::new()
-        .issuer("https://auth.example.com")
-        .audience(vec!["moqt-relay.example.com".to_string()])
-        .expires_at(now - Duration::hours(1)) // Expired 1 hour ago
-        .moqt_scope(MoqtScopeBuilder::new().publisher().build())
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://auth.example.com")
+        .with_audience(vec!["moqt-relay.example.com".to_string()])
+        .with_expiration(now - Duration::hours(1)) // Expired 1 hour ago
+        .with_moqt_scope(MoqtScopeBuilder::new().publisher().build());
 
     encode_token(&token, key).expect("Failed to encode token")
 }

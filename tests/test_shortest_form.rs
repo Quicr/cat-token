@@ -8,10 +8,7 @@ fn test_integer_coord_encoded_as_integer() {
     let key = HmacSha256Algorithm::generate_key().unwrap();
     let alg = HmacSha256Algorithm::from_secret_key(&key);
 
-    let token = CatTokenBuilder::new()
-        .geo_coordinate(45.0, 90.0, 0)
-        .build()
-        .unwrap();
+    let token = CatToken::new().with_geo_coordinate(45.0, 90.0, 0);
 
     let cose_bytes = encode_token(&token, &alg).unwrap();
 
@@ -61,10 +58,7 @@ fn test_fractional_coord_encoded_as_float() {
     let key = HmacSha256Algorithm::generate_key().unwrap();
     let alg = HmacSha256Algorithm::from_secret_key(&key);
 
-    let token = CatTokenBuilder::new()
-        .geo_coordinate(45.5, 90.25, 0)
-        .build()
-        .unwrap();
+    let token = CatToken::new().with_geo_coordinate(45.5, 90.25, 0);
 
     let cose_bytes = encode_token(&token, &alg).unwrap();
 
@@ -105,10 +99,7 @@ fn test_integer_coords_roundtrip() {
     let key = HmacSha256Algorithm::generate_key().unwrap();
     let alg = HmacSha256Algorithm::from_secret_key(&key);
 
-    let token = CatTokenBuilder::new()
-        .geo_coordinate(45.0, -90.0, 1000)
-        .build()
-        .unwrap();
+    let token = CatToken::new().with_geo_coordinate(45.0, -90.0, 1000);
 
     let encoded = encode_token(&token, &alg).unwrap();
     let decoded = Decoder::with_algorithm(&alg)

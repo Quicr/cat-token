@@ -240,10 +240,7 @@ fn test_builder_uri_match_rules() {
         component: URI_COMPONENT_HOST,
         matches: vec![MatchValue::Exact("api.example.com".to_string())],
     }];
-    let token = CatTokenBuilder::new()
-        .uri_match_rules(rules.clone())
-        .build()
-        .unwrap();
+    let token = CatToken::new().with_uri_match_rules(rules.clone());
     assert_eq!(token.cat.catu, Some(rules));
 }
 
@@ -253,9 +250,6 @@ fn test_builder_header_match_rules() {
         name: "Content-Type".to_string(),
         matches: vec![MatchValue::Exact("application/cbor".to_string())],
     }];
-    let token = CatTokenBuilder::new()
-        .header_match_rules(rules.clone())
-        .build()
-        .unwrap();
+    let token = CatToken::new().with_header_match_rules(rules.clone());
     assert_eq!(token.cat.cath, Some(rules));
 }

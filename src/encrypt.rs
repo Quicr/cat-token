@@ -1,6 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2022 Quicr
 // SPDX-License-Identifier: BSD-2-Clause
 
+//! COSE_Encrypt0 (RFC 9052 §5) AES-GCM encryption and decryption.
+//!
+//! Enforces a size cap on both the envelope and decrypted plaintext to bound
+//! working memory under adversarial input.
+
 use crate::CatError;
 use aes_gcm::{
     Aes128Gcm, Aes256Gcm, KeyInit, Nonce,
@@ -19,8 +24,11 @@ const ALG_A256GCM: i64 = 3;
 pub const MAX_ENCRYPT0_SIZE: usize = 16 * 1024;
 const GCM_TAG_BYTES: usize = 16;
 
+/// AES-GCM content-encryption algorithm for COSE_Encrypt0.
 pub enum EncryptionAlgorithm {
+    /// AES-128-GCM (COSE alg 1).
     A128Gcm,
+    /// AES-256-GCM (COSE alg 3).
     A256Gcm,
 }
 

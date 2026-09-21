@@ -13,19 +13,18 @@ fn main() -> Result<(), CatError> {
     // 1. Create a signing key (auth server keeps this secret)
     let key = Es256Algorithm::new_with_key_pair()?;
 
-    // 2. Build a token with MOQT permissions
-    let token = CatTokenBuilder::new()
-        .issuer("https://auth.example.com")
-        .audience(vec!["relay.example.com".to_string()])
-        .expires_at(Utc::now() + Duration::hours(1))
-        .moqt_scope(
+    // 2. Build a token with MOQT permissions using the fluent with_* API
+    let token = CatToken::new()
+        .with_issuer("https://auth.example.com")
+        .with_audience(vec!["relay.example.com".to_string()])
+        .with_expiration(Utc::now() + Duration::hours(1))
+        .with_moqt_scope(
             MoqtScopeBuilder::new()
                 .publisher() // Allows PublishNamespace + Publish
                 .namespace_exact(b"live.example.com")
                 .track_prefix(b"/streams/")
                 .build(),
-        )
-        .build()?;
+        );
 
     // 3. Encode the token (returns COSE_Sign1 CBOR bytes)
     let encoded = encode_token(&token, &key)?;

@@ -7,7 +7,7 @@
 //! This example shows how to create tokens for a generic CDN or API gateway.
 
 use cat_token::{
-    CatTokenBuilder, CatTokenValidator, Decoder, Es256Algorithm, MatchValue, NetworkIdentifier,
+    CatToken, CatTokenValidator, Decoder, Es256Algorithm, MatchValue, NetworkIdentifier,
     URI_COMPONENT_EXTENSION, URI_COMPONENT_PATH, UriMatchRule, encode_token, encode_token_base64,
 };
 use chrono::{Duration, Utc};
@@ -19,13 +19,13 @@ fn main() {
 
     // Example 1: CDN edge authorization token
     println!("1. CDN Edge Token");
-    let cdn_token = CatTokenBuilder::new()
-        .issuer("https://auth.cdn.example.com")
-        .audience(vec!["edge-pop-us-west".to_string()])
-        .subject("customer-12345")
-        .expires_at(Utc::now() + Duration::hours(24))
-        .issued_at(Utc::now())
-        .uri_match_rules(vec![
+    let cdn_token = CatToken::new()
+        .with_issuer("https://auth.cdn.example.com")
+        .with_audience(vec!["edge-pop-us-west".to_string()])
+        .with_subject("customer-12345")
+        .with_expiration(Utc::now() + Duration::hours(24))
+        .with_issued_at(Utc::now())
+        .with_uri_match_rules(vec![
             UriMatchRule {
                 component: URI_COMPONENT_PATH,
                 matches: vec![MatchValue::Prefix("/customer-12345/".to_string())],
@@ -37,9 +37,7 @@ fn main() {
                     MatchValue::Exact("ts".to_string()),
                 ],
             },
-        ])
-        .build()
-        .unwrap();
+        ]);
 
     let encoded = encode_token(&cdn_token, &key).unwrap();
     let encoded_b64 = encode_token_base64(&cdn_token, &key).unwrap();
@@ -51,25 +49,23 @@ fn main() {
 
     // Example 2: API gateway token with network restrictions
     println!("\n2. API Gateway Token (with network restrictions)");
-    let api_token = CatTokenBuilder::new()
-        .issuer("https://auth.api.example.com")
-        .audience(vec!["api-gateway".to_string()])
-        .subject("service-account-xyz")
-        .expires_at(Utc::now() + Duration::hours(1))
-        .network_identifiers(vec![
+    let api_token = CatToken::new()
+        .with_issuer("https://auth.api.example.com")
+        .with_audience(vec!["api-gateway".to_string()])
+        .with_subject("service-account-xyz")
+        .with_expiration(Utc::now() + Duration::hours(1))
+        .with_network_identifiers(vec![
             NetworkIdentifier::IpPrefix("10.0.0.0".parse().unwrap(), 8),
             NetworkIdentifier::IpPrefix("192.168.0.0".parse().unwrap(), 16),
             NetworkIdentifier::Asn(64512),
         ])
-        .uri_match_rules(vec![UriMatchRule {
+        .with_uri_match_rules(vec![UriMatchRule {
             component: URI_COMPONENT_PATH,
             matches: vec![
                 MatchValue::Prefix("/api/v1/".to_string()),
                 MatchValue::Exact("/health".to_string()),
             ],
-        }])
-        .build()
-        .unwrap();
+        }]);
 
     let encoded_b64 = encode_token_base64(&api_token, &key).unwrap();
     println!(
@@ -80,15 +76,13 @@ fn main() {
 
     // Example 3: Geo-restricted token
     println!("\n3. Geo-Restricted Token");
-    let geo_token = CatTokenBuilder::new()
-        .issuer("https://auth.streaming.com")
-        .audience(vec!["streaming-service".to_string()])
-        .subject("subscriber-789")
-        .expires_at(Utc::now() + Duration::hours(4))
-        .geo_coordinate(37.7749, -122.4194, 50000) // San Francisco, 50km radius
-        .geohash("9q8yy") // SF area geohash
-        .build()
-        .unwrap();
+    let geo_token = CatToken::new()
+        .with_issuer("https://auth.streaming.com")
+        .with_audience(vec!["streaming-service".to_string()])
+        .with_subject("subscriber-789")
+        .with_expiration(Utc::now() + Duration::hours(4))
+        .with_geo_coordinate(37.7749, -122.4194, 50000) // San Francisco, 50km radius
+        .with_geohash("9q8yy"); // SF area geohash
 
     let encoded = encode_token(&geo_token, &key).unwrap();
     let encoded_b64 = encode_token_base64(&geo_token, &key).unwrap();

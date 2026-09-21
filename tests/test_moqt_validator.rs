@@ -54,11 +54,9 @@ fn test_moqt_validator_spec_example_exact_match() {
         .track_exact(b"/bob")
         .build();
 
-    let token = CatTokenBuilder::new()
-        .issuer("https://spec-example.com")
-        .moqt_scope(scope)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://spec-example.com")
+        .with_moqt_scope(scope);
 
     let v = validator();
 
@@ -108,11 +106,9 @@ fn test_moqt_validator_spec_example_prefix_match() {
         .track_prefix(b"/bob")
         .build();
 
-    let token = CatTokenBuilder::new()
-        .issuer("https://spec-example.com")
-        .moqt_scope(scope)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://spec-example.com")
+        .with_moqt_scope(scope);
 
     let v = validator();
 
@@ -163,13 +159,11 @@ fn test_moqt_validator_multiple_scopes() {
     let pub_scope = roles::publisher(b"cdn.example.com", b"/live/");
     let sub_scope = roles::subscriber(b"cdn.example.com", b"/vod/");
 
-    let token = CatTokenBuilder::new()
-        .issuer("https://multi-scope.com")
-        .audience(vec![RELAY.to_string()])
-        .expires_at(Utc::now() + Duration::hours(1))
-        .moqt_scopes(vec![pub_scope, sub_scope])
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://multi-scope.com")
+        .with_audience(vec![RELAY.to_string()])
+        .with_expiration(Utc::now() + Duration::hours(1))
+        .with_moqt_scopes(vec![pub_scope, sub_scope]);
 
     let v = MoqtValidator::new();
 
@@ -215,12 +209,10 @@ fn test_moqt_validator_revalidation_required() {
         .namespace_exact(b"example.com")
         .build();
 
-    let token = CatTokenBuilder::new()
-        .issuer("https://test.com")
-        .moqt_scope(scope)
-        .moqt_reval(300.0) // 5 minute revalidation
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://test.com")
+        .with_moqt_scope(scope)
+        .with_moqt_reval(300.0); // 5 minute revalidation
 
     let v = validator();
 
@@ -243,12 +235,10 @@ fn test_moqt_validator_revalidation_zero() {
         .namespace_exact(b"example.com")
         .build();
 
-    let token = CatTokenBuilder::new()
-        .issuer("https://test.com")
-        .moqt_scope(scope)
-        .moqt_reval(0.0)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://test.com")
+        .with_moqt_scope(scope)
+        .with_moqt_reval(0.0);
 
     let v = validator();
 
@@ -273,12 +263,10 @@ fn test_moqt_validator_claims_validation() {
         .build();
 
     // Token with short revalidation interval
-    let token = CatTokenBuilder::new()
-        .issuer("https://test.com")
-        .moqt_scope(scope.clone())
-        .moqt_reval(30.0) // 30 seconds
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://test.com")
+        .with_moqt_scope(scope.clone())
+        .with_moqt_reval(30.0); // 30 seconds
 
     // Validator that requires at least 60 seconds
     let v = MoqtValidator::new().with_min_revalidation_interval(60.0);
@@ -290,12 +278,10 @@ fn test_moqt_validator_claims_validation() {
     ));
 
     // Token with acceptable revalidation interval
-    let token2 = CatTokenBuilder::new()
-        .issuer("https://test.com")
-        .moqt_scope(scope)
-        .moqt_reval(120.0) // 2 minutes
-        .build()
-        .unwrap();
+    let token2 = CatToken::new()
+        .with_issuer("https://test.com")
+        .with_moqt_scope(scope)
+        .with_moqt_reval(120.0); // 2 minutes
 
     let result = v.validate_moqt_claims(&token2);
     assert!(result.is_ok());
@@ -308,12 +294,10 @@ fn test_moqt_validator_no_revalidation_support() {
         .namespace_exact(b"example.com")
         .build();
 
-    let token = CatTokenBuilder::new()
-        .issuer("https://test.com")
-        .moqt_scope(scope)
-        .moqt_reval(300.0)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://test.com")
+        .with_moqt_scope(scope)
+        .with_moqt_reval(300.0);
 
     // Validator that doesn't support revalidation
     let v = MoqtValidator::new().disable_revalidation_support();
@@ -369,10 +353,7 @@ fn test_moqt_roles() {
 #[test]
 fn test_moqt_default_blocked() {
     // "The default for all actions is 'Blocked'"
-    let token = CatTokenBuilder::new()
-        .issuer("https://test.com")
-        .build()
-        .unwrap(); // No MOQT scopes
+    let token = CatToken::new().with_issuer("https://test.com"); // No MOQT scopes
 
     let v = validator();
 
@@ -387,11 +368,9 @@ fn test_moqt_default_blocked() {
 
 #[test]
 fn test_moqt_empty_scopes() {
-    let token = CatTokenBuilder::new()
-        .issuer("https://test.com")
-        .moqt_scopes(vec![]) // Empty scopes array
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://test.com")
+        .with_moqt_scopes(vec![]); // Empty scopes array
 
     let v = validator();
 
@@ -412,11 +391,9 @@ fn test_moqt_validator_concurrent_access() {
         .build();
 
     let token = Arc::new(
-        CatTokenBuilder::new()
-            .issuer("https://concurrent-test.com")
-            .moqt_scope(scope)
-            .build()
-            .unwrap(),
+        CatToken::new()
+            .with_issuer("https://concurrent-test.com")
+            .with_moqt_scope(scope),
     );
 
     let v = Arc::new(validator());
@@ -561,5 +538,63 @@ fn test_jti_cache_stats() {
     assert!(
         stats.premature_evictions > 0,
         "premature_evictions should be non-zero when overfilled inside the freshness window"
+    );
+}
+
+// Regression: geohash geofencing must be one-directional. A peer whose
+// location is only known to a *coarse* prefix must NOT satisfy a token
+// restricted to a *finer* zone inside it. Previously the match also accepted
+// the token-zone-contains-peer direction, widening the geofence.
+#[test]
+fn test_geohash_geofence_is_one_directional() {
+    let scope = MoqtScopeBuilder::new()
+        .actions(&[MoqtAction::Publish])
+        .namespace_exact(b"example.com")
+        .track_prefix(b"/")
+        .build();
+
+    // Token grants only inside the fine zone "9q8yyk".
+    let token = make_validated(
+        &CatToken::new()
+            .with_moqt_scope(scope)
+            .with_geohash("9q8yyk"),
+    );
+
+    let base_ctx = || {
+        ctx(
+            MoqtAction::Publish,
+            vec![b"example.com".to_vec()],
+            b"/stream".to_vec(),
+        )
+    };
+
+    // Peer inside the token zone (finer/equal prefix) -> allowed.
+    let mut inside = RequestLocation::new();
+    inside.geohash = Some("9q8yyk".to_string());
+    assert!(
+        validator()
+            .authorize(&token, &base_ctx().with_peer_location(inside))
+            .is_ok(),
+        "peer exactly in the token zone must be allowed"
+    );
+
+    let mut inside_finer = RequestLocation::new();
+    inside_finer.geohash = Some("9q8yyk3x".to_string());
+    assert!(
+        validator()
+            .authorize(&token, &base_ctx().with_peer_location(inside_finer))
+            .is_ok(),
+        "peer in a finer sub-zone of the token zone must be allowed"
+    );
+
+    // Peer known only to a coarse containing prefix -> must be REJECTED.
+    let mut coarse = RequestLocation::new();
+    coarse.geohash = Some("9q".to_string());
+    assert!(
+        matches!(
+            validator().authorize(&token, &base_ctx().with_peer_location(coarse)),
+            Err(CatError::GeographicValidationFailed(_))
+        ),
+        "peer known only to a coarse containing prefix must be rejected (geofence must not widen)"
     );
 }

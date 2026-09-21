@@ -30,21 +30,25 @@ impl Default for UriMatcherLimits {
 }
 
 impl UriMatcherLimits {
+    /// Create limits with the crate defaults.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Set the maximum accepted regex pattern length in bytes.
     pub fn with_max_regex_pattern_length(mut self, length: usize) -> Self {
         self.max_regex_pattern_length = length;
         self
     }
 
+    /// Set the maximum number of regex patterns per matcher.
     pub fn with_max_regex_patterns(mut self, count: usize) -> Self {
         self.max_regex_patterns = count;
         self
     }
 }
 
+/// Trie of patterns matched against the leading bytes of a URI.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PrefixTrie {
     trie: Trie<Vec<u8>, String>,
@@ -58,6 +62,7 @@ impl Default for PrefixTrie {
 }
 
 impl PrefixTrie {
+    /// Create an empty prefix trie.
     pub fn new() -> Self {
         Self {
             trie: Trie::new(),
@@ -65,6 +70,8 @@ impl PrefixTrie {
         }
     }
 
+    /// Insert a prefix `pattern` mapping to `value`, replacing any existing
+    /// entry for the same pattern.
     pub fn insert(&mut self, pattern: &str, value: String) {
         let key = pattern.as_bytes().to_vec();
         if !self.trie.contains_key(&key) {
@@ -73,6 +80,7 @@ impl PrefixTrie {
         self.trie.insert(key, value);
     }
 
+    /// Return the values of every stored pattern that is a prefix of `text`.
     pub fn search_prefix(&self, text: &str) -> Vec<&str> {
         let mut matches = Vec::new();
         let text_bytes = text.as_bytes();
@@ -88,6 +96,7 @@ impl PrefixTrie {
         matches
     }
 
+    /// Return `true` if any stored pattern is a prefix of `text`.
     pub fn contains_prefix(&self, text: &str) -> bool {
         let text_bytes = text.as_bytes();
 
@@ -102,6 +111,7 @@ impl PrefixTrie {
         false
     }
 
+    /// Return every stored pattern as a `String`.
     pub fn get_all_patterns(&self) -> Vec<String> {
         self.trie
             .keys()
@@ -109,6 +119,7 @@ impl PrefixTrie {
             .collect()
     }
 
+    /// Remove `pattern`; returns `true` if it was present.
     pub fn remove(&mut self, pattern: &str) -> bool {
         let key = pattern.as_bytes().to_vec();
         if self.trie.remove(&key).is_some() {
@@ -119,11 +130,13 @@ impl PrefixTrie {
         }
     }
 
+    /// Number of stored patterns.
     pub fn size(&self) -> usize {
         self.size
     }
 }
 
+/// Trie of patterns matched against the trailing bytes of a URI.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SuffixTrie {
     trie: Trie<Vec<u8>, String>,
@@ -137,6 +150,7 @@ impl Default for SuffixTrie {
 }
 
 impl SuffixTrie {
+    /// Create an empty suffix trie.
     pub fn new() -> Self {
         Self {
             trie: Trie::new(),
@@ -144,6 +158,8 @@ impl SuffixTrie {
         }
     }
 
+    /// Insert a suffix `pattern` mapping to `value`, replacing any existing
+    /// entry for the same pattern.
     pub fn insert(&mut self, pattern: &str, value: String) {
         // Store reversed pattern for efficient suffix matching
         let key: Vec<u8> = pattern.bytes().rev().collect();
@@ -153,6 +169,7 @@ impl SuffixTrie {
         self.trie.insert(key, value);
     }
 
+    /// Return the values of every stored pattern that is a suffix of `text`.
     pub fn search_suffix(&self, text: &str) -> Vec<&str> {
         let mut matches = Vec::new();
         let reversed: Vec<u8> = text.bytes().rev().collect();
@@ -168,6 +185,7 @@ impl SuffixTrie {
         matches
     }
 
+    /// Return `true` if any stored pattern is a suffix of `text`.
     pub fn contains_suffix(&self, text: &str) -> bool {
         let reversed: Vec<u8> = text.bytes().rev().collect();
 
@@ -182,6 +200,7 @@ impl SuffixTrie {
         false
     }
 
+    /// Return every stored pattern as a `String`.
     pub fn get_all_patterns(&self) -> Vec<String> {
         self.trie
             .keys()
@@ -192,6 +211,7 @@ impl SuffixTrie {
             .collect()
     }
 
+    /// Remove `pattern`; returns `true` if it was present.
     pub fn remove(&mut self, pattern: &str) -> bool {
         let key: Vec<u8> = pattern.bytes().rev().collect();
         if self.trie.remove(&key).is_some() {
@@ -202,11 +222,14 @@ impl SuffixTrie {
         }
     }
 
+    /// Number of stored patterns.
     pub fn size(&self) -> usize {
         self.size
     }
 }
 
+/// Matches a URI against a set of exact, prefix, suffix, regex, and hash
+/// patterns for `catu`-style claim enforcement.
 pub struct UriMatcher {
     prefix_trie: PrefixTrie,
     suffix_trie: SuffixTrie,
@@ -223,10 +246,12 @@ impl Default for UriMatcher {
 }
 
 impl UriMatcher {
+    /// Create a matcher with default [`UriMatcherLimits`].
     pub fn new() -> Self {
         Self::with_limits(UriMatcherLimits::default())
     }
 
+    /// Create a matcher with explicit regex limits.
     pub fn with_limits(limits: UriMatcherLimits) -> Self {
         Self {
             prefix_trie: PrefixTrie::new(),
@@ -238,6 +263,9 @@ impl UriMatcher {
         }
     }
 
+    /// Add a URI pattern (exact, prefix, suffix, regex, or hash). Regex
+    /// patterns are rejected if they exceed the configured count or length
+    /// limits, guarding against CPU exhaustion.
     pub fn add_pattern(
         &mut self,
         pattern: crate::claims::UriPattern,
@@ -292,6 +320,7 @@ impl UriMatcher {
         Ok(())
     }
 
+    /// Return `true` if `uri` matches any stored pattern.
     pub fn matches(&self, uri: &str) -> bool {
         // Check exact match
         if self.exact_patterns.contains_key(uri) {
@@ -328,6 +357,8 @@ impl UriMatcher {
         false
     }
 
+    /// Return a label (`"exact:"`, `"prefix:"`, `"suffix:"`, `"regex:"`,
+    /// or `"hash:"` prefixed) for every stored pattern that matches `uri`.
     pub fn get_matching_patterns(&self, uri: &str) -> Vec<String> {
         let mut matches = Vec::new();
 

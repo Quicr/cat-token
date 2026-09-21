@@ -94,12 +94,10 @@ fn test_jkt_without_ckt_roundtrip() {
 
 #[test]
 fn test_ckt_builder() {
-    let token = CatTokenBuilder::new()
-        .issuer("test")
-        .confirmation(b"jkt".to_vec())
-        .cose_key_thumbprint(b"ckt".to_vec())
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("test")
+        .with_confirmation(b"jkt".to_vec())
+        .with_cose_key_thumbprint(b"ckt".to_vec());
 
     let cnf = token.dpop.cnf.unwrap();
     assert_eq!(cnf.jkt, b"jkt".to_vec());

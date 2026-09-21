@@ -71,15 +71,13 @@ fn test_token_with_network_identifiers() {
 
 #[test]
 fn test_token_builder_network_methods() {
-    let token = CatTokenBuilder::new()
-        .ip_address("203.0.113.1")
+    let token = CatToken::new()
+        .with_ip_address("203.0.113.1")
         .unwrap()
-        .ip_range("198.51.100.0/24")
+        .with_ip_range("198.51.100.0/24")
         .unwrap()
-        .asn(64496)
-        .asn_range(65000, 65010)
-        .build()
-        .unwrap();
+        .with_asn(64496)
+        .with_asn_range(65000, 65010);
 
     assert!(token.cat.catnip.is_some());
     let nips = token.cat.catnip.unwrap();
@@ -185,23 +183,21 @@ fn test_asn_validation_ranges() {
 
 #[test]
 fn test_mixed_network_identifiers_comprehensive() {
-    let token = CatTokenBuilder::new()
-        .issuer("https://network.example.com")
-        .version(1)
-        .ip_address("192.168.1.1")
+    let token = CatToken::new()
+        .with_issuer("https://network.example.com")
+        .with_version(1)
+        .with_ip_address("192.168.1.1")
         .unwrap()
-        .ip_address("10.0.0.1")
+        .with_ip_address("10.0.0.1")
         .unwrap()
-        .ip_range("172.16.0.0/16")
+        .with_ip_range("172.16.0.0/16")
         .unwrap()
-        .ip_range("192.168.0.0/24")
+        .with_ip_range("192.168.0.0/24")
         .unwrap()
-        .asn(64496)
-        .asn(65001)
-        .asn_range(64512, 64520)
-        .asn_range(65000, 65010)
-        .build()
-        .unwrap();
+        .with_asn(64496)
+        .with_asn(65001)
+        .with_asn_range(64512, 64520)
+        .with_asn_range(65000, 65010);
 
     assert_eq!(token.cat.catv, Some(1));
     let nips = token.cat.catnip.unwrap();

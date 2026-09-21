@@ -1,6 +1,13 @@
 // SPDX-FileCopyrightText: Copyright (c) 2022 Quicr
 // SPDX-License-Identifier: BSD-2-Clause
 
+//! MOQT (Media over QUIC Transport) authorization for CAT tokens.
+//!
+//! Provides [`MoqtValidator`], the [`RelayRequestContext`] describing an
+//! incoming relay request, the resulting [`AuthorizedRequest`], the
+//! [`MoqtScopeBuilder`] for constructing MOQT scope claims, and the [`roles`]
+//! module of well-known MOQT roles.
+
 use crate::claims::{CatIfAction, CatRenewal};
 use crate::token::{
     enforce_catnip, enforce_catpor, enforce_catu, enforce_geo, validate_all_headers,
@@ -205,6 +212,9 @@ pub struct RelayRequestContext {
 }
 
 impl RelayRequestContext {
+    /// Creates a request context for the given relay endpoint, MOQT action,
+    /// namespace tuple, and track name. Optional peer/transport context is
+    /// added via the `with_*` builder methods.
     pub fn new(
         relay_endpoint: impl Into<String>,
         action: MoqtAction,
@@ -229,26 +239,31 @@ impl RelayRequestContext {
         }
     }
 
+    /// Sets the peer's negotiated TLS ALPN, used to enforce the `catalpn` claim.
     pub fn with_peer_tls_alpn(mut self, alpn: Vec<u8>) -> Self {
         self.peer_tls_alpn = Some(alpn);
         self
     }
 
+    /// Sets the peer IP address, used to enforce the `catnip` claim.
     pub fn with_peer_ip(mut self, ip: std::net::IpAddr) -> Self {
         self.peer_ip = Some(ip);
         self
     }
 
+    /// Sets the peer's autonomous system number.
     pub fn with_peer_asn(mut self, asn: u32) -> Self {
         self.peer_asn = Some(asn);
         self
     }
 
+    /// Sets the request URI, used to enforce the `catu` claim.
     pub fn with_request_uri(mut self, uri: impl Into<String>) -> Self {
         self.request_uri = Some(uri.into());
         self
     }
 
+    /// Sets the request method, used to enforce the `catm` claim.
     pub fn with_request_method(mut self, method: impl Into<String>) -> Self {
         self.request_method = Some(method.into());
         self
@@ -296,11 +311,14 @@ impl RelayRequestContext {
         Ok(self)
     }
 
+    /// Sets the tenant identifier used to namespace replay/JTI state.
     pub fn with_tenant_id(mut self, tenant: impl Into<String>) -> Self {
         self.tenant_id = Some(tenant.into());
         self
     }
 
+    /// Attaches the DPoP proof presented with the request, enabling
+    /// proof-of-possession binding.
     pub fn with_dpop_proof(mut self, proof: DpopProof) -> Self {
         self.dpop_proof = Some(proof);
         self
@@ -487,6 +505,8 @@ impl Default for MoqtValidator {
 }
 
 impl MoqtValidator {
+    /// Creates a validator with fail-closed defaults (audience binding required,
+    /// revalidation supported).
     pub fn new() -> Self {
         Self {
             min_revalidation_interval: None,
@@ -1193,6 +1213,7 @@ pub struct MoqtScopeBuilder {
 }
 
 impl MoqtScopeBuilder {
+    /// Creates an empty scope builder.
     pub fn new() -> Self {
         Self {
             actions: Vec::new(),
@@ -1569,7 +1590,7 @@ fn enforce_actx_shape(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{CatTokenBuilder, ValidatedToken};
+    use crate::ValidatedToken;
 
     fn ctx(action: MoqtAction, ns: Vec<Vec<u8>>, track: Vec<u8>) -> RelayRequestContext {
         RelayRequestContext::new("relay", action, ns, track)
@@ -1603,12 +1624,10 @@ mod tests {
             .track_prefix(b"/stream/")
             .build();
 
-        let token = CatTokenBuilder::new()
-            .issuer("https://test.com")
-            .single_audience("relay")
-            .moqt_scope(scope)
-            .build()
-            .unwrap();
+        let token = CatToken::new()
+            .with_issuer("https://test.com")
+            .with_single_audience("relay")
+            .with_moqt_scope(scope);
 
         let validator = MoqtValidator::new();
 
@@ -1657,13 +1676,11 @@ mod tests {
             .namespace_exact(b"example.com")
             .build();
 
-        let token = CatTokenBuilder::new()
-            .issuer("https://test.com")
-            .single_audience("relay")
-            .moqt_scope(scope)
-            .moqt_reval(300.0)
-            .build()
-            .unwrap();
+        let token = CatToken::new()
+            .with_issuer("https://test.com")
+            .with_single_audience("relay")
+            .with_moqt_scope(scope)
+            .with_moqt_reval(300.0);
 
         let validator = MoqtValidator::new();
 
@@ -1685,12 +1702,10 @@ mod tests {
             .namespace_exact(b"example.com")
             .build();
 
-        let token = CatTokenBuilder::new()
-            .issuer("https://test.com")
-            .moqt_scope(scope)
-            .moqt_reval(300.0)
-            .build()
-            .unwrap();
+        let token = CatToken::new()
+            .with_issuer("https://test.com")
+            .with_moqt_scope(scope)
+            .with_moqt_reval(300.0);
 
         let validator = MoqtValidator::new().disable_revalidation_support();
 
@@ -1705,12 +1720,10 @@ mod tests {
             .namespace_exact(b"example.com")
             .build();
 
-        let token = CatTokenBuilder::new()
-            .issuer("https://test.com")
-            .moqt_scope(scope)
-            .moqt_reval(60.0) // 1 minute
-            .build()
-            .unwrap();
+        let token = CatToken::new()
+            .with_issuer("https://test.com")
+            .with_moqt_scope(scope)
+            .with_moqt_reval(60.0); // 1 minute
 
         let validator = MoqtValidator::new().with_min_revalidation_interval(300.0); // 5 minutes minimum
 
@@ -1728,11 +1741,9 @@ mod tests {
             .namespace_exact(b"example.com")
             .build();
 
-        let token = CatTokenBuilder::new()
-            .issuer("https://test.com")
-            .moqt_scope(scope)
-            .build()
-            .unwrap();
+        let token = CatToken::new()
+            .with_issuer("https://test.com")
+            .with_moqt_scope(scope);
 
         let validator = MoqtValidator::new();
         let request = ctx(
@@ -1779,12 +1790,10 @@ mod tests {
             .track_prefix(b"/stream/")
             .build();
 
-        let token = CatTokenBuilder::new()
-            .issuer("https://test.com")
-            .single_audience("relay")
-            .moqt_scopes(vec![scope1, scope2])
-            .build()
-            .unwrap();
+        let token = CatToken::new()
+            .with_issuer("https://test.com")
+            .with_single_audience("relay")
+            .with_moqt_scopes(vec![scope1, scope2]);
 
         let validator = MoqtValidator::new();
 

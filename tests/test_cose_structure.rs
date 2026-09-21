@@ -7,11 +7,9 @@ use chrono::{Duration, Utc};
 #[test]
 fn test_cose_sig_structure_es256() {
     let alg = Es256Algorithm::new_with_key_pair().unwrap();
-    let token = CatTokenBuilder::new()
-        .issuer("https://example.com")
-        .expires_in(3600)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://example.com")
+        .with_expires_in(3600);
 
     let encoded = encode_token(&token, &alg).unwrap();
     let decoded = Decoder::with_algorithm(&alg)
@@ -24,11 +22,9 @@ fn test_cose_sig_structure_es256() {
 #[test]
 fn test_cose_sig_structure_ps256() {
     let alg = Ps256Algorithm::new_with_key_pair().unwrap();
-    let token = CatTokenBuilder::new()
-        .issuer("https://example.com")
-        .expires_in(3600)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://example.com")
+        .with_expires_in(3600);
 
     let encoded = encode_token(&token, &alg).unwrap();
     let decoded = Decoder::with_algorithm(&alg)
@@ -42,11 +38,9 @@ fn test_cose_sig_structure_ps256() {
 fn test_cose_mac0_structure_hmac() {
     let key = HmacSha256Algorithm::generate_key().unwrap();
     let alg = HmacSha256Algorithm::from_secret_key(&key);
-    let token = CatTokenBuilder::new()
-        .issuer("https://example.com")
-        .expires_in(3600)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://example.com")
+        .with_expires_in(3600);
 
     let encoded = encode_token(&token, &alg).unwrap();
     let decoded = Decoder::with_algorithm(&alg)
@@ -135,12 +129,10 @@ fn test_tampered_token_rejected_with_cose_structure() {
     let key = HmacSha256Algorithm::generate_key().unwrap();
     let alg = HmacSha256Algorithm::from_secret_key(&key);
 
-    let token = CatTokenBuilder::new()
-        .issuer("https://example.com")
-        .audience(vec!["https://api.example.com".to_string()])
-        .expires_at(Utc::now() + Duration::hours(1))
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://example.com")
+        .with_audience(vec!["https://api.example.com".to_string()])
+        .with_expiration(Utc::now() + Duration::hours(1));
 
     let encoded = encode_token(&token, &alg).unwrap();
 
@@ -161,10 +153,7 @@ fn test_wrong_key_rejected_with_cose_structure() {
     let alg1 = HmacSha256Algorithm::from_secret_key(&key1);
     let alg2 = HmacSha256Algorithm::from_secret_key(&key2);
 
-    let token = CatTokenBuilder::new()
-        .issuer("https://example.com")
-        .build()
-        .unwrap();
+    let token = CatToken::new().with_issuer("https://example.com");
 
     let encoded = encode_token(&token, &alg1).unwrap();
     let result = Decoder::with_algorithm(&alg2).decode(&encoded);
@@ -174,15 +163,13 @@ fn test_wrong_key_rejected_with_cose_structure() {
 #[test]
 fn test_roundtrip_all_algorithms_with_cose() {
     let now = Utc::now();
-    let token = CatTokenBuilder::new()
-        .issuer("https://roundtrip.example.com")
-        .audience(vec!["aud1".to_string(), "aud2".to_string()])
-        .expires_at(now + Duration::hours(1))
-        .not_before(now)
-        .cwt_id_str("roundtrip-test")
-        .subject("test-user")
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://roundtrip.example.com")
+        .with_audience(vec!["aud1".to_string(), "aud2".to_string()])
+        .with_expiration(now + Duration::hours(1))
+        .with_not_before(now)
+        .with_cwt_id_str("roundtrip-test")
+        .with_subject("test-user");
 
     // HMAC
     let hmac_key = HmacSha256Algorithm::generate_key().unwrap();

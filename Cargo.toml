@@ -158,3 +158,10 @@ async = ["moqt", "dep:async-trait", "dep:futures"]
 # pre-commit half of the pipeline in tokio::task::spawn_blocking so
 # ES256/PS256 verify does not run on the reactor. Requires async.
 tokio = ["async", "dep:tokio"]
+
+# docs.rs renders with every feature enabled so the async / tokio / moqt
+# surface is visible in the published documentation, and sets `--cfg docsrs`
+# for feature-gated doc annotations.
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]

@@ -129,11 +129,9 @@ fn bench_moqt_authorization(c: &mut Criterion) {
         .track_prefix(b"/stream/")
         .build();
 
-    let single_scope_token = CatTokenBuilder::new()
-        .issuer("https://auth.example.com")
-        .moqt_scope(single_scope)
-        .build()
-        .unwrap();
+    let single_scope_token = CatToken::new()
+        .with_issuer("https://auth.example.com")
+        .with_moqt_scope(single_scope);
 
     // Multi-scope token (10 scopes)
     let multi_scopes: Vec<_> = (0..10)
@@ -147,11 +145,9 @@ fn bench_moqt_authorization(c: &mut Criterion) {
         })
         .collect();
 
-    let multi_scope_token = CatTokenBuilder::new()
-        .issuer("https://auth.example.com")
-        .moqt_scopes(multi_scopes)
-        .build()
-        .unwrap();
+    let multi_scope_token = CatToken::new()
+        .with_issuer("https://auth.example.com")
+        .with_moqt_scopes(multi_scopes);
 
     let validator = MoqtValidator::new().dangerously_allow_missing_audience();
 
@@ -259,11 +255,9 @@ fn bench_moqt_throughput(c: &mut Criterion) {
         .namespace_prefix(b"cdn.")
         .build();
 
-    let token = CatTokenBuilder::new()
-        .issuer("https://auth.example.com")
-        .moqt_scope(scope)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://auth.example.com")
+        .with_moqt_scope(scope);
 
     let validator = MoqtValidator::new().dangerously_allow_missing_audience();
     let validated = make_validated(&token);
@@ -318,11 +312,9 @@ fn bench_moqt_concurrent_authorize(c: &mut Criterion) {
         .full_access()
         .namespace_prefix(b"cdn.")
         .build();
-    let token = CatTokenBuilder::new()
-        .issuer("https://auth.example.com")
-        .moqt_scope(scope)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://auth.example.com")
+        .with_moqt_scope(scope);
     let validator = Arc::new(MoqtValidator::new().dangerously_allow_missing_audience());
     let validated = Arc::new(make_validated(&token));
 

@@ -148,16 +148,14 @@ fn test_uri_match_rules() {
 #[test]
 fn test_token_builder() {
     let jkt = b"conf-key".to_vec();
-    let token = CatTokenBuilder::new()
-        .issuer("https://auth.example.com")
-        .audience(vec!["client1".to_string()])
-        .expires_at(Utc::now() + chrono::Duration::hours(2))
-        .version(1)
-        .subject("user456")
-        .confirmation(jkt.clone())
-        .if_action(CLAIM_EXP, CatIfAction::new(403).unwrap())
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://auth.example.com")
+        .with_audience(vec!["client1".to_string()])
+        .with_expiration(Utc::now() + chrono::Duration::hours(2))
+        .with_version(1)
+        .with_subject("user456")
+        .with_confirmation(jkt.clone())
+        .with_if_action(CLAIM_EXP, CatIfAction::new(403).unwrap());
 
     assert_eq!(token.core.iss, Some("https://auth.example.com".to_string()));
     assert_eq!(token.cat.catv, Some(1));

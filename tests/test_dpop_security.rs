@@ -101,13 +101,11 @@ fn test_dpop_namespace_mismatch_rejected() {
         .namespace_prefix(b"namespace")
         .build();
 
-    let token = CatTokenBuilder::new()
-        .issuer("https://test.com")
-        .single_audience("relay")
-        .moqt_scope(scope)
-        .confirmation(thumbprint)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://test.com")
+        .with_single_audience("relay")
+        .with_moqt_scope(scope)
+        .with_confirmation(thumbprint);
 
     let settings = CatDpopSettings::new().with_window(300).unwrap();
     let validator = cat_token::moqt::MoqtValidator::new().dpop_best_effort(settings);
@@ -148,13 +146,11 @@ fn test_dpop_track_mismatch_rejected() {
         .namespace_exact(b"ns")
         .build();
 
-    let token = CatTokenBuilder::new()
-        .issuer("https://test.com")
-        .single_audience("relay")
-        .moqt_scope(scope)
-        .confirmation(thumbprint)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://test.com")
+        .with_single_audience("relay")
+        .with_moqt_scope(scope)
+        .with_confirmation(thumbprint);
 
     let settings = CatDpopSettings::new().with_window(300).unwrap();
     let validator = cat_token::moqt::MoqtValidator::new().dpop_best_effort(settings);
@@ -187,13 +183,11 @@ fn test_dpop_matching_target_succeeds() {
         .namespace_exact(b"ns")
         .build();
 
-    let token = CatTokenBuilder::new()
-        .issuer("https://test.com")
-        .single_audience("relay")
-        .moqt_scope(scope)
-        .confirmation(thumbprint)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://test.com")
+        .with_single_audience("relay")
+        .with_moqt_scope(scope)
+        .with_confirmation(thumbprint);
 
     let validated = make_validated(&token);
     let mut proof = DpopProof::create_for_moqt(
@@ -316,13 +310,11 @@ fn dpop_bound_token(jkt: Vec<u8>) -> CatToken {
         .action(MoqtAction::Publish)
         .namespace_exact(b"ns")
         .build();
-    CatTokenBuilder::new()
-        .issuer("https://test.com")
-        .single_audience("relay")
-        .moqt_scope(scope)
-        .confirmation(jkt)
-        .build()
-        .unwrap()
+    CatToken::new()
+        .with_issuer("https://test.com")
+        .with_single_audience("relay")
+        .with_moqt_scope(scope)
+        .with_confirmation(jkt)
 }
 
 fn dpop_request(proof: DpopProof) -> cat_token::moqt::RelayRequestContext {
@@ -421,13 +413,11 @@ fn test_authorize_rejects_resource_endpoint_mismatch() {
         .action(MoqtAction::Publish)
         .namespace_exact(b"ns")
         .build();
-    let token = CatTokenBuilder::new()
-        .issuer("https://test.com")
-        .single_audience("relay-b")
-        .moqt_scope(scope)
-        .confirmation(thumbprint)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://test.com")
+        .with_single_audience("relay-b")
+        .with_moqt_scope(scope)
+        .with_confirmation(thumbprint);
     let validated = make_validated(&token);
 
     let mut proof = DpopProof::create_for_moqt(
@@ -474,13 +464,11 @@ fn test_dpop_setup_authorizes_with_empty_namespace_and_track() {
     let scope = cat_token::moqt::MoqtScopeBuilder::new()
         .action(MoqtAction::ClientSetup)
         .build();
-    let token = CatTokenBuilder::new()
-        .issuer("https://test.com")
-        .single_audience("relay")
-        .moqt_scope(scope)
-        .confirmation(thumbprint)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://test.com")
+        .with_single_audience("relay")
+        .with_moqt_scope(scope)
+        .with_confirmation(thumbprint);
     let validated = make_validated(&token);
 
     let mut proof =
@@ -517,13 +505,11 @@ fn test_dpop_nonce_mismatch_rejected() {
         .action(MoqtAction::Publish)
         .namespace_exact(b"ns")
         .build();
-    let token = CatTokenBuilder::new()
-        .issuer("https://test.com")
-        .single_audience("relay")
-        .moqt_scope(scope)
-        .confirmation(thumbprint)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://test.com")
+        .with_single_audience("relay")
+        .with_moqt_scope(scope)
+        .with_confirmation(thumbprint);
     let validated = make_validated(&token);
 
     // Proof carries nonce "server-nonce-a", but the relay's challenge
@@ -569,13 +555,11 @@ fn test_dpop_missing_nonce_rejected_when_expected() {
         .action(MoqtAction::Publish)
         .namespace_exact(b"ns")
         .build();
-    let token = CatTokenBuilder::new()
-        .issuer("https://test.com")
-        .single_audience("relay")
-        .moqt_scope(scope)
-        .confirmation(thumbprint)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://test.com")
+        .with_single_audience("relay")
+        .with_moqt_scope(scope)
+        .with_confirmation(thumbprint);
     let validated = make_validated(&token);
 
     let mut proof = DpopProof::create_for_moqt(
@@ -618,13 +602,11 @@ fn test_dpop_matching_nonce_accepted() {
         .action(MoqtAction::Publish)
         .namespace_exact(b"ns")
         .build();
-    let token = CatTokenBuilder::new()
-        .issuer("https://test.com")
-        .single_audience("relay")
-        .moqt_scope(scope)
-        .confirmation(thumbprint)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://test.com")
+        .with_single_audience("relay")
+        .with_moqt_scope(scope)
+        .with_confirmation(thumbprint);
     let validated = make_validated(&token);
 
     let mut proof = DpopProof::create_for_moqt(
@@ -666,13 +648,11 @@ fn test_dpop_setup_rejects_populated_namespace() {
     let scope = cat_token::moqt::MoqtScopeBuilder::new()
         .action(MoqtAction::ClientSetup)
         .build();
-    let token = CatTokenBuilder::new()
-        .issuer("https://test.com")
-        .single_audience("relay")
-        .moqt_scope(scope)
-        .confirmation(thumbprint)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://test.com")
+        .with_single_audience("relay")
+        .with_moqt_scope(scope)
+        .with_confirmation(thumbprint);
     let validated = make_validated(&token);
 
     let mut proof = DpopProof::create_for_moqt(

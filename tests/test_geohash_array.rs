@@ -47,11 +47,9 @@ fn test_multiple_geohashes_roundtrip() {
 
 #[test]
 fn test_geohash_builder_accumulates() {
-    let token = CatTokenBuilder::new()
-        .geohash("9q8yyk")
-        .geohash("dr5regw")
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_geohash("9q8yyk")
+        .with_geohash("dr5regw");
 
     let hashes = token.cat.geohash.unwrap();
     assert_eq!(hashes.len(), 2);

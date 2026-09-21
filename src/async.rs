@@ -58,6 +58,8 @@ use std::sync::{Arc, Mutex};
 /// should implement `AsyncJtiStore` natively.
 #[async_trait]
 pub trait AsyncJtiStore: Send + Sync {
+    /// Atomically records `key` if absent; see the trait rustdoc for the full
+    /// insert-if-absent, replay, and fail-closed contract.
     async fn check_and_insert(&self, key: String, iat: i64) -> Result<(), CatError>;
 
     /// Self-attestation mirror of [`crate::dpop::JtiStore::is_strict`]. See
@@ -100,6 +102,8 @@ pub trait AsyncJtiStore: Send + Sync {
 /// == false` and let the validator refuse to authorize on that path.
 #[async_trait]
 pub trait AsyncReplayGuard: Send + Sync {
+    /// Records `cti` and returns `Ok(true)` if it was seen before. See the
+    /// trait rustdoc for the atomicity and ordering contract.
     async fn check_and_record(&self, cti: &[u8]) -> Result<bool, CatError>;
 
     /// Self-attestation. See the trait rustdoc for the strict-guard
@@ -122,6 +126,7 @@ pub struct AsyncJtiStoreAdapter {
 }
 
 impl AsyncJtiStoreAdapter {
+    /// Wraps a sync [`crate::JtiStore`] as an [`AsyncJtiStore`].
     #[must_use = "AsyncJtiStoreAdapter::new returns the adapter; discarding it drops the wrapped store"]
     pub fn new(inner: Arc<dyn crate::JtiStore>) -> Self {
         Self { inner }
@@ -422,19 +427,23 @@ impl AsyncInMemoryStrictJtiStore {
         }
     }
 
+    /// Returns the number of recorded entries.
     pub fn len(&self) -> usize {
         self.entries.lock().map(|e| e.len()).unwrap_or(0)
     }
 
+    /// Returns `true` if no entries are recorded.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
+    /// Returns the running count of inserts rejected because the store was at capacity.
     pub fn rejected_over_capacity(&self) -> u64 {
         self.rejected_over_capacity
             .load(std::sync::atomic::Ordering::Relaxed)
     }
 
+    /// Evicts entries older than `max_age_seconds` to bound memory.
     pub fn cleanup(&self, max_age_seconds: i64) {
         use std::time::{SystemTime, UNIX_EPOCH};
         let now = SystemTime::now()

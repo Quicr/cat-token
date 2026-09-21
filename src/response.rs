@@ -1,6 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2022 Quicr
 // SPDX-License-Identifier: BSD-2-Clause
 
+//! HTTP cache-control response policy for CAT-authorized responses.
+//!
+//! Derives `Cache-Control` and related headers from a validated token,
+//! failing closed on control characters that could enable header injection.
+
 use crate::CatError;
 use crate::pipeline::ValidatedToken;
 
@@ -15,15 +20,21 @@ use crate::pipeline::ValidatedToken;
 /// `s-maxage` for shared caches (RFC 9111 §5.2.2.10).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CacheScope {
+    /// Per-principal caching; emits `Cache-Control: private` (the default).
     #[default]
     Private,
+    /// Shared caching; emits `Cache-Control: public` and `s-maxage`. Only
+    /// safe with a principal-segregated cache key.
     Public,
 }
 
+/// Response headers to apply for a CAT-authorized (or rejected) request.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct CatResponsePolicy {
+    /// The `Cache-Control` header value to emit.
     pub cache_control: String,
+    /// Additional response headers as `(name, value)` pairs.
     pub additional_headers: Vec<(String, String)>,
 }
 
@@ -86,6 +97,7 @@ impl CatResponsePolicy {
         })
     }
 
+    /// Returns a minimal `Cache-Control: private` policy with no extra headers.
     pub fn minimal() -> Self {
         Self {
             cache_control: "private".to_string(),
@@ -93,6 +105,7 @@ impl CatResponsePolicy {
         }
     }
 
+    /// Returns a `Cache-Control: no-store` policy for rejected requests.
     pub fn for_rejection() -> Self {
         Self {
             cache_control: "no-store".to_string(),
@@ -118,6 +131,8 @@ pub fn validate_header_value(name: &str, value: &str) -> Result<(), CatError> {
     Ok(())
 }
 
+/// Strips token-bearing query parameters (`cat`, `token`, `access_token`)
+/// from a URI so it is safe to use as a cache key.
 pub fn sanitize_uri_for_cache(uri: &str) -> String {
     crate::token::strip_token_from_uri(uri, &["cat", "token", "access_token"])
 }
@@ -125,7 +140,7 @@ pub fn sanitize_uri_for_cache(uri: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::CatTokenBuilder;
+    use crate::CatToken;
     use chrono::{Duration, Utc};
 
     #[test]
@@ -143,11 +158,9 @@ mod tests {
 
     #[test]
     fn test_token_policy_with_expiry() {
-        let token = CatTokenBuilder::new()
-            .issuer("https://test.com")
-            .expires_at(Utc::now() + Duration::hours(1))
-            .build()
-            .unwrap();
+        let token = CatToken::new()
+            .with_issuer("https://test.com")
+            .with_expiration(Utc::now() + Duration::hours(1));
         let validated = ValidatedToken::from_unchecked(token);
 
         let policy = CatResponsePolicy::for_token(&validated).unwrap();
@@ -158,10 +171,7 @@ mod tests {
     fn test_token_policy_extreme_exp_does_not_panic() {
         // A hostile token with i64::MIN exp would wrap or panic under plain
         // subtraction; verify the checked path emits no-cache instead.
-        let mut token = CatTokenBuilder::new()
-            .issuer("https://test.com")
-            .build()
-            .unwrap();
+        let mut token = CatToken::new().with_issuer("https://test.com");
         token.core.exp = Some(i64::MIN);
         let validated = ValidatedToken::from_unchecked(token);
 
@@ -171,11 +181,9 @@ mod tests {
 
     #[test]
     fn test_token_policy_public_scope_adds_s_maxage() {
-        let token = CatTokenBuilder::new()
-            .issuer("https://test.com")
-            .expires_at(Utc::now() + Duration::hours(1))
-            .build()
-            .unwrap();
+        let token = CatToken::new()
+            .with_issuer("https://test.com")
+            .with_expiration(Utc::now() + Duration::hours(1));
         let validated = ValidatedToken::from_unchecked(token);
 
         let policy =
@@ -194,11 +202,9 @@ mod tests {
 
     #[test]
     fn test_token_policy_default_is_private() {
-        let token = CatTokenBuilder::new()
-            .issuer("https://test.com")
-            .expires_at(Utc::now() + Duration::hours(1))
-            .build()
-            .unwrap();
+        let token = CatToken::new()
+            .with_issuer("https://test.com")
+            .with_expiration(Utc::now() + Duration::hours(1));
         let validated = ValidatedToken::from_unchecked(token);
 
         let policy = CatResponsePolicy::for_token(&validated).unwrap();
@@ -208,10 +214,7 @@ mod tests {
 
     #[test]
     fn test_token_policy_without_expiry() {
-        let token = CatTokenBuilder::new()
-            .issuer("https://test.com")
-            .build()
-            .unwrap();
+        let token = CatToken::new().with_issuer("https://test.com");
         let validated = ValidatedToken::from_unchecked(token);
 
         let policy = CatResponsePolicy::for_token(&validated).unwrap();
@@ -230,11 +233,9 @@ mod tests {
 
     #[test]
     fn test_for_token_rejects_control_char_in_catifdata() {
-        let mut token = CatTokenBuilder::new()
-            .issuer("https://test.com")
-            .interface_data("legitimate")
-            .build()
-            .unwrap();
+        let mut token = CatToken::new()
+            .with_issuer("https://test.com")
+            .with_interface_data("legitimate");
         token
             .informational
             .catifdata

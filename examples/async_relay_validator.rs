@@ -279,17 +279,15 @@ fn create_dpop_token(signing_key: &Es256Algorithm, holder_thumbprint: Vec<u8>) -
         .track_prefix(b"/")
         .build();
 
-    let token = CatTokenBuilder::new()
-        .issuer("https://auth.example.com")
-        .audience(vec!["moqt-relay.example.com".to_string()])
-        .subject("broadcaster123")
-        .issued_at(now)
-        .expires_at(now + Duration::hours(2))
-        .moqt_scope(scope)
-        .moqt_reval(300.0)
-        .confirmation(holder_thumbprint)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://auth.example.com")
+        .with_audience(vec!["moqt-relay.example.com".to_string()])
+        .with_subject("broadcaster123")
+        .with_issued_at(now)
+        .with_expiration(now + Duration::hours(2))
+        .with_moqt_scope(scope)
+        .with_moqt_reval(300.0)
+        .with_confirmation(holder_thumbprint);
 
     encode_token(&token, signing_key).expect("Failed to encode token")
 }

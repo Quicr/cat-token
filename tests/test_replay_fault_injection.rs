@@ -96,19 +96,17 @@ fn build_token_and_proof(dpop_alg: &Es256Algorithm) -> (ValidatedToken, DpopProo
         .namespace_exact(b"ns")
         .track_prefix(b"tr")
         .build();
-    let token = CatTokenBuilder::new()
-        .issuer("https://issuer.example")
-        .single_audience("relay.example")
-        .moqt_scope(scope)
-        .confirmation(dpop_jwk.thumbprint().unwrap())
-        .dpop_settings(
+    let token = CatToken::new()
+        .with_issuer("https://issuer.example")
+        .with_single_audience("relay.example")
+        .with_moqt_scope(scope)
+        .with_confirmation(dpop_jwk.thumbprint().unwrap())
+        .with_dpop_settings(
             CatDpopSettings::new()
                 .with_window(300)
                 .unwrap()
                 .with_jti_processing(true),
-        )
-        .build()
-        .unwrap();
+        );
     let key = HmacSha256Algorithm::new(b"test-key-for-roundtrip-000000000");
     let encoded = encode_token(&token, &key).unwrap();
     let cat_validator =
@@ -197,19 +195,17 @@ fn test_transient_backend_failure_does_not_burn_jti() {
         .namespace_exact(b"ns")
         .track_prefix(b"tr")
         .build();
-    let token = CatTokenBuilder::new()
-        .issuer("https://issuer.example")
-        .single_audience("relay.example")
-        .moqt_scope(scope)
-        .confirmation(dpop_jwk.thumbprint().unwrap())
-        .dpop_settings(
+    let token = CatToken::new()
+        .with_issuer("https://issuer.example")
+        .with_single_audience("relay.example")
+        .with_moqt_scope(scope)
+        .with_confirmation(dpop_jwk.thumbprint().unwrap())
+        .with_dpop_settings(
             CatDpopSettings::new()
                 .with_window(300)
                 .unwrap()
                 .with_jti_processing(true),
-        )
-        .build()
-        .unwrap();
+        );
     let key = HmacSha256Algorithm::new(b"test-key-for-roundtrip-000000000");
     let encoded = encode_token(&token, &key).unwrap();
     let validated = Decoder::with_algorithm(&key)

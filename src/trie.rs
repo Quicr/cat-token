@@ -32,45 +32,59 @@ impl Default for UriMatcherLimits {
 }
 
 impl UriMatcherLimits {
+    /// Create limits with the crate defaults.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Set the maximum accepted regex pattern length in bytes.
     pub fn with_max_regex_pattern_length(mut self, length: usize) -> Self {
         self.max_regex_pattern_length = length;
         self
     }
 
+    /// Set the maximum number of regex patterns per matcher.
     pub fn with_max_regex_patterns(mut self, count: usize) -> Self {
         self.max_regex_patterns = count;
         self
     }
 }
 
+/// A single node in a character-keyed trie.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct TrieNode {
+    /// Child nodes keyed by the next character.
     pub children: HashMap<char, Box<TrieNode>>,
+    /// Whether a stored pattern ends at this node.
     pub is_terminal: bool,
+    /// The value associated with a terminal node, if any.
     pub value: Option<String>,
 }
 
 impl TrieNode {
+    /// Create an empty node with no children.
     pub fn new() -> Self {
         Self::default()
     }
 }
 
+/// Trie of patterns matched against the leading characters of a URI.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct PrefixTrie {
+    /// Root node of the trie.
     pub root: TrieNode,
+    /// Number of stored patterns.
     pub size: usize,
 }
 
 impl PrefixTrie {
+    /// Create an empty prefix trie.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Insert a prefix `pattern` mapping to `value`, replacing any existing
+    /// entry for the same pattern.
     pub fn insert(&mut self, pattern: &str, value: String) {
         let mut current = &mut self.root;
 
@@ -89,6 +103,7 @@ impl PrefixTrie {
         current.value = Some(value);
     }
 
+    /// Return the values of every stored pattern that is a prefix of `text`.
     pub fn search_prefix(&self, text: &str) -> Vec<&str> {
         let mut matches = Vec::new();
         let mut current = &self.root;
@@ -111,6 +126,7 @@ impl PrefixTrie {
         matches
     }
 
+    /// Return `true` if any stored pattern is a prefix of `text`.
     pub fn contains_prefix(&self, text: &str) -> bool {
         let mut current = &self.root;
 
@@ -128,6 +144,7 @@ impl PrefixTrie {
         current.is_terminal
     }
 
+    /// Return every stored pattern as a `String`.
     pub fn get_all_patterns(&self) -> Vec<String> {
         let mut patterns = Vec::new();
         // Use iterative approach with explicit stack to prevent stack overflow
@@ -153,6 +170,7 @@ impl PrefixTrie {
         patterns
     }
 
+    /// Remove `pattern`; returns `true` if it was present.
     pub fn remove(&mut self, pattern: &str) -> bool {
         // Collect chars once for efficient indexing
         let chars: Vec<char> = pattern.chars().collect();
@@ -204,22 +222,29 @@ impl PrefixTrie {
         false
     }
 
+    /// Number of stored patterns.
     pub fn size(&self) -> usize {
         self.size
     }
 }
 
+/// Trie of patterns matched against the trailing characters of a URI.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct SuffixTrie {
+    /// Root node of the trie (keyed on reversed patterns).
     pub root: TrieNode,
+    /// Number of stored patterns.
     pub size: usize,
 }
 
 impl SuffixTrie {
+    /// Create an empty suffix trie.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Insert a suffix `pattern` mapping to `value`, replacing any existing
+    /// entry for the same pattern.
     pub fn insert(&mut self, pattern: &str, value: String) {
         let reversed: String = pattern.chars().rev().collect();
         let mut current = &mut self.root;
@@ -239,6 +264,7 @@ impl SuffixTrie {
         current.value = Some(value);
     }
 
+    /// Return the values of every stored pattern that is a suffix of `text`.
     pub fn search_suffix(&self, text: &str) -> Vec<&str> {
         let mut matches = Vec::new();
         let reversed: String = text.chars().rev().collect();
@@ -261,6 +287,7 @@ impl SuffixTrie {
         matches
     }
 
+    /// Return `true` if any stored pattern is a suffix of `text`.
     pub fn contains_suffix(&self, text: &str) -> bool {
         let reversed: String = text.chars().rev().collect();
         let mut current = &self.root;
@@ -279,6 +306,7 @@ impl SuffixTrie {
         current.is_terminal
     }
 
+    /// Return every stored pattern as a `String`.
     pub fn get_all_patterns(&self) -> Vec<String> {
         let mut patterns = Vec::new();
         // Use iterative approach with explicit stack to prevent stack overflow
@@ -308,6 +336,7 @@ impl SuffixTrie {
             .collect()
     }
 
+    /// Remove `pattern`; returns `true` if it was present.
     pub fn remove(&mut self, pattern: &str) -> bool {
         let reversed: String = pattern.chars().rev().collect();
         let chars: Vec<char> = reversed.chars().collect();
@@ -359,11 +388,14 @@ impl SuffixTrie {
         false
     }
 
+    /// Number of stored patterns.
     pub fn size(&self) -> usize {
         self.size
     }
 }
 
+/// Matches a URI against a set of exact, prefix, suffix, regex, and hash
+/// patterns for `catu`-style claim enforcement.
 pub struct UriMatcher {
     prefix_trie: PrefixTrie,
     suffix_trie: SuffixTrie,
@@ -380,10 +412,12 @@ impl Default for UriMatcher {
 }
 
 impl UriMatcher {
+    /// Create a matcher with default [`UriMatcherLimits`].
     pub fn new() -> Self {
         Self::with_limits(UriMatcherLimits::default())
     }
 
+    /// Create a matcher with explicit regex limits.
     pub fn with_limits(limits: UriMatcherLimits) -> Self {
         Self {
             prefix_trie: PrefixTrie::default(),
@@ -395,6 +429,9 @@ impl UriMatcher {
         }
     }
 
+    /// Add a URI pattern (exact, prefix, suffix, regex, or hash). Regex
+    /// patterns are rejected if they exceed the configured count or length
+    /// limits, guarding against CPU exhaustion.
     pub fn add_pattern(
         &mut self,
         pattern: crate::claims::UriPattern,
@@ -449,6 +486,7 @@ impl UriMatcher {
         Ok(())
     }
 
+    /// Return `true` if `uri` matches any stored pattern.
     pub fn matches(&self, uri: &str) -> bool {
         // Check exact match
         if self.exact_patterns.contains_key(uri) {
@@ -485,6 +523,8 @@ impl UriMatcher {
         false
     }
 
+    /// Return a label (`"exact:"`, `"prefix:"`, `"suffix:"`, `"regex:"`,
+    /// or `"hash:"` prefixed) for every stored pattern that matches `uri`.
     pub fn get_matching_patterns(&self, uri: &str) -> Vec<String> {
         let mut matches = Vec::new();
 

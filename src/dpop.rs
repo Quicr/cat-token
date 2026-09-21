@@ -103,12 +103,17 @@ pub const SUPPORTED_DPOP_COSE_ALGORITHMS: &[i64] =
 // `CWT_CLAIM_ACTX/NONCE/ATH` — are cfg-gated below.
 
 // Protected-header labels (RFC 8152 §3.1 / RFC 9596):
+/// COSE protected-header label for the signature algorithm (`alg`, RFC 8152 §3.1).
 pub const COSE_HDR_ALG: i64 = 1;
+/// COSE protected-header label carrying the embedded `COSE_Key` (RFC 9596).
 pub const COSE_HDR_COSE_KEY: i64 = 4;
+/// COSE protected-header label for the token type (`typ`, RFC 9596).
 pub const COSE_HDR_TYP: i64 = 16;
 
 // CWT base-registry payload labels (RFC 8392):
+/// CWT payload label for the issued-at time (`iat`, RFC 8392).
 pub const CWT_CLAIM_IAT: i64 = 6;
+/// CWT payload label for the token identifier (`cti`, RFC 8392).
 pub const CWT_CLAIM_CTI: i64 = 7;
 
 // CWT-payload labels for the DPoP claims specific to
@@ -137,18 +142,29 @@ pub(crate) const ACTX_TN: i64 = 3;
 pub(crate) const ACTX_PARAMETERS: i64 = 4;
 
 // COSE_Key labels (RFC 8152 §7 + RFC 8230 §4 for RSA):
+/// `COSE_Key` label for the key type (`kty`, RFC 8152 §7).
 pub const COSE_KEY_KTY: i64 = 1;
+/// `COSE_Key` label for the key's algorithm (`alg`, RFC 8152 §7).
 pub const COSE_KEY_ALG: i64 = 3;
+/// `COSE_Key` label for the EC curve (`crv`, RFC 8152 §7).
 pub const COSE_KEY_CRV: i64 = -1;
+/// `COSE_Key` label for the EC public x-coordinate (RFC 8152 §7).
 pub const COSE_KEY_X: i64 = -2;
+/// `COSE_Key` label for the EC public y-coordinate (RFC 8152 §7).
 pub const COSE_KEY_Y: i64 = -3;
+/// `COSE_Key` label for the RSA modulus `n` (RFC 8230 §4).
 pub const COSE_KEY_N: i64 = -1; // RSA n (RFC 8230 §4)
+/// `COSE_Key` label for the RSA public exponent `e` (RFC 8230 §4).
 pub const COSE_KEY_E: i64 = -2; // RSA e (RFC 8230 §4)
 
+/// `COSE_Key` key-type value for EC2 keys (RFC 8152 §13).
 pub const COSE_KTY_EC2: i64 = 2;
+/// `COSE_Key` key-type value for RSA keys (RFC 8230 §4).
 pub const COSE_KTY_RSA: i64 = 3;
+/// `COSE_Key` curve value for the P-256 curve (RFC 8152 §13.1).
 pub const COSE_CRV_P256: i64 = 1;
 
+/// CBOR tag for a `COSE_Sign1` structure (RFC 8152).
 pub const COSE_TAG_SIGN1: u64 = 18;
 
 #[cfg(feature = "moqt")]
@@ -207,6 +223,7 @@ impl DpopHeader {
         (self.typ == DPOP_TYP || self.typ == DPOP_TYP_JWT) && self.is_supported_algorithm()
     }
 
+    /// Return `true` if `alg` is an accepted (asymmetric) DPoP algorithm.
     pub fn is_supported_algorithm(&self) -> bool {
         SUPPORTED_DPOP_COSE_ALGORITHMS.contains(&self.alg)
     }
@@ -232,6 +249,7 @@ pub struct AuthorizationContext {
     /// Fixed to `"moqt"` for this crate; other protocol namespaces (e.g. a
     /// future `"moqt2"`) can be plugged in without changing the wire format.
     pub ctx_type: String,
+    /// MOQT action being authorized (e.g. `SUBSCRIBE`, `PUBLISH`).
     pub action: MoqtAction,
     /// MOQ namespace tuple. Each element is one namespace segment (bytes).
     pub tns: Vec<Vec<u8>>,
@@ -245,6 +263,7 @@ pub struct AuthorizationContext {
 
 #[cfg(feature = "moqt")]
 impl AuthorizationContext {
+    /// Build a `"moqt"` authorization context for the given action, namespace tuple, and track.
     pub fn new_moqt(action: MoqtAction, namespace: Vec<Vec<u8>>, track: &[u8]) -> Self {
         Self {
             ctx_type: "moqt".to_string(),
@@ -255,6 +274,7 @@ impl AuthorizationContext {
         }
     }
 
+    /// Attach an optional `moqt://` resource URI and return the context (builder style).
     pub fn with_resource(mut self, resource: String) -> Self {
         self.resource = Some(resource);
         self
@@ -348,6 +368,7 @@ pub struct DpopPayload {
 
 #[cfg(feature = "moqt")]
 impl DpopPayload {
+    /// Build a payload wrapping `actx` with `iat` set to the current time.
     pub fn new(actx: AuthorizationContext) -> Self {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -362,6 +383,7 @@ impl DpopPayload {
         }
     }
 
+    /// Return `true` if the authorization context is well-formed and `iat` is positive.
     pub fn is_valid(&self) -> bool {
         self.actx.is_valid() && self.iat > 0
     }
@@ -377,6 +399,9 @@ impl DpopPayload {
         self.is_fresh_with_future_tolerance(window_seconds, 5)
     }
 
+    /// Freshness check with an explicit future-clock tolerance: rejects proofs
+    /// older than `window_seconds` or dated more than `future_tolerance_seconds`
+    /// ahead of now.
     pub fn is_fresh_with_future_tolerance(
         &self,
         window_seconds: i64,
@@ -487,6 +512,7 @@ impl std::fmt::Debug for DpopProof {
 
 #[cfg(feature = "moqt")]
 impl DpopProof {
+    /// Assemble a proof from an existing header, payload, and signature (defaults to CWT).
     pub fn new(header: DpopHeader, payload: DpopPayload, signature: Vec<u8>) -> Self {
         Self {
             header,
@@ -517,18 +543,22 @@ impl DpopProof {
             .as_slice())
     }
 
+    /// Borrow the proof's protected header.
     pub fn header(&self) -> &DpopHeader {
         &self.header
     }
 
+    /// Borrow the proof's payload.
     pub fn payload(&self) -> &DpopPayload {
         &self.payload
     }
 
+    /// Borrow the raw signature bytes.
     pub fn signature(&self) -> &[u8] {
         &self.signature
     }
 
+    /// Return the wire format this proof encodes to / was decoded from.
     pub fn wire_format(&self) -> DpopWireFormat {
         self.wire_format
     }
@@ -580,6 +610,7 @@ impl DpopProof {
         self
     }
 
+    /// Set the `actx` resource URI and reset cached signed bytes (builder style).
     pub fn with_resource(mut self, resource: String) -> Self {
         self.payload.actx.resource = Some(resource);
         self.signed_bytes = SignedInput::default();
@@ -607,6 +638,7 @@ impl DpopProof {
         self
     }
 
+    /// Set the anti-replay `nonce` and reset cached signed bytes (builder style).
     pub fn with_nonce(mut self, nonce: String) -> Self {
         self.payload.nonce = Some(nonce);
         self.signed_bytes = SignedInput::default();
@@ -626,6 +658,8 @@ impl DpopProof {
         }
     }
 
+    /// Sign the proof with `algorithm`, caching the covered bytes. Errors if the
+    /// algorithm's COSE id does not match the header `alg`.
     pub fn sign(&mut self, algorithm: &dyn CryptographicAlgorithm) -> Result<(), CatError> {
         if algorithm.algorithm_id() != self.header.alg {
             return Err(CatError::AlgorithmMismatch {
@@ -683,6 +717,8 @@ impl DpopProof {
         }
     }
 
+    /// Non-cryptographic structural check: header/payload validity, freshness,
+    /// and a present signature. Does not verify the signature.
     pub fn is_valid(&self, settings: &CatDpopSettings) -> bool {
         settings.validate_crit().is_ok()
             && self.header.is_valid()
@@ -691,6 +727,7 @@ impl DpopProof {
             && !self.signature.is_empty()
     }
 
+    /// Like [`DpopProof::is_valid`] but returns a descriptive error on the first failing check.
     pub fn validate_with_settings(&self, settings: &CatDpopSettings) -> Result<(), CatError> {
         settings.validate_crit()?;
         if !self.header.is_valid() {
@@ -1861,14 +1898,22 @@ pub const DEFAULT_JTI_SHARDS: usize = 16;
 /// per-JTI TTL) via [`DpopValidator::with_jti_store_strict`].
 #[cfg(feature = "moqt")]
 pub trait JtiStore: Send + Sync {
+    /// Record `key` as seen at `iat`, returning [`CatError::ReplayAttackDetected`]
+    /// if it was already present.
     fn check_and_insert(&self, key: String, iat: i64) -> Result<(), CatError>;
+    /// Number of JTIs currently tracked.
     fn len(&self) -> usize;
+    /// Return `true` if no JTIs are currently tracked.
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
+    /// Drop entries older than `max_age_seconds`. Default is a no-op for stores
+    /// with their own expiry (e.g. TTL-backed backends).
     fn cleanup(&self, max_age_seconds: i64) {
         let _ = max_age_seconds;
     }
+    /// Count of JTIs evicted before their freshness window elapsed; a canary
+    /// for cache pressure. Defaults to `0` for stores that never evict early.
     fn premature_evictions(&self) -> u64 {
         0
     }
@@ -1944,14 +1989,20 @@ pub struct LruJtiStore {
 
 #[cfg(feature = "moqt")]
 impl LruJtiStore {
+    /// Create a store with the given total capacity, [`DEFAULT_JTI_SHARDS`] shards,
+    /// and a 300-second freshness window.
     pub fn new(capacity: usize) -> Self {
         Self::with_shards_and_window(capacity, DEFAULT_JTI_SHARDS, 300)
     }
 
+    /// Create a store with the given total capacity and shard count (300-second window).
     pub fn with_shards(capacity: usize, shards: usize) -> Self {
         Self::with_shards_and_window(capacity, shards, 300)
     }
 
+    /// Create a store with an explicit capacity, shard count, and freshness window.
+    ///
+    /// Capacity is clamped to `[MIN_JTI_CACHE_SIZE, MAX_JTI_CACHE_SIZE]`.
     pub fn with_shards_and_window(
         capacity: usize,
         shards: usize,
@@ -2064,10 +2115,15 @@ impl JtiStore for LruJtiStore {
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 #[must_use = "JtiCacheStats reports replay-store health; dropping it defeats the check"]
+/// Snapshot of replay-store health metrics.
 pub struct JtiCacheStats {
+    /// Number of JTIs currently tracked.
     pub size: usize,
+    /// Configured capacity of the store.
     pub capacity: usize,
+    /// `true` when the store is near capacity and at risk of premature eviction.
     pub under_pressure: bool,
+    /// Cumulative count of JTIs evicted before their freshness window elapsed.
     pub premature_evictions: u64,
 }
 
@@ -2112,6 +2168,10 @@ impl StrictShard {
     }
 }
 
+/// Strict, in-memory, sharded, TTL-backed [`JtiStore`] that never evicts for
+/// capacity — every accepted JTI is retained for its full freshness window
+/// (RFC 9449 §11.1). Suitable for tests and single-node deployments needing
+/// [`JtiStore::is_strict`] to return `true`; see [`InMemoryStrictJtiStore::new`].
 #[cfg(feature = "moqt")]
 pub struct InMemoryStrictJtiStore {
     shards: Vec<StrictShard>,
@@ -2269,6 +2329,8 @@ impl JtiStore for InMemoryStrictJtiStore {
 
 // --- Validator ----------------------------------------------------------
 
+/// Validates DPoP proofs (signature, freshness, binding) and enforces
+/// single-use via a pluggable [`JtiStore`] replay cache.
 #[cfg(feature = "moqt")]
 pub struct DpopValidator {
     settings: CatDpopSettings,
@@ -2600,6 +2662,7 @@ impl DpopValidator {
         Ok(())
     }
 
+    /// Drop replay-cache entries older than the configured JTI expiry window.
     pub fn cleanup_expired_jtis(&self) {
         self.jti_store.cleanup(self.jti_expiry_seconds);
     }
@@ -2653,6 +2716,7 @@ pub fn construct_moqt_uri(
 
 // --- Free helpers --------------------------------------------------------
 
+/// Generate a fresh random JTI (a v4 UUID string) for a new proof.
 pub fn generate_jti() -> String {
     uuid::Uuid::new_v4().to_string()
 }

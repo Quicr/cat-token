@@ -36,17 +36,15 @@ fn authorize(
     v.authorize(token, req)
 }
 
-// --- CatTokenBuilder::expires_in ---
+// --- CatToken::with_expires_in ---
 
 #[test]
 fn test_expires_in_creates_future_expiration() {
     let key = Es256Algorithm::new_with_key_pair().unwrap();
-    let token = CatTokenBuilder::new()
-        .issuer("test")
-        .single_audience("relay")
-        .expires_in(3600)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("test")
+        .with_single_audience("relay")
+        .with_expires_in(3600);
 
     let encoded = encode_token(&token, &key).unwrap();
     let decoded = Decoder::with_algorithm(&key)
@@ -64,12 +62,10 @@ fn test_expires_in_creates_future_expiration() {
 #[test]
 fn test_expires_in_negative_already_expired() {
     let key = Es256Algorithm::new_with_key_pair().unwrap();
-    let token = CatTokenBuilder::new()
-        .issuer("test")
-        .single_audience("relay")
-        .expires_in(-10)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("test")
+        .with_single_audience("relay")
+        .with_expires_in(-10);
 
     let encoded = encode_token(&token, &key).unwrap();
     let decoded = Decoder::with_algorithm(&key)
@@ -86,17 +82,15 @@ fn test_expires_in_negative_already_expired() {
     ));
 }
 
-// --- CatTokenBuilder::single_audience ---
+// --- CatToken::with_single_audience ---
 
 #[test]
 fn test_single_audience_convenience() {
     let key = Es256Algorithm::new_with_key_pair().unwrap();
-    let token = CatTokenBuilder::new()
-        .issuer("issuer")
-        .single_audience("my-relay")
-        .expires_in(3600)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("issuer")
+        .with_single_audience("my-relay")
+        .with_expires_in(3600);
 
     let encoded = encode_token(&token, &key).unwrap();
     let decoded = Decoder::with_algorithm(&key)
@@ -121,13 +115,11 @@ fn test_single_audience_convenience() {
 #[test]
 fn test_decode_token_valid_cose() {
     let key = Es256Algorithm::new_with_key_pair().unwrap();
-    let token = CatTokenBuilder::new()
-        .issuer("test-issuer")
-        .single_audience("relay")
-        .subject("user-1")
-        .expires_in(3600)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("test-issuer")
+        .with_single_audience("relay")
+        .with_subject("user-1")
+        .with_expires_in(3600);
 
     let encoded = encode_token(&token, &key).unwrap();
     let decoded = Decoder::with_algorithm(&key)
@@ -161,11 +153,9 @@ fn test_decode_token_malformed() {
 #[test]
 fn test_decode_token_base64_roundtrip() {
     let key = Es256Algorithm::new_with_key_pair().unwrap();
-    let token = CatTokenBuilder::new()
-        .issuer("b64-test")
-        .expires_in(3600)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("b64-test")
+        .with_expires_in(3600);
 
     let encoded_b64 = encode_token_base64(&token, &key).unwrap();
     let decoded = Decoder::with_algorithm(&key)
@@ -190,11 +180,9 @@ fn test_from_public_key_pem_roundtrip() {
     let verifier = Es256Algorithm::from_public_key_pem(&pem).unwrap();
 
     // Sign with original, verify with PEM-loaded key
-    let token = CatTokenBuilder::new()
-        .issuer("pem-test")
-        .expires_in(3600)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("pem-test")
+        .with_expires_in(3600);
 
     let encoded = encode_token(&token, &key_pair).unwrap();
     let decoded = Decoder::with_algorithm(&verifier)
@@ -219,11 +207,9 @@ fn test_from_public_key_der_roundtrip() {
 
     let verifier = Es256Algorithm::from_public_key_der(der.as_bytes()).unwrap();
 
-    let token = CatTokenBuilder::new()
-        .issuer("der-test")
-        .expires_in(3600)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("der-test")
+        .with_expires_in(3600);
 
     let encoded = encode_token(&token, &key_pair).unwrap();
     let decoded = Decoder::with_algorithm(&verifier)
@@ -257,11 +243,9 @@ fn test_from_private_key_pem_roundtrip() {
     // against the matching public key.
     let loaded = Es256Algorithm::from_private_key_pem(&pem).unwrap();
 
-    let token = CatTokenBuilder::new()
-        .issuer("priv-pem-test")
-        .expires_in(3600)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("priv-pem-test")
+        .with_expires_in(3600);
 
     let encoded = encode_token(&token, &loaded).unwrap();
     let decoded = Decoder::with_algorithm(&verifier)
@@ -289,11 +273,9 @@ fn test_from_private_key_der_roundtrip() {
 
     let loaded = Es256Algorithm::from_private_key_der(der.as_bytes()).unwrap();
 
-    let token = CatTokenBuilder::new()
-        .issuer("priv-der-test")
-        .expires_in(3600)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("priv-der-test")
+        .with_expires_in(3600);
 
     let encoded = encode_token(&token, &loaded).unwrap();
     let decoded = Decoder::with_algorithm(&verifier)
@@ -318,11 +300,9 @@ fn test_verifying_key_reexport() {
     let vk: &Es256VerifyingKey = key_pair.verifying_key();
     let verifier = Es256Algorithm::new_verifier(*vk);
 
-    let token = CatTokenBuilder::new()
-        .issuer("reexport-test")
-        .expires_in(60)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("reexport-test")
+        .with_expires_in(60);
 
     let encoded = encode_token(&token, &key_pair).unwrap();
     assert!(Decoder::with_algorithm(&verifier).decode(&encoded).is_ok());
@@ -338,11 +318,7 @@ fn test_namespace_path_splits_by_slash() {
         .track_prefix(b"")
         .build();
 
-    let token = CatTokenBuilder::new()
-        .issuer("test")
-        .moqt_scope(scope)
-        .build()
-        .unwrap();
+    let token = CatToken::new().with_issuer("test").with_moqt_scope(scope);
 
     let v = moqt_validator_permissive();
 
@@ -379,11 +355,7 @@ fn test_namespace_path_ignores_empty_segments() {
         .track_prefix(b"")
         .build();
 
-    let token = CatTokenBuilder::new()
-        .issuer("test")
-        .moqt_scope(scope)
-        .build()
-        .unwrap();
+    let token = CatToken::new().with_issuer("test").with_moqt_scope(scope);
 
     let v = moqt_validator_permissive();
 
@@ -408,11 +380,7 @@ fn test_namespace_path_allows_additional_trailing_elements() {
         .track_prefix(b"")
         .build();
 
-    let token = CatTokenBuilder::new()
-        .issuer("test")
-        .moqt_scope(scope)
-        .build()
-        .unwrap();
+    let token = CatToken::new().with_issuer("test").with_moqt_scope(scope);
 
     let v = moqt_validator_permissive();
 
@@ -473,15 +441,13 @@ fn test_full_roundtrip_new_apis() {
         .action(MoqtAction::ClientSetup)
         .build();
 
-    let token = CatTokenBuilder::new()
-        .issuer("auth-server")
-        .single_audience("relay-01")
-        .subject("publisher-42")
-        .expires_in(7200)
-        .moqt_scope(scope)
-        .moqt_scope(setup_scope)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("auth-server")
+        .with_single_audience("relay-01")
+        .with_subject("publisher-42")
+        .with_expires_in(7200)
+        .with_moqt_scope(scope)
+        .with_moqt_scope(setup_scope);
 
     // Encode with signing key, decode with PEM-loaded verifier
     let encoded = encode_token(&token, &key_pair).unwrap();

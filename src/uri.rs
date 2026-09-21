@@ -1,31 +1,65 @@
-// URI normalization per RFC 3986 §6.2.2-6.2.3 and RFC 9110 §4.2.3.
-//
-// This module provides a single URI parser used across the crate. The parser
-// is fail-closed for the strict CAT profile: userinfo (`user:pass@`) and
-// fragments (`#frag`) are rejected because both are stripped or ignored by
-// most HTTP servers/relays before authorization, creating a divergence between
-// what the token grants and what the request actually names.
+//! URI normalization per RFC 3986 §6.2.2-6.2.3 and RFC 9110 §4.2.3.
+//!
+//! This module provides a single URI parser used across the crate. The parser
+//! is fail-closed for the strict CAT profile: userinfo (`user:pass@`) and
+//! fragments (`#frag`) are rejected because both are stripped or ignored by
+//! most HTTP servers/relays before authorization, creating a divergence between
+//! what the token grants and what the request actually names.
 
 use crate::CatError;
 use crate::claims::*;
 
+/// Parsed components of a normalized URI.
+///
+/// The struct owns a single normalized-URI buffer and exposes each component
+/// as a borrowed `&str` slice into it, so decomposition costs one allocation
+/// (the normalized string) rather than one per component — the hot
+/// `catu` enforcement path runs this per request.
 #[derive(Debug, Clone, Default)]
 pub struct UriComponents {
-    pub scheme: String,
-    pub host: String,
-    pub port: String,
-    pub path: String,
-    pub query: String,
+    raw: String,
+    scheme: std::ops::Range<usize>,
+    host: std::ops::Range<usize>,
+    port: std::ops::Range<usize>,
+    path: std::ops::Range<usize>,
+    query: std::ops::Range<usize>,
 }
 
 impl UriComponents {
+    /// The URI scheme (e.g. `https`), lowercased, without the `://`.
+    pub fn scheme(&self) -> &str {
+        &self.raw[self.scheme.clone()]
+    }
+
+    /// The host authority, lowercased. IPv6 literals retain their brackets.
+    pub fn host(&self) -> &str {
+        &self.raw[self.host.clone()]
+    }
+
+    /// The port, or an empty string when absent or a scheme default.
+    pub fn port(&self) -> &str {
+        &self.raw[self.port.clone()]
+    }
+
+    /// The path, always beginning with `/` for an authority-bearing URI.
+    pub fn path(&self) -> &str {
+        &self.raw[self.path.clone()]
+    }
+
+    /// The query string without the leading `?`, or empty when absent.
+    pub fn query(&self) -> &str {
+        &self.raw[self.query.clone()]
+    }
+
+    /// Look up a URI component by its CTA-5007-B `catu` component key
+    /// (`URI_COMPONENT_*`). Returns an empty string for an unknown key.
     pub fn component(&self, component: i64) -> &str {
         match component {
-            URI_COMPONENT_SCHEME => &self.scheme,
-            URI_COMPONENT_HOST => &self.host,
-            URI_COMPONENT_PORT => &self.port,
-            URI_COMPONENT_PATH => &self.path,
-            URI_COMPONENT_QUERY => &self.query,
+            URI_COMPONENT_SCHEME => self.scheme(),
+            URI_COMPONENT_HOST => self.host(),
+            URI_COMPONENT_PORT => self.port(),
+            URI_COMPONENT_PATH => self.path(),
+            URI_COMPONENT_QUERY => self.query(),
             URI_COMPONENT_PARENT_PATH => self.parent_path_str(),
             URI_COMPONENT_FILENAME => self.filename_str(),
             URI_COMPONENT_STEM => self.stem_str(),
@@ -35,18 +69,20 @@ impl UriComponents {
     }
 
     fn parent_path_str(&self) -> &str {
-        if let Some(pos) = self.path.rfind('/') {
-            &self.path[..pos + 1]
+        let path = self.path();
+        if let Some(pos) = path.rfind('/') {
+            &path[..pos + 1]
         } else {
             ""
         }
     }
 
     fn filename_str(&self) -> &str {
-        if let Some(pos) = self.path.rfind('/') {
-            &self.path[pos + 1..]
+        let path = self.path();
+        if let Some(pos) = path.rfind('/') {
+            &path[pos + 1..]
         } else {
-            &self.path
+            path
         }
     }
 
@@ -94,7 +130,6 @@ fn ensure_ascii(uri: &str) -> Result<(), CatError> {
 
 fn parse_uri(uri: &str) -> Result<UriComponents, CatError> {
     ensure_ascii(uri)?;
-    let mut components = UriComponents::default();
 
     if uri.contains('#') {
         return Err(CatError::InvalidClaimValue(
@@ -102,20 +137,33 @@ fn parse_uri(uri: &str) -> Result<UriComponents, CatError> {
         ));
     }
 
-    let mut rest = uri;
+    // Compute every component as a byte range into `uri`, then move `uri`
+    // into the returned struct. No per-component allocation.
+    let empty = 0..0;
+    let mut scheme = empty.clone();
+    let host;
+    let mut port = empty.clone();
+    let path;
+    let mut query = empty.clone();
 
-    if let Some(pos) = rest.find("://") {
-        components.scheme = rest[..pos].to_string();
-        rest = &rest[pos + 3..];
+    let mut cursor = 0usize;
+
+    if let Some(pos) = uri.find("://") {
+        scheme = 0..pos;
+        cursor = pos + 3;
     }
 
-    let (authority, path_and_query) = if let Some(pos) = rest.find('/') {
-        (&rest[..pos], &rest[pos..])
+    let rest = &uri[cursor..];
+    let (authority_range, pq_range) = if let Some(pos) = rest.find('/') {
+        (cursor..cursor + pos, cursor + pos..uri.len())
     } else if let Some(pos) = rest.find('?') {
-        (&rest[..pos], &rest[pos..])
+        (cursor..cursor + pos, cursor + pos..uri.len())
     } else {
-        (rest, "")
+        (cursor..uri.len(), uri.len()..uri.len())
     };
+
+    let authority = &uri[authority_range.clone()];
+    let abase = authority_range.start;
 
     if authority.contains('@') {
         return Err(CatError::InvalidClaimValue(
@@ -125,37 +173,47 @@ fn parse_uri(uri: &str) -> Result<UriComponents, CatError> {
 
     if authority.starts_with('[') {
         if let Some(bracket_end) = authority.find(']') {
-            components.host = authority[..bracket_end + 1].to_string();
+            host = abase..abase + bracket_end + 1;
             let after_bracket = &authority[bracket_end + 1..];
             if let Some(port_str) = after_bracket.strip_prefix(':')
                 && !port_str.is_empty()
                 && port_str.chars().all(|c| c.is_ascii_digit())
             {
-                components.port = port_str.to_string();
+                let port_start = abase + bracket_end + 2;
+                port = port_start..port_start + port_str.len();
             }
         } else {
-            components.host = authority.to_string();
+            host = authority_range.clone();
         }
     } else if let Some(pos) = authority.rfind(':') {
         let potential_port = &authority[pos + 1..];
         if potential_port.chars().all(|c| c.is_ascii_digit()) && !potential_port.is_empty() {
-            components.host = authority[..pos].to_string();
-            components.port = potential_port.to_string();
+            host = abase..abase + pos;
+            port = abase + pos + 1..authority_range.end;
         } else {
-            components.host = authority.to_string();
+            host = authority_range.clone();
         }
     } else {
-        components.host = authority.to_string();
+        host = authority_range.clone();
     }
 
+    let path_and_query = &uri[pq_range.clone()];
+    let pqbase = pq_range.start;
     if let Some(pos) = path_and_query.find('?') {
-        components.path = path_and_query[..pos].to_string();
-        components.query = path_and_query[pos + 1..].to_string();
+        path = pqbase..pqbase + pos;
+        query = pqbase + pos + 1..pq_range.end;
     } else {
-        components.path = path_and_query.to_string();
+        path = pq_range.clone();
     }
 
-    Ok(components)
+    Ok(UriComponents {
+        raw: uri.to_string(),
+        scheme,
+        host,
+        port,
+        path,
+        query,
+    })
 }
 
 /// Normalize a URI per RFC 3986 §6.2.2-6.2.3. Rejects userinfo and fragments
@@ -440,11 +498,11 @@ mod tests {
     #[test]
     fn test_decompose() {
         let c = decompose_uri("https://example.com:8080/api/v1/resource.json?key=value").unwrap();
-        assert_eq!(c.scheme, "https");
-        assert_eq!(c.host, "example.com");
-        assert_eq!(c.port, "8080");
-        assert_eq!(c.path, "/api/v1/resource.json");
-        assert_eq!(c.query, "key=value");
+        assert_eq!(c.scheme(), "https");
+        assert_eq!(c.host(), "example.com");
+        assert_eq!(c.port(), "8080");
+        assert_eq!(c.path(), "/api/v1/resource.json");
+        assert_eq!(c.query(), "key=value");
     }
 
     #[test]
@@ -480,9 +538,9 @@ mod tests {
             "https://[::1]/api"
         );
         let c = decompose_uri("https://[::1]/api").unwrap();
-        assert_eq!(c.host, "[::1]");
-        assert!(c.port.is_empty());
-        assert_eq!(c.path, "/api");
+        assert_eq!(c.host(), "[::1]");
+        assert!(c.port().is_empty());
+        assert_eq!(c.path(), "/api");
     }
 
     #[test]
@@ -492,8 +550,8 @@ mod tests {
             "https://[2001:db8::1]:8080/"
         );
         let c = decompose_uri("https://[2001:DB8::1]:8080/x").unwrap();
-        assert_eq!(c.host, "[2001:db8::1]");
-        assert_eq!(c.port, "8080");
+        assert_eq!(c.host(), "[2001:db8::1]");
+        assert_eq!(c.port(), "8080");
     }
 
     #[test]
@@ -526,8 +584,8 @@ mod tests {
     #[test]
     fn test_ipv6_zone_survives_decompose() {
         let c = decompose_uri("https://[fe80::1%25eth0]:8443/x").unwrap();
-        assert_eq!(c.host, "[fe80::1%25eth0]");
-        assert_eq!(c.port, "8443");
-        assert_eq!(c.path, "/x");
+        assert_eq!(c.host(), "[fe80::1%25eth0]");
+        assert_eq!(c.port(), "8443");
+        assert_eq!(c.path(), "/x");
     }
 }

@@ -1,6 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2022 Quicr
 // SPDX-License-Identifier: BSD-2-Clause
 
+#![deny(missing_docs)]
+#![cfg_attr(docsrs, feature(doc_auto_cfg))]
+
 //! # cat-token
 //!
 //! CAT-4-MOQT strict fail-closed profile of CTA-5007-B.
@@ -107,8 +110,8 @@ pub use crate::structured_header::{
     get_sf_dictionary_member, normalize_sf_value, parse_sf_dictionary, parse_sf_item, parse_sf_list,
 };
 pub use crate::token::{
-    CatPorBlockList, CatTokenBuilder, CatTokenValidator, Decoder, MAX_CLOCK_SKEW_TOLERANCE_SECS,
-    ReplayGuard, encode_token, encode_token_base64,
+    CatPorBlockList, CatTokenValidator, Decoder, MAX_CLOCK_SKEW_TOLERANCE_SECS, ReplayGuard,
+    encode_token, encode_token_base64,
 };
 pub use crate::x509::{
     PathValidator, VerifiedPeerCertificate, authenticate_and_pin, check_cattpk_pin,
@@ -126,3 +129,24 @@ pub use r#async::{
     AsyncInMemoryStrictJtiStore, AsyncJtiStore, AsyncJtiStoreAdapter, AsyncMoqtValidator,
     AsyncReplayGuard,
 };
+
+/// Re-exports of third-party types that appear in this crate's public API.
+///
+/// Several public signatures accept or return types owned by upstream crates
+/// (`chrono` timestamps on the token builder, `p256`/`rsa` key types on the
+/// algorithm and JWK constructors). Those types are re-exported here so the
+/// version contract is explicit and callers can name them without adding a
+/// direct dependency pinned to this crate's exact upstream versions. If you
+/// call e.g. [`CatToken::with_expiration`] or
+/// [`Es256Algorithm::from_key_pair`], prefer these re-exports over depending
+/// on `chrono`/`p256`/`rsa` yourself.
+pub mod reexports {
+    /// `chrono` types used by the token builder's timestamp setters.
+    pub use chrono::{DateTime, Utc};
+    /// `p256` ECDSA key types used by [`crate::Es256Algorithm`] and
+    /// [`crate::Jwk`].
+    pub use p256::ecdsa::{SigningKey as Es256SigningKey, VerifyingKey as Es256VerifyingKey};
+    /// `rsa` public-key type used by [`crate::Ps256Algorithm`] and
+    /// [`crate::Jwk`].
+    pub use rsa::RsaPublicKey;
+}

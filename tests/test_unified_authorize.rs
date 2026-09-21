@@ -58,12 +58,10 @@ fn scope() -> MoqtScope {
 }
 
 fn baseline_token() -> CatToken {
-    CatTokenBuilder::new()
-        .issuer("https://issuer.example")
-        .single_audience("relay")
-        .moqt_scope(scope())
-        .build()
-        .unwrap()
+    CatToken::new()
+        .with_issuer("https://issuer.example")
+        .with_single_audience("relay")
+        .with_moqt_scope(scope())
 }
 
 fn baseline_ctx() -> RelayRequestContext {
@@ -97,13 +95,11 @@ fn test_authorize_rejects_unknown_catv() {
     // pipeline must reject rather than silently accept. `CatTokenValidator`
     // catches this during validation, so the token never reaches
     // `MoqtValidator::authorize` — verify the earlier gate here.
-    let token = CatTokenBuilder::new()
-        .issuer("https://issuer.example")
-        .single_audience("relay")
-        .moqt_scope(scope())
-        .version(2)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://issuer.example")
+        .with_single_audience("relay")
+        .with_moqt_scope(scope())
+        .with_version(2);
     let key = HmacSha256Algorithm::new(b"test-key-for-roundtrip-000000000");
     let encoded = encode_token(&token, &key).unwrap();
     let validator =
@@ -123,13 +119,11 @@ fn test_authorize_enforces_catu_match() {
         component: URI_COMPONENT_HOST,
         matches: vec![MatchValue::Exact("api.example.com".to_string())],
     }];
-    let token = CatTokenBuilder::new()
-        .issuer("https://issuer.example")
-        .single_audience("relay")
-        .moqt_scope(scope())
-        .uri_match_rules(rules)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://issuer.example")
+        .with_single_audience("relay")
+        .with_moqt_scope(scope())
+        .with_uri_match_rules(rules);
 
     let ctx = baseline_ctx().with_request_uri("https://api.example.com/v1/stream");
     ok(&token, &ctx).expect("matching URI must authorize");
@@ -141,13 +135,11 @@ fn test_authorize_rejects_catu_mismatch() {
         component: URI_COMPONENT_HOST,
         matches: vec![MatchValue::Exact("api.example.com".to_string())],
     }];
-    let token = CatTokenBuilder::new()
-        .issuer("https://issuer.example")
-        .single_audience("relay")
-        .moqt_scope(scope())
-        .uri_match_rules(rules)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://issuer.example")
+        .with_single_audience("relay")
+        .with_moqt_scope(scope())
+        .with_uri_match_rules(rules);
 
     let ctx = baseline_ctx().with_request_uri("https://evil.example/v1/stream");
     let err = ok(&token, &ctx).unwrap_err();
@@ -160,13 +152,11 @@ fn test_authorize_rejects_catu_without_uri_context() {
         component: URI_COMPONENT_HOST,
         matches: vec![MatchValue::Exact("api.example.com".to_string())],
     }];
-    let token = CatTokenBuilder::new()
-        .issuer("https://issuer.example")
-        .single_audience("relay")
-        .moqt_scope(scope())
-        .uri_match_rules(rules)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://issuer.example")
+        .with_single_audience("relay")
+        .with_moqt_scope(scope())
+        .with_uri_match_rules(rules);
     let err = ok(&token, &baseline_ctx()).unwrap_err();
     assert!(matches!(
         err,
@@ -372,13 +362,11 @@ fn test_authorize_catreplay_missing_cti_rejects() {
 
 #[test]
 fn test_authorize_returns_catr_renewal() {
-    let token = CatTokenBuilder::new()
-        .issuer("https://issuer.example")
-        .single_audience("relay")
-        .moqt_scope(scope())
-        .renewal(CatRenewal::automatic().with_expadd(600.0).unwrap())
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://issuer.example")
+        .with_single_audience("relay")
+        .with_moqt_scope(scope())
+        .with_renewal(CatRenewal::automatic().with_expadd(600.0).unwrap());
 
     let result = ok(&token, &baseline_ctx()).expect("baseline authorizes");
     assert!(result.renewal().is_some());
@@ -389,12 +377,10 @@ fn test_authorize_returns_catr_renewal() {
 
 #[test]
 fn test_catif_action_lookup() {
-    let token = CatTokenBuilder::new()
-        .issuer("https://issuer.example")
-        .if_action(CLAIM_EXP, CatIfAction::new(401).unwrap())
-        .if_action(CLAIM_AUD, CatIfAction::new(403).unwrap())
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://issuer.example")
+        .with_if_action(CLAIM_EXP, CatIfAction::new(401).unwrap())
+        .with_if_action(CLAIM_AUD, CatIfAction::new(403).unwrap());
 
     assert_eq!(
         MoqtValidator::catif_action_for(&token, CLAIM_EXP)
@@ -415,12 +401,10 @@ fn test_catif_action_lookup() {
 
 #[test]
 fn test_authorize_rejects_audience_mismatch() {
-    let token = CatTokenBuilder::new()
-        .issuer("https://issuer.example")
-        .single_audience("other-relay")
-        .moqt_scope(scope())
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://issuer.example")
+        .with_single_audience("other-relay")
+        .with_moqt_scope(scope());
 
     let err = ok(&token, &baseline_ctx()).unwrap_err();
     assert!(matches!(err, CatError::InvalidAudience));
@@ -435,12 +419,10 @@ fn test_authorize_rejects_scope_mismatch() {
         .namespace_exact(b"ns")
         .track_prefix(b"track")
         .build();
-    let token = CatTokenBuilder::new()
-        .issuer("https://issuer.example")
-        .single_audience("relay")
-        .moqt_scope(publish_scope)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://issuer.example")
+        .with_single_audience("relay")
+        .with_moqt_scope(publish_scope);
 
     // ctx asks for Subscribe, token only allows Publish.
     let err = ok(&token, &baseline_ctx()).unwrap_err();
@@ -468,12 +450,10 @@ fn test_replay_not_committed_when_scope_fails() {
         .track_prefix(b"track")
         .build();
 
-    let mut token = CatTokenBuilder::new()
-        .issuer("https://issuer.example")
-        .single_audience("relay")
-        .moqt_scope(publish_scope)
-        .build()
-        .unwrap();
+    let mut token = CatToken::new()
+        .with_issuer("https://issuer.example")
+        .with_single_audience("relay")
+        .with_moqt_scope(publish_scope);
     token.core.cti = Some(b"cti-scope-fail".to_vec());
     token.cat.catreplay = Some(ReplayProtection::Prohibited);
 
@@ -488,12 +468,10 @@ fn test_replay_not_committed_when_scope_fails() {
     // Now the legitimate follow-up request with a scope-compatible token
     // must still succeed — the failed attempt above must not have burned
     // the cti.
-    let mut good_token = CatTokenBuilder::new()
-        .issuer("https://issuer.example")
-        .single_audience("relay")
-        .moqt_scope(subscribe_scope)
-        .build()
-        .unwrap();
+    let mut good_token = CatToken::new()
+        .with_issuer("https://issuer.example")
+        .with_single_audience("relay")
+        .with_moqt_scope(subscribe_scope);
     good_token.core.cti = Some(b"cti-scope-fail".to_vec());
     good_token.cat.catreplay = Some(ReplayProtection::Prohibited);
 
@@ -506,12 +484,10 @@ fn test_replay_not_committed_when_scope_fails() {
 fn test_replay_not_committed_when_audience_fails() {
     // Same cti reused across two attempts, first with wrong audience, second
     // with correct audience. The first must fail without consuming the cti.
-    let mut wrong_aud = CatTokenBuilder::new()
-        .issuer("https://issuer.example")
-        .single_audience("other-relay")
-        .moqt_scope(scope())
-        .build()
-        .unwrap();
+    let mut wrong_aud = CatToken::new()
+        .with_issuer("https://issuer.example")
+        .with_single_audience("other-relay")
+        .with_moqt_scope(scope());
     wrong_aud.core.cti = Some(b"cti-aud-fail".to_vec());
     wrong_aud.cat.catreplay = Some(ReplayProtection::Prohibited);
 
@@ -521,12 +497,10 @@ fn test_replay_not_committed_when_audience_fails() {
         .unwrap_err();
     assert!(matches!(err, CatError::InvalidAudience));
 
-    let mut right_aud = CatTokenBuilder::new()
-        .issuer("https://issuer.example")
-        .single_audience("relay")
-        .moqt_scope(scope())
-        .build()
-        .unwrap();
+    let mut right_aud = CatToken::new()
+        .with_issuer("https://issuer.example")
+        .with_single_audience("relay")
+        .with_moqt_scope(scope());
     right_aud.core.cti = Some(b"cti-aud-fail".to_vec());
     right_aud.cat.catreplay = Some(ReplayProtection::Prohibited);
 
@@ -579,12 +553,10 @@ fn test_transient_cti_commit_failure_leaves_no_state_for_retry() {
     // token succeeds and treats the cti as fresh — because the first
     // attempt never actually consumed it (the store errored before
     // recording).
-    let mut token = CatTokenBuilder::new()
-        .issuer("https://issuer.example")
-        .single_audience("relay")
-        .moqt_scope(scope())
-        .build()
-        .unwrap();
+    let mut token = CatToken::new()
+        .with_issuer("https://issuer.example")
+        .with_single_audience("relay")
+        .with_moqt_scope(scope());
     token.core.cti = Some(b"cti-retry".to_vec());
     token.cat.catreplay = Some(ReplayProtection::Prohibited);
 

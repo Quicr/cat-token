@@ -89,6 +89,9 @@ impl fmt::Debug for SafeDisplay<'_> {
     }
 }
 
+/// Every failure the authorize pipeline can emit. See the [module
+/// docs](crate::error) for the malformed / denied / operator category
+/// split and log-injection escaping guarantees.
 #[derive(Error, Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum CatError {
@@ -116,15 +119,19 @@ pub enum CatError {
     #[error("Token signature verification failed")]
     SignatureVerificationFailed,
 
+    /// The token's `exp` claim is at or before the current time.
     #[error("Token has expired")]
     TokenExpired,
 
+    /// The token's `nbf` (not-before) claim is in the future.
     #[error("Token is not yet valid (nbf)")]
     TokenNotYetValid,
 
+    /// The token's `aud` claim does not include the expected audience.
     #[error("Invalid audience")]
     InvalidAudience,
 
+    /// The token's `iss` claim does not match the expected issuer.
     #[error("Invalid issuer")]
     InvalidIssuer,
 
@@ -154,7 +161,12 @@ pub enum CatError {
     /// `detail` may echo attacker-controlled bytes; it is
     /// `SafeDisplay`-sanitized before rendering.
     #[error("Malformed claim {claim}: {}", SafeDisplay(.detail))]
-    MalformedClaim { claim: &'static str, detail: String },
+    MalformedClaim {
+        /// Static name of the offending claim (e.g. `"catu"`).
+        claim: &'static str,
+        /// Human-readable detail; `SafeDisplay`-sanitized on render.
+        detail: String,
+    },
 
     /// The request/peer does not satisfy a well-formed claim (e.g.,
     /// `catu` prefix mismatch, `cath` header rule not met, `catnip`
@@ -165,7 +177,12 @@ pub enum CatError {
     /// `detail` may echo attacker-controlled bytes; it is
     /// `SafeDisplay`-sanitized before rendering.
     #[error("Claim {claim} enforcement failed: {}", SafeDisplay(.detail))]
-    ClaimEnforcementFailed { claim: &'static str, detail: String },
+    ClaimEnforcementFailed {
+        /// Static name of the claim the request failed to satisfy.
+        claim: &'static str,
+        /// Human-readable detail; `SafeDisplay`-sanitized on render.
+        detail: String,
+    },
 
     /// The token asserts a claim that requires a piece of request
     /// context (peer IP, ALPN, URI, request method, header set, block
@@ -174,29 +191,45 @@ pub enum CatError {
     /// input was absent, not because the token was malformed.
     #[error("Token claim {claim} requires request context {field}, but it was not provided")]
     MissingRelayContext {
+        /// Static name of the claim that required the missing context.
         claim: &'static str,
+        /// Name of the request-context field the integrator did not supply.
         field: &'static str,
     },
 
+    /// The token's `alg` identifier is not one this crate can verify.
     #[error("Unsupported algorithm: {}", SafeDisplay(.0))]
     UnsupportedAlgorithm(String),
 
+    /// The resolver's expected `alg` disagrees with the token's `alg`.
     #[error("Algorithm mismatch: expected {expected}, found {found}")]
-    AlgorithmMismatch { expected: i64, found: i64 },
+    AlgorithmMismatch {
+        /// COSE algorithm identifier the resolver expected.
+        expected: i64,
+        /// COSE algorithm identifier found in the token header.
+        found: i64,
+    },
 
     /// The token's protected-header `alg` is not in the admission
     /// policy's allow-list. Distinct from
     /// [`CatError::AlgorithmMismatch`], which signals a resolver-vs-
     /// token disagreement on a single expected `alg`.
     #[error("Algorithm {found} not permitted by admission policy (allowed: {allowed:?})")]
-    AlgorithmNotAllowed { found: i64, allowed: Vec<i64> },
+    AlgorithmNotAllowed {
+        /// COSE algorithm identifier found in the token header.
+        found: i64,
+        /// Sorted allow-list of permitted algorithm identifiers.
+        allowed: Vec<i64>,
+    },
 
     /// The token's protected-header `kid` is not in the admission
     /// policy's allow-list, or the policy requires a `kid` and none
     /// was present. `found` is `None` when the header omitted `kid`.
     #[error("Key ID {found:?} not permitted by admission policy (allowed: {allowed:?})")]
     KidNotAllowed {
+        /// `kid` found in the header, or `None` if it was omitted.
         found: Option<Vec<u8>>,
+        /// Sorted allow-list of permitted `kid` values.
         allowed: Vec<Vec<u8>>,
     },
 
@@ -224,12 +257,16 @@ pub enum CatError {
     #[error("Configuration refused: {}", SafeDisplay(.0))]
     ConfigurationRefused(String),
 
+    /// A geographic claim (`catgeo`/`catnip`) was not satisfied by the
+    /// request's resolved location or peer address.
     #[error("Geographic validation failed: {}", SafeDisplay(.0))]
     GeographicValidationFailed(String),
 
+    /// The replay guard has already seen this token's `cti`/`jti`.
     #[error("Replay attack detected")]
     ReplayAttackDetected,
 
+    /// The requested MOQT action is not permitted by the token's scope.
     #[error("MOQT action not authorized: {}", SafeDisplay(.0))]
     MoqtActionNotAuthorized(String),
 
@@ -238,27 +275,37 @@ pub enum CatError {
     #[error("DPoP validation failed: {}", SafeDisplay(.0))]
     DpopValidationFailed(String),
 
+    /// The DPoP proof is not correctly bound to the presented token.
     #[error("Invalid DPoP binding")]
     InvalidDpopBinding,
 
+    /// The token's `catr` policy requires revalidation before use.
     #[error("Token revalidation required")]
     RevalidationRequired,
 
+    /// The requested revalidation interval is below the policy minimum.
     #[error("Revalidation interval too short")]
     RevalidationIntervalTooShort,
 
+    /// The token's `catpor` probabilistic-rejection roll denied this use.
     #[error("Token rejected by probability of rejection")]
     RejectedByProbability,
 
+    /// Peer-certificate validation for a certificate-bound claim failed.
     #[error("Certificate validation failed: {}", SafeDisplay(.0))]
     CertificateValidationFailed(String),
 
+    /// The DPoP proof uses an algorithm this crate does not accept.
     #[error("DPoP algorithm not supported: {}", SafeDisplay(.0))]
     DpopAlgorithmNotSupported(String),
 
+    /// The DPoP proof's embedded JWK thumbprint does not match the
+    /// token's confirmation (`cnf`) key.
     #[error("DPoP key mismatch: embedded JWK thumbprint does not match expected")]
     DpopKeyMismatch,
 
+    /// A privacy-sensitive claim was carried in a token that was not
+    /// encrypted, violating the profile's confidentiality requirement.
     #[error("Privacy-sensitive claim {0} requires encryption")]
     UnencryptedPrivacyClaim(String),
 }

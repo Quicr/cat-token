@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2022 Quicr
 // SPDX-License-Identifier: BSD-2-Clause
 
+//! `cat-cli` — command-line tool for issuing and inspecting CAT tokens.
+
 use cat_token::*;
 use chrono::{Duration, Utc};
 use p256::ecdsa::SigningKey;
@@ -203,14 +205,13 @@ fn generate_moqt_token(args: &[String]) -> Result<(), Box<dyn std::error::Error>
         .action(MoqtAction::ClientSetup)
         .build();
 
-    let token = CatTokenBuilder::new()
-        .issuer(&issuer)
-        .single_audience(&audience)
-        .subject(&subject)
-        .expires_in(expires)
-        .moqt_scope(scope)
-        .moqt_scope(setup_scope)
-        .build()?;
+    let token = CatToken::new()
+        .with_issuer(&issuer)
+        .with_single_audience(&audience)
+        .with_subject(&subject)
+        .with_expires_in(expires)
+        .with_moqt_scope(scope)
+        .with_moqt_scope(setup_scope);
 
     let encoded = encode_token_base64(&token, &algorithm)?;
     println!("{encoded}");
@@ -222,16 +223,14 @@ fn create_sample_token() -> CatToken {
     let now = Utc::now();
     let exp = now + Duration::hours(1);
 
-    CatTokenBuilder::new()
-        .issuer("https://example.com")
-        .audience(vec!["https://api.example.com".to_string()])
-        .expires_at(exp)
-        .not_before(now)
-        .cwt_id(uuid::Uuid::new_v4().as_bytes().to_vec())
-        .version(1)
-        .replay_protection(cat_token::ReplayProtection::Prohibited)
-        .geo_coordinate(37.7749, -122.4194, 100)
-        .geohash("9q8yy")
-        .build()
-        .unwrap()
+    CatToken::new()
+        .with_issuer("https://example.com")
+        .with_audience(vec!["https://api.example.com".to_string()])
+        .with_expiration(exp)
+        .with_not_before(now)
+        .with_cwt_id(uuid::Uuid::new_v4().as_bytes().to_vec())
+        .with_version(1)
+        .with_replay_protection(cat_token::ReplayProtection::Prohibited)
+        .with_geo_coordinate(37.7749, -122.4194, 100)
+        .with_geohash("9q8yy")
 }

@@ -20,11 +20,9 @@ fn test_encoded_token_uses_label_323() {
     let alg = HmacSha256Algorithm::from_secret_key(&key);
 
     let jkt_bytes = vec![0xAA; 32];
-    let token = CatTokenBuilder::new()
-        .issuer("https://example.com")
-        .confirmation(jkt_bytes.clone())
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://example.com")
+        .with_confirmation(jkt_bytes.clone());
 
     let cose_bytes = encode_token(&token, &alg).unwrap();
 
@@ -131,11 +129,9 @@ fn test_roundtrip_with_label_323() {
     let alg = HmacSha256Algorithm::from_secret_key(&key);
 
     let jkt_bytes = vec![0xCC; 32];
-    let token = CatTokenBuilder::new()
-        .issuer("https://example.com")
-        .confirmation(jkt_bytes.clone())
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://example.com")
+        .with_confirmation(jkt_bytes.clone());
 
     let encoded = encode_token(&token, &alg).unwrap();
     let decoded = Decoder::with_algorithm(&alg)

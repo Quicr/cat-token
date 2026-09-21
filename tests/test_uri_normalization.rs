@@ -116,11 +116,11 @@ fn test_normalize_preserves_query() {
 #[test]
 fn test_decompose_full_uri() {
     let c = decompose_uri("https://example.com:8080/api/v1/resource.json?key=value").unwrap();
-    assert_eq!(c.scheme, "https");
-    assert_eq!(c.host, "example.com");
-    assert_eq!(c.port, "8080");
-    assert_eq!(c.path, "/api/v1/resource.json");
-    assert_eq!(c.query, "key=value");
+    assert_eq!(c.scheme(), "https");
+    assert_eq!(c.host(), "example.com");
+    assert_eq!(c.port(), "8080");
+    assert_eq!(c.path(), "/api/v1/resource.json");
+    assert_eq!(c.query(), "key=value");
     assert_eq!(c.component(URI_COMPONENT_PARENT_PATH), "/api/v1/");
     assert_eq!(c.component(URI_COMPONENT_FILENAME), "resource.json");
     assert_eq!(c.component(URI_COMPONENT_STEM), "resource");
@@ -130,26 +130,26 @@ fn test_decompose_full_uri() {
 #[test]
 fn test_decompose_normalizes_first() {
     let c = decompose_uri("HTTPS://EXAMPLE.COM:443/api/../v2/data").unwrap();
-    assert_eq!(c.scheme, "https");
-    assert_eq!(c.host, "example.com");
-    assert_eq!(c.port, "");
-    assert_eq!(c.path, "/v2/data");
+    assert_eq!(c.scheme(), "https");
+    assert_eq!(c.host(), "example.com");
+    assert_eq!(c.port(), "");
+    assert_eq!(c.path(), "/v2/data");
 }
 
 #[test]
 fn test_decompose_no_path() {
     let c = decompose_uri("https://example.com").unwrap();
-    assert_eq!(c.scheme, "https");
-    assert_eq!(c.host, "example.com");
-    assert_eq!(c.path, "/");
+    assert_eq!(c.scheme(), "https");
+    assert_eq!(c.host(), "example.com");
+    assert_eq!(c.path(), "/");
 }
 
 #[test]
 fn test_decompose_path_only() {
     let c = decompose_uri("/api/v1/data").unwrap();
-    assert_eq!(c.scheme, "");
-    assert_eq!(c.host, "");
-    assert_eq!(c.path, "/api/v1/data");
+    assert_eq!(c.scheme(), "");
+    assert_eq!(c.host(), "");
+    assert_eq!(c.path(), "/api/v1/data");
 }
 
 #[test]

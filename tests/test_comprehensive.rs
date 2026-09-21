@@ -32,36 +32,34 @@ fn test_comprehensive_token_creation() {
         matches: vec![MatchValue::Prefix("Bearer ".to_string())],
     }];
 
-    let token = CatTokenBuilder::new()
+    let token = CatToken::new()
         // Core claims
-        .issuer("https://auth.example.com")
-        .audience(vec![
+        .with_issuer("https://auth.example.com")
+        .with_audience(vec![
             "client1".to_string(),
             "client2".to_string(),
             "mobile-app".to_string(),
         ])
-        .expires_at(exp)
-        .not_before(now)
-        .cwt_id_str("token-12345")
+        .with_expiration(exp)
+        .with_not_before(now)
+        .with_cwt_id_str("token-12345")
         // CAT claims
-        .version(1)
-        .uri_match_rules(uri_match_rules.clone())
-        .header_match_rules(header_match_rules.clone())
-        .replay_protection(cat_token::ReplayProtection::Prohibited)
-        .geo_coordinate(40.7128, -74.0060, 100) // New York City
-        .geohash("dr5regw")
+        .with_version(1)
+        .with_uri_match_rules(uri_match_rules.clone())
+        .with_header_match_rules(header_match_rules.clone())
+        .with_replay_protection(cat_token::ReplayProtection::Prohibited)
+        .with_geo_coordinate(40.7128, -74.0060, 100) // New York City
+        .with_geohash("dr5regw")
         // Informational claims
-        .subject("user@example.com")
-        .issued_at(iat)
-        .interface_data("mobile-interface-v2")
+        .with_subject("user@example.com")
+        .with_issued_at(iat)
+        .with_interface_data("mobile-interface-v2")
         // DPoP claims
-        .confirmation(b"jwk-thumbprint-xyz".to_vec())
-        .dpop_settings(cat_token::CatDpopSettings::new().with_window(300).unwrap())
+        .with_confirmation(b"jwk-thumbprint-xyz".to_vec())
+        .with_dpop_settings(cat_token::CatDpopSettings::new().with_window(300).unwrap())
         // Request claims
-        .if_action(CLAIM_EXP, CatIfAction::new(401).unwrap())
-        .renewal(CatRenewal::automatic().with_expadd(3600.0).unwrap())
-        .build()
-        .unwrap();
+        .with_if_action(CLAIM_EXP, CatIfAction::new(401).unwrap())
+        .with_renewal(CatRenewal::automatic().with_expadd(3600.0).unwrap());
 
     // Verify all claims are properly set
     assert_eq!(token.core.iss, Some("https://auth.example.com".to_string()));

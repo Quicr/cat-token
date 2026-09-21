@@ -20,15 +20,21 @@ use crate::error::CatError;
 use crate::pipeline::TokenHeader;
 use std::collections::HashMap;
 
+/// The `(issuer, kid, algorithm)` triple a [`KeyResolver`] matches against
+/// to select a verification key.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct KeyHint {
+    /// COSE algorithm identifier from the token's protected header.
     pub algorithm_id: i64,
+    /// Key ID from the protected header, if present.
     pub kid: Option<Vec<u8>>,
+    /// Issuer peeked from the token's `iss` claim, if present.
     pub issuer: Option<String>,
 }
 
 impl KeyHint {
+    /// Create a hint carrying only the algorithm identifier.
     pub fn new(algorithm_id: i64) -> Self {
         Self {
             algorithm_id,
@@ -37,6 +43,7 @@ impl KeyHint {
         }
     }
 
+    /// Set the `kid` component of the hint.
     pub fn with_kid(mut self, kid: Vec<u8>) -> Self {
         self.kid = Some(kid);
         self
@@ -54,13 +61,19 @@ impl From<&TokenHeader> for KeyHint {
 }
 
 impl KeyHint {
+    /// Set the `issuer` component of the hint.
     pub fn with_issuer(mut self, issuer: Option<String>) -> Self {
         self.issuer = issuer;
         self
     }
 }
 
+/// Selects the verification key for a token from its `(issuer, kid, alg)`
+/// hint. Implementations must fail closed: refuse to match unless the
+/// exact registered tuple is supplied.
 pub trait KeyResolver: Send + Sync {
+    /// Return the verification key matching `hint`, or an error if no
+    /// registered key matches the exact triple.
     fn resolve(&self, hint: &KeyHint) -> Result<&dyn CryptographicAlgorithm, CatError>;
 }
 
@@ -176,12 +189,14 @@ struct KeyEntry {
 }
 
 impl KeyRingResolver {
+    /// Create an empty key ring with no registered keys.
     pub fn new() -> Self {
         Self {
             keys: HashMap::new(),
         }
     }
 
+    /// Register a key for `(issuer, kid, alg)` and return `self` for chaining.
     pub fn with_key(
         mut self,
         issuer: impl Into<String>,
@@ -192,6 +207,8 @@ impl KeyRingResolver {
         self
     }
 
+    /// Register a key for the `(issuer, kid, alg)` triple; the algorithm
+    /// identifier is derived from `algorithm`.
     pub fn add_key(
         &mut self,
         issuer: impl Into<String>,
@@ -209,6 +226,8 @@ impl KeyRingResolver {
         );
     }
 
+    /// Remove the key registered for `(issuer, kid, algorithm_id)`.
+    /// Returns `true` if a key was present and removed.
     pub fn remove_key(&mut self, issuer: &str, kid: &[u8], algorithm_id: i64) -> bool {
         self.keys
             .remove(&KeyEntry {
@@ -219,6 +238,7 @@ impl KeyRingResolver {
             .is_some()
     }
 
+    /// Number of registered keys in the ring.
     pub fn key_count(&self) -> usize {
         self.keys.len()
     }

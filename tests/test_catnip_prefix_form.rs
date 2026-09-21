@@ -8,11 +8,7 @@ fn test_valid_prefix_form_accepted() {
     let key = HmacSha256Algorithm::generate_key().unwrap();
     let alg = HmacSha256Algorithm::from_secret_key(&key);
 
-    let token = CatTokenBuilder::new()
-        .ip_range("192.168.0.0/16")
-        .unwrap()
-        .build()
-        .unwrap();
+    let token = CatToken::new().with_ip_range("192.168.0.0/16").unwrap();
 
     let encoded = encode_token(&token, &alg).unwrap();
     let decoded = Decoder::with_algorithm(&alg)

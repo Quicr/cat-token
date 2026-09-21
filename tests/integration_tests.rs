@@ -11,22 +11,20 @@ fn test_cat_token_creation() {
     let now = Utc::now();
     let exp = now + Duration::hours(1);
 
-    let token = CatTokenBuilder::new()
-        .issuer("https://example.com")
-        .audience(vec!["https://api.example.com".to_string()])
-        .expires_at(exp)
-        .not_before(now)
-        .cwt_id_str("test-token-id")
-        .version(1)
-        .uri_match_rules(vec![UriMatchRule {
+    let token = CatToken::new()
+        .with_issuer("https://example.com")
+        .with_audience(vec!["https://api.example.com".to_string()])
+        .with_expiration(exp)
+        .with_not_before(now)
+        .with_cwt_id_str("test-token-id")
+        .with_version(1)
+        .with_uri_match_rules(vec![UriMatchRule {
             component: URI_COMPONENT_HOST,
             matches: vec![MatchValue::Exact("example.com".to_string())],
         }])
-        .replay_protection(cat_token::ReplayProtection::Prohibited)
-        .geo_coordinate(37.7749, -122.4194, 100)
-        .geohash("9q8yy")
-        .build()
-        .unwrap();
+        .with_replay_protection(cat_token::ReplayProtection::Prohibited)
+        .with_geo_coordinate(37.7749, -122.4194, 100)
+        .with_geohash("9q8yy");
 
     assert_eq!(token.core.iss, Some("https://example.com".to_string()));
     assert_eq!(
@@ -65,14 +63,12 @@ fn test_hmac_token_encoding_decoding() {
     let now = Utc::now();
     let exp = now + Duration::hours(1);
 
-    let token = CatTokenBuilder::new()
-        .issuer("https://test.com")
-        .audience(vec!["https://api.test.com".to_string()])
-        .expires_at(exp)
-        .cwt_id_str("test-hmac-token")
-        .version(1)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://test.com")
+        .with_audience(vec!["https://api.test.com".to_string()])
+        .with_expiration(exp)
+        .with_cwt_id_str("test-hmac-token")
+        .with_version(1);
 
     let encoded = encode_token(&token, &algorithm).unwrap();
     assert!(!encoded.is_empty());
@@ -95,14 +91,12 @@ fn test_es256_token_encoding_decoding() {
     let now = Utc::now();
     let exp = now + Duration::hours(1);
 
-    let token = CatTokenBuilder::new()
-        .issuer("https://test.com")
-        .audience(vec!["https://api.test.com".to_string()])
-        .expires_at(exp)
-        .cwt_id_str("test-es256-token")
-        .version(1)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://test.com")
+        .with_audience(vec!["https://api.test.com".to_string()])
+        .with_expiration(exp)
+        .with_cwt_id_str("test-es256-token")
+        .with_version(1);
 
     let encoded = encode_token(&token, &algorithm).unwrap();
     assert!(!encoded.is_empty());
@@ -125,14 +119,12 @@ fn test_ps256_token_encoding_decoding() {
     let now = Utc::now();
     let exp = now + Duration::hours(1);
 
-    let token = CatTokenBuilder::new()
-        .issuer("https://test.com")
-        .audience(vec!["https://api.test.com".to_string()])
-        .expires_at(exp)
-        .cwt_id_str("test-ps256-token")
-        .version(1)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://test.com")
+        .with_audience(vec!["https://api.test.com".to_string()])
+        .with_expiration(exp)
+        .with_cwt_id_str("test-ps256-token")
+        .with_version(1);
 
     let encoded = encode_token(&token, &algorithm).unwrap();
     assert!(!encoded.is_empty());
@@ -153,17 +145,15 @@ fn test_token_validation_success() {
     let now = Utc::now();
     let exp = now + Duration::hours(1);
 
-    let token = CatTokenBuilder::new()
-        .issuer("https://trusted-issuer.com")
-        .audience(vec!["https://my-service.com".to_string()])
-        .expires_at(exp)
-        .not_before(now)
-        .cwt_id_str("valid-token")
-        .version(1)
-        .geo_coordinate(40.7128, -74.0060, 50)
-        .geohash("dr5reg")
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://trusted-issuer.com")
+        .with_audience(vec!["https://my-service.com".to_string()])
+        .with_expiration(exp)
+        .with_not_before(now)
+        .with_cwt_id_str("valid-token")
+        .with_version(1)
+        .with_geo_coordinate(40.7128, -74.0060, 50)
+        .with_geohash("dr5reg");
 
     let validator = CatTokenValidator::dangerously_any_issuer()
         .with_expected_issuers(vec!["https://trusted-issuer.com".to_string()])
@@ -180,13 +170,11 @@ fn test_token_validation_expired() {
     let now = Utc::now();
     let exp = now - Duration::hours(1); // Expired 1 hour ago
 
-    let token = CatTokenBuilder::new()
-        .issuer("https://trusted-issuer.com")
-        .audience(vec!["https://my-service.com".to_string()])
-        .expires_at(exp)
-        .cwt_id_str("expired-token")
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://trusted-issuer.com")
+        .with_audience(vec!["https://my-service.com".to_string()])
+        .with_expiration(exp)
+        .with_cwt_id_str("expired-token");
 
     let validator = CatTokenValidator::dangerously_any_issuer()
         .with_expected_issuers(vec!["https://trusted-issuer.com".to_string()])
@@ -202,14 +190,12 @@ fn test_token_validation_not_yet_valid() {
     let nbf = now + Duration::hours(1); // Valid starting 1 hour from now
     let exp = now + Duration::hours(2);
 
-    let token = CatTokenBuilder::new()
-        .issuer("https://trusted-issuer.com")
-        .audience(vec!["https://my-service.com".to_string()])
-        .expires_at(exp)
-        .not_before(nbf)
-        .cwt_id_str("future-token")
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://trusted-issuer.com")
+        .with_audience(vec!["https://my-service.com".to_string()])
+        .with_expiration(exp)
+        .with_not_before(nbf)
+        .with_cwt_id_str("future-token");
 
     let validator = CatTokenValidator::dangerously_any_issuer()
         .with_expected_issuers(vec!["https://trusted-issuer.com".to_string()])
@@ -224,13 +210,11 @@ fn test_token_validation_invalid_issuer() {
     let now = Utc::now();
     let exp = now + Duration::hours(1);
 
-    let token = CatTokenBuilder::new()
-        .issuer("https://untrusted-issuer.com")
-        .audience(vec!["https://my-service.com".to_string()])
-        .expires_at(exp)
-        .cwt_id_str("invalid-issuer-token")
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://untrusted-issuer.com")
+        .with_audience(vec!["https://my-service.com".to_string()])
+        .with_expiration(exp)
+        .with_cwt_id_str("invalid-issuer-token");
 
     let validator = CatTokenValidator::dangerously_any_issuer()
         .with_expected_issuers(vec!["https://trusted-issuer.com".to_string()])
@@ -245,13 +229,11 @@ fn test_token_validation_invalid_audience() {
     let now = Utc::now();
     let exp = now + Duration::hours(1);
 
-    let token = CatTokenBuilder::new()
-        .issuer("https://trusted-issuer.com")
-        .audience(vec!["https://other-service.com".to_string()])
-        .expires_at(exp)
-        .cwt_id_str("invalid-audience-token")
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://trusted-issuer.com")
+        .with_audience(vec!["https://other-service.com".to_string()])
+        .with_expiration(exp)
+        .with_cwt_id_str("invalid-audience-token");
 
     let validator = CatTokenValidator::dangerously_any_issuer()
         .with_expected_issuers(vec!["https://trusted-issuer.com".to_string()])
@@ -266,22 +248,20 @@ fn test_cwt_payload_encoding_decoding() {
     let now = Utc::now();
     let exp = now + Duration::hours(1);
 
-    let token = CatTokenBuilder::new()
-        .issuer("https://example.com")
-        .audience(vec!["https://api.example.com".to_string()])
-        .expires_at(exp)
-        .not_before(now)
-        .cwt_id_str("test-payload")
-        .version(1)
-        .uri_match_rules(vec![UriMatchRule {
+    let token = CatToken::new()
+        .with_issuer("https://example.com")
+        .with_audience(vec!["https://api.example.com".to_string()])
+        .with_expiration(exp)
+        .with_not_before(now)
+        .with_cwt_id_str("test-payload")
+        .with_version(1)
+        .with_uri_match_rules(vec![UriMatchRule {
             component: URI_COMPONENT_PATH,
             matches: vec![MatchValue::Prefix("/api/".to_string())],
         }])
-        .replay_protection(cat_token::ReplayProtection::Prohibited)
-        .geo_coordinate(51.5074, -0.1278, 0)
-        .geohash("gcpvj")
-        .build()
-        .unwrap();
+        .with_replay_protection(cat_token::ReplayProtection::Prohibited)
+        .with_geo_coordinate(51.5074, -0.1278, 0)
+        .with_geohash("gcpvj");
 
     let cwt = Cwt::new(-7, token.clone()); // ES256 algorithm
     let encoded_payload = cwt.encode_payload().unwrap();
@@ -385,11 +365,9 @@ fn test_invalid_signature_verification() {
     let algorithm1 = HmacSha256Algorithm::from_secret_key(&key1);
     let algorithm2 = HmacSha256Algorithm::from_secret_key(&key2);
 
-    let token = CatTokenBuilder::new()
-        .issuer("https://test.com")
-        .cwt_id_str("signature-test")
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://test.com")
+        .with_cwt_id_str("signature-test");
 
     let encoded = encode_token(&token, &algorithm1).unwrap();
 
@@ -458,15 +436,13 @@ fn test_moqt_claims_creation() {
         .with_namespace_match(namespace_match)
         .with_track_match(track_match);
 
-    let token = CatTokenBuilder::new()
-        .issuer("https://moqt-issuer.com")
-        .audience(vec!["moqt-relay".to_string()])
-        .expires_at(Utc::now() + Duration::hours(1))
-        .cwt_id_str("moqt-token")
-        .moqt_scope(scope)
-        .moqt_reval(300.0)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://moqt-issuer.com")
+        .with_audience(vec!["moqt-relay".to_string()])
+        .with_expiration(Utc::now() + Duration::hours(1))
+        .with_cwt_id_str("moqt-token")
+        .with_moqt_scope(scope)
+        .with_moqt_reval(300.0);
 
     // Test MOQT claims are present
     assert!(token.moqt.moqt.is_some());
@@ -555,15 +531,13 @@ fn test_moqt_token_encoding_decoding() {
         .with_namespace_match(NamespaceMatch::exact(b"example.com".to_vec()))
         .with_track_match(BinaryMatch::exact(b"logs/12345/bob".to_vec()));
 
-    let token = CatTokenBuilder::new()
-        .issuer("https://moqt-test.com")
-        .audience(vec!["moqt-relay".to_string()])
-        .expires_at(Utc::now() + Duration::hours(1))
-        .cwt_id_str("moqt-encode-test")
-        .moqt_scopes(vec![scope1, scope2])
-        .moqt_reval(600.0)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://moqt-test.com")
+        .with_audience(vec!["moqt-relay".to_string()])
+        .with_expiration(Utc::now() + Duration::hours(1))
+        .with_cwt_id_str("moqt-encode-test")
+        .with_moqt_scopes(vec![scope1, scope2])
+        .with_moqt_reval(600.0);
 
     let encoded = encode_token(&token, &algorithm).unwrap();
     let decoded = Decoder::with_algorithm(&algorithm)
@@ -614,13 +588,11 @@ fn test_moqt_multiple_scopes_authorization() {
         .with_namespace_match(NamespaceMatch::exact(b"example.com".to_vec()))
         .with_track_match(BinaryMatch::prefix(b"/private".to_vec()));
 
-    let token = CatTokenBuilder::new()
-        .issuer("https://multi-scope-test.com")
-        .audience(vec!["moqt-relay".to_string()])
-        .expires_at(Utc::now() + Duration::hours(1))
-        .moqt_scopes(vec![scope1, scope2])
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://multi-scope-test.com")
+        .with_audience(vec!["moqt-relay".to_string()])
+        .with_expiration(Utc::now() + Duration::hours(1))
+        .with_moqt_scopes(vec![scope1, scope2]);
 
     // Test permissions for public namespace (scope1)
     assert!(token.allows_moqt_action(
@@ -705,11 +677,9 @@ fn test_moqt_spec_example_exact_match() {
         .with_namespace_match(NamespaceMatch::exact(b"example.com".to_vec()))
         .with_track_match(BinaryMatch::exact(b"/bob".to_vec()));
 
-    let token = CatTokenBuilder::new()
-        .issuer("https://spec-example.com")
-        .moqt_scope(scope)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://spec-example.com")
+        .with_moqt_scope(scope);
 
     // Should permit
     assert!(token.allows_moqt_action(
@@ -767,11 +737,9 @@ fn test_moqt_spec_example_prefix_match() {
         .with_namespace_match(NamespaceMatch::exact(b"example.com".to_vec()))
         .with_track_match(BinaryMatch::prefix(b"/bob".to_vec()));
 
-    let token = CatTokenBuilder::new()
-        .issuer("https://spec-prefix-example.com")
-        .moqt_scope(scope)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://spec-prefix-example.com")
+        .with_moqt_scope(scope);
 
     // Should permit
     assert!(token.allows_moqt_action(

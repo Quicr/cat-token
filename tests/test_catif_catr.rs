@@ -127,11 +127,9 @@ fn test_catif_roundtrip() {
 
 #[test]
 fn test_catif_builder() {
-    let token = CatTokenBuilder::new()
-        .issuer("test")
-        .if_action(CLAIM_EXP, CatIfAction::new(401).unwrap())
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("test")
+        .with_if_action(CLAIM_EXP, CatIfAction::new(401).unwrap());
 
     assert!(token.request.catif.is_some());
     assert_eq!(token.request.catif.unwrap()[0].1.status(), 401);
@@ -366,11 +364,9 @@ fn test_catr_redirect_roundtrip() {
 
 #[test]
 fn test_catr_builder() {
-    let token = CatTokenBuilder::new()
-        .issuer("test")
-        .renewal(CatRenewal::automatic().with_expadd(600.0).unwrap())
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("test")
+        .with_renewal(CatRenewal::automatic().with_expadd(600.0).unwrap());
 
     let catr = token.request.catr.unwrap();
     assert_eq!(catr.renewal_type(), CatRenewalType::Automatic);

@@ -33,10 +33,7 @@ fn test_hmac_token_header_contains_alg_5() {
     let key = HmacSha256Algorithm::generate_key().unwrap();
     let alg = HmacSha256Algorithm::from_secret_key(&key);
 
-    let token = CatTokenBuilder::new()
-        .issuer("https://example.com")
-        .build()
-        .unwrap();
+    let token = CatToken::new().with_issuer("https://example.com");
 
     let cose_bytes = encode_token(&token, &alg).unwrap();
 

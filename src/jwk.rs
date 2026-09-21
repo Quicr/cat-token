@@ -1,6 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (c) 2022 Quicr
 // SPDX-License-Identifier: BSD-2-Clause
 
+//! JSON Web Key ([`Jwk`]) representation and conversions.
+//!
+//! Supports EC P-256 and RSA public keys, RFC 7638 thumbprints, and
+//! conversion to/from the underlying `p256`/`rsa` key types. The [`Jwk`]
+//! `Debug` impl deliberately redacts key material.
+
 use crate::CatError;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use p256::EncodedPoint;
@@ -10,17 +16,26 @@ use rsa::traits::PublicKeyParts;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+/// A JSON Web Key (RFC 7517) holding an EC P-256 or RSA public key.
+///
+/// The `Debug` impl redacts all key material, exposing only `kty`/`crv`.
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct Jwk {
+    /// Key type (`"EC"` or `"RSA"`).
     pub kty: String,
+    /// Curve name for EC keys (e.g. `"P-256"`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub crv: Option<String>,
+    /// Base64url-encoded EC public key x coordinate.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub x: Option<String>,
+    /// Base64url-encoded EC public key y coordinate.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub y: Option<String>,
+    /// Base64url-encoded RSA modulus.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub n: Option<String>,
+    /// Base64url-encoded RSA public exponent.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub e: Option<String>,
 }
@@ -36,6 +51,7 @@ impl std::fmt::Debug for Jwk {
 }
 
 impl Jwk {
+    /// Builds an EC P-256 JWK from an ES256 verifying key.
     pub fn from_es256_verifying_key(key: &VerifyingKey) -> Result<Self, CatError> {
         let point: EncodedPoint = key.into();
         let x_bytes = point.x().ok_or_else(|| {
@@ -55,6 +71,7 @@ impl Jwk {
         })
     }
 
+    /// Builds an RSA JWK from an RSA public key.
     pub fn from_rsa_public_key(key: &RsaPublicKey) -> Self {
         let n_bytes = key.n().to_bytes_be();
         let e_bytes = key.e().to_bytes_be();
@@ -69,6 +86,7 @@ impl Jwk {
         }
     }
 
+    /// Computes the RFC 7638 JWK thumbprint (SHA-256 over the canonical JSON).
     pub fn thumbprint(&self) -> Result<Vec<u8>, CatError> {
         let canonical = self.canonical_json()?;
         let mut hasher = Sha256::new();
@@ -76,6 +94,7 @@ impl Jwk {
         Ok(hasher.finalize().to_vec())
     }
 
+    /// Returns the RFC 7638 thumbprint as a base64url (no-pad) string.
     pub fn thumbprint_base64(&self) -> Result<String, CatError> {
         let thumbprint = self.thumbprint()?;
         Ok(URL_SAFE_NO_PAD.encode(&thumbprint))
@@ -149,6 +168,7 @@ impl Jwk {
         }
     }
 
+    /// Reconstructs an RSA public key from this JWK; errors if `kty` is not `"RSA"`.
     pub fn to_rsa_public_key(&self) -> Result<RsaPublicKey, CatError> {
         if self.kty != "RSA" {
             return Err(CatError::InvalidClaimValue("Not an RSA key".to_string()));
@@ -177,6 +197,7 @@ impl Jwk {
             .map_err(|e| CatError::KeyOperationFailed(format!("Invalid RSA public key: {}", e)))
     }
 
+    /// Reconstructs an ES256 verifying key; errors unless `kty` is `"EC"` and `crv` is `"P-256"`.
     pub fn to_verifying_key(&self) -> Result<VerifyingKey, CatError> {
         if self.kty != "EC" {
             return Err(CatError::InvalidClaimValue("Not an EC key".to_string()));

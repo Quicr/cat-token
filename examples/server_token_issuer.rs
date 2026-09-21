@@ -43,20 +43,20 @@ fn issue_publisher_token(
         .track_prefix(b"/") // All tracks under this namespace
         .build();
 
-    let mut builder = CatTokenBuilder::new()
-        .issuer("https://auth.example.com")
-        .audience(vec!["moqt-relay.example.com".to_string()])
-        .subject(user_id)
-        .issued_at(now)
-        .expires_at(now + Duration::hours(2))
-        .cwt_id_str(format!("pub-{}-{}", user_id, now.timestamp()))
-        .moqt_scope(scope)
-        .moqt_reval(300.0); // 5-minute revalidation
+    let mut token = CatToken::new()
+        .with_issuer("https://auth.example.com")
+        .with_audience(vec!["moqt-relay.example.com".to_string()])
+        .with_subject(user_id)
+        .with_issued_at(now)
+        .with_expiration(now + Duration::hours(2))
+        .with_cwt_id_str(format!("pub-{}-{}", user_id, now.timestamp()))
+        .with_moqt_scope(scope)
+        .with_moqt_reval(300.0); // 5-minute revalidation
 
     // Add DPoP binding if client provided their public key
     if let Some(jwk) = client_jwk {
         let cnf = confirmation_from_jwk(jwk)?;
-        builder = builder.confirmation(cnf.jkt).dpop_settings(
+        token = token.with_confirmation(cnf.jkt).with_dpop_settings(
             CatDpopSettings::new()
                 .with_window(300)
                 .unwrap()
@@ -64,7 +64,6 @@ fn issue_publisher_token(
         );
     }
 
-    let token = builder.build()?;
     encode_token(&token, algorithm)
 }
 
@@ -87,15 +86,14 @@ fn issue_subscriber_token(
         })
         .collect();
 
-    let token = CatTokenBuilder::new()
-        .issuer("https://auth.example.com")
-        .audience(vec!["moqt-relay.example.com".to_string()])
-        .subject(user_id)
-        .issued_at(now)
-        .expires_at(now + Duration::hours(24)) // Longer validity for viewers
-        .cwt_id_str(format!("sub-{}-{}", user_id, now.timestamp()))
-        .moqt_scopes(scopes)
-        .build()?;
+    let token = CatToken::new()
+        .with_issuer("https://auth.example.com")
+        .with_audience(vec!["moqt-relay.example.com".to_string()])
+        .with_subject(user_id)
+        .with_issued_at(now)
+        .with_expiration(now + Duration::hours(24)) // Longer validity for viewers
+        .with_cwt_id_str(format!("sub-{}-{}", user_id, now.timestamp()))
+        .with_moqt_scopes(scopes);
 
     encode_token(&token, algorithm)
 }
@@ -115,23 +113,22 @@ fn issue_admin_token(
 
     let cnf = confirmation_from_jwk(client_jwk)?;
 
-    let token = CatTokenBuilder::new()
-        .issuer("https://auth.example.com")
-        .audience(vec!["moqt-relay.example.com".to_string()])
-        .subject(admin_id)
-        .issued_at(now)
-        .expires_at(now + Duration::minutes(30)) // Short validity for admin
-        .cwt_id_str(format!("admin-{}-{}", admin_id, now.timestamp()))
-        .moqt_scope(scope)
-        .moqt_reval(60.0) // 1-minute revalidation for admin ops
-        .confirmation(cnf.jkt)
-        .dpop_settings(
+    let token = CatToken::new()
+        .with_issuer("https://auth.example.com")
+        .with_audience(vec!["moqt-relay.example.com".to_string()])
+        .with_subject(admin_id)
+        .with_issued_at(now)
+        .with_expiration(now + Duration::minutes(30)) // Short validity for admin
+        .with_cwt_id_str(format!("admin-{}-{}", admin_id, now.timestamp()))
+        .with_moqt_scope(scope)
+        .with_moqt_reval(60.0) // 1-minute revalidation for admin ops
+        .with_confirmation(cnf.jkt)
+        .with_dpop_settings(
             CatDpopSettings::new()
                 .with_window(60)
                 .unwrap()
                 .with_jti_processing(true),
-        )
-        .build()?;
+        );
 
     encode_token(&token, algorithm)
 }

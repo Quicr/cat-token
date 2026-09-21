@@ -214,14 +214,12 @@ fn test_full_roundtrip_with_all_fixed_claim_types() {
     let key = HmacSha256Algorithm::generate_key().unwrap();
     let alg = HmacSha256Algorithm::from_secret_key(&key);
 
-    let token = CatTokenBuilder::new()
-        .issuer("https://example.com")
-        .version(1)
-        .replay_protection(ReplayProtection::ReuseDetection)
-        .probability_of_rejection(0.02, b"block-list-1".to_vec(), Some(1700000000))
-        .expires_in(3600)
-        .build()
-        .unwrap();
+    let token = CatToken::new()
+        .with_issuer("https://example.com")
+        .with_version(1)
+        .with_replay_protection(ReplayProtection::ReuseDetection)
+        .with_probability_of_rejection(0.02, b"block-list-1".to_vec(), Some(1700000000))
+        .with_expires_in(3600);
 
     let encoded = encode_token(&token, &alg).unwrap();
     let decoded = Decoder::with_algorithm(&alg)

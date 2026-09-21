@@ -148,21 +148,19 @@ fn test_full_catnip_roundtrip() {
     let key = HmacSha256Algorithm::generate_key().unwrap();
     let alg = HmacSha256Algorithm::from_secret_key(&key);
 
-    let token = CatTokenBuilder::new()
-        .issuer("https://example.com")
-        .ip_address("192.168.1.1")
+    let token = CatToken::new()
+        .with_issuer("https://example.com")
+        .with_ip_address("192.168.1.1")
         .unwrap()
-        .ip_address("2001:db8::1")
+        .with_ip_address("2001:db8::1")
         .unwrap()
-        .ip_range("10.0.0.0/8")
+        .with_ip_range("10.0.0.0/8")
         .unwrap()
-        .ip_range("2001:db8::/32")
+        .with_ip_range("2001:db8::/32")
         .unwrap()
-        .asn(64512)
-        .asn_range(65000, 65100)
-        .expires_in(3600)
-        .build()
-        .unwrap();
+        .with_asn(64512)
+        .with_asn_range(65000, 65100)
+        .with_expires_in(3600);
 
     let encoded = encode_token(&token, &alg).unwrap();
     let decoded = Decoder::with_algorithm(&alg)

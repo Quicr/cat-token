@@ -1,8 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2022 Quicr
 // SPDX-License-Identifier: BSD-2-Clause
-//
-// Deterministic test vector generator for CAT/MoQT cross-implementation testing.
-// Outputs JSON files with hex-encoded CBOR, tokens, and expected validation results.
+
+//! Deterministic test-vector generator for CAT/MoQT cross-implementation
+//! testing. Outputs JSON files with hex-encoded CBOR, tokens, and expected
+//! validation results.
 
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use cat_token::*;
